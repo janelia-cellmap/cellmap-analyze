@@ -1,0 +1,17 @@
+[project]
+name = "cellmap-analyze"
+version = "0.0.1"
+
+requires-python = ">=3.10"
+authors = [
+  {name = "David Ackerman", email = "ackermand@janelia.hhmi.org"},
+]
+maintainers = [
+  {name = "David Ackerman", email = "ackermand@janelia.hhmi.org"},
+]
+description = "Code to perform analysis on segmentations like those produced by CellMap"
+readme = "README.md"
+license = {file = "LICENSE.txt"}
+
+[project.scripts]
+contact-sites = "cellmap_analyze.process.contact_sites:contact-sites"
