@@ -11,7 +11,7 @@ import yaml
 from yaml.loader import SafeLoader
 from dataclasses import dataclass
 from funlib.persistence import Array
-from funlib.geometry import Roi
+from funlib.geometry import Coordinate, Roi
 import numpy as np
 import logging
 
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class DaskBlock:
-    index: int
+    id: int
     roi: Roi
 
 
@@ -35,6 +35,18 @@ def create_blocks(
     block_size=None,
     padding=None,
 ):
+    def get_global_block_id(
+        roi_shape_voxels: Coordinate, block_roi: Roi, voxel_size: Coordinate
+    ):
+        block_start_voxels = block_roi.get_begin() / voxel_size
+        id = (
+            roi_shape_voxels[0] * roi_shape_voxels[1] * block_start_voxels[2]
+            + roi_shape_voxels[0] * block_start_voxels[1]
+            + block_start_voxels[0]
+            + 1
+        )
+        return id
+
     with Timing_Messager("Generating blocks", logger):
         # roi = roi.snap_to_grid(ds.chunk_shape * ds.voxel_size)
         if not block_size:
@@ -45,6 +57,8 @@ def create_blocks(
                 [np.ceil(roi.shape[i] / block_size[i]) for i in range(len(block_size))]
             )
         )
+        roi_shape_voxels = roi.shape / ds.voxel_size
+
         # create an empty list with num_expected_blocks elements
         block_rois = [None] * num_expected_blocks
         index = 0
@@ -54,8 +68,13 @@ def create_blocks(
                     block_roi = Roi((x, y, z), block_size).intersect(roi)
                     if padding:
                         block_roi = block_roi.grow(padding, padding)
-                    block_rois[index] = DaskBlock(index, block_roi.intersect(roi))
+                    block_roi = block_roi.intersect(roi)
+                    block_id = get_global_block_id(
+                        roi_shape_voxels, block_roi, ds.voxel_size
+                    )
+                    block_rois[index] = DaskBlock(block_id, block_roi)
                     index += 1
+
         if index < len(block_rois):
             block_rois[index:] = []
     return block_rois
