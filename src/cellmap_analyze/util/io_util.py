@@ -32,7 +32,7 @@ def split_dataset_path(dataset_path) -> tuple[str, str]:
 
     # split at .zarr or .n5, whichever comes last
     splitter = (
-        ".zarr" if dataset_path.rfind(".zarr") > dataset_path.split(".n5") else ".n5"
+        ".zarr" if dataset_path.rfind(".zarr") > dataset_path.rfind(".n5") else ".n5"
     )
     filename, dataset = dataset_path.split(splitter)
     return filename + splitter, dataset
