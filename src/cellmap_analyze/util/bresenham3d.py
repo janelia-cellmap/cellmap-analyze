@@ -7,12 +7,21 @@
 from typing import List, Tuple
 
 
+def append_if_not_masked(x, y, z, points, mask=None):
+    if mask is not None and mask[x, y, z]:
+        return False
+    else:
+        points.append((x, y, z))
+        return True
+
+
 def bresenham3DWithMask(
     x1, y1, z1, x2, y2, z2, mask=None
 ) -> List[Tuple[int, int, int]]:
 
     listOfPoints = []
-    listOfPoints.append((x1, y1, z1))
+    if not append_if_not_masked(x1, y1, z1, listOfPoints, mask=mask):
+        return []
     dx = abs(x2 - x1)
     dy = abs(y2 - y1)
     dz = abs(z2 - z1)
@@ -44,9 +53,8 @@ def bresenham3DWithMask(
             p1 += 2 * dy
             p2 += 2 * dz
 
-            if mask and mask[x1, y1, z1]:
+            if not append_if_not_masked(x1, y1, z1, listOfPoints, mask=mask):
                 return []
-            listOfPoints.append((x1, y1, z1))
 
     # Driving axis is Y-axis"
     elif dy >= dx and dy >= dz:
@@ -62,9 +70,9 @@ def bresenham3DWithMask(
                 p2 -= 2 * dy
             p1 += 2 * dx
             p2 += 2 * dz
-            if mask and mask[x1, y1, z1]:
+
+            if not append_if_not_masked(x1, y1, z1, listOfPoints, mask=mask):
                 return []
-            listOfPoints.append((x1, y1, z1))
 
     # Driving axis is Z-axis"
     else:
@@ -81,8 +89,7 @@ def bresenham3DWithMask(
             p1 += 2 * dy
             p2 += 2 * dx
 
-            if mask and mask[x1, y1, z1]:
+            if not append_if_not_masked(x1, y1, z1, listOfPoints, mask=mask):
                 return []
-            listOfPoints.append((x1, y1, z1))
 
     return listOfPoints
