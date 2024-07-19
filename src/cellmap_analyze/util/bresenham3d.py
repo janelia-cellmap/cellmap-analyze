@@ -3,7 +3,7 @@
 
 # https://www.geeksforgeeks.org/bresenhams-algorithm-for-3-d-line-drawing/
 
-
+from numba import jit
 from typing import List, Tuple
 
 
@@ -91,5 +91,5 @@ def bresenham3DWithMask(
 
             if not append_if_not_masked(x1, y1, z1, listOfPoints, mask=mask):
                 return []
-
+    # assert (x2, y2, z2) in listOfPoints
     return listOfPoints

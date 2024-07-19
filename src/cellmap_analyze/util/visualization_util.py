@@ -1,4 +1,5 @@
 import neuroglancer
+import numpy as np
 
 
 def view_in_neuroglancer(**kwargs):
@@ -8,9 +9,16 @@ def view_in_neuroglancer(**kwargs):
     viewer = neuroglancer.Viewer()
     with viewer.txn() as s:
         for array_name, array in kwargs.items():
-            s.layers[array_name] = neuroglancer.SegmentationLayer(
-                source=neuroglancer.LocalVolume(
-                    data=array,
-                ),
-            )
+            if array.dtype not in (float, np.float32):
+                s.layers[array_name] = neuroglancer.SegmentationLayer(
+                    source=neuroglancer.LocalVolume(
+                        data=array,
+                    ),
+                )
+            else:
+                s.layers[array_name] = neuroglancer.ImageLayer(
+                    source=neuroglancer.LocalVolume(
+                        data=array,
+                    ),
+                )
     return viewer.get_viewer_url()

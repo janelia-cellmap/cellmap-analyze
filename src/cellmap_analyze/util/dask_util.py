@@ -30,10 +30,7 @@ class DaskBlock:
 
 
 def create_blocks(
-    roi: Roi,
-    ds: Array,
-    block_size=None,
-    padding=None,
+    roi: Roi, ds: Array, block_size=None, padding=None, extend_beyond_roi=True
 ):
     def get_global_block_id(
         roi_shape_voxels: Coordinate, block_roi: Roi, voxel_size: Coordinate
@@ -66,12 +63,13 @@ def create_blocks(
             for y in range(roi.get_begin()[1], roi.get_end()[1], block_size[1]):
                 for x in range(roi.get_begin()[0], roi.get_end()[0], block_size[0]):
                     block_roi = Roi((x, y, z), block_size).intersect(roi)
-                    if padding:
-                        block_roi = block_roi.grow(padding, padding)
-                    block_roi = block_roi.intersect(roi)
                     block_id = get_global_block_id(
                         roi_shape_voxels, block_roi, ds.voxel_size
                     )
+                    if padding:
+                        block_roi = block_roi.grow(padding, padding)
+                    if not extend_beyond_roi:
+                        block_roi = block_roi.intersect(roi)
                     block_rois[index] = DaskBlock(block_id, block_roi)
                     index += 1
 
