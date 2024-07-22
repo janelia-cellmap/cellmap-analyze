@@ -4,6 +4,7 @@ from skimage.measure import regionprops_table
 import pandas as pd
 from scipy.ndimage import find_objects, center_of_mass
 from cellmap_analyze.util.io_util import print_with_datetime
+from funlib.evaluate.detection import find_centers
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -82,10 +83,9 @@ def get_region_properties(data, voxel_face_area=1, voxel_volume=1, trim=1):
     volumes = counts * voxel_volume
     coms = []
     # coms = np.array(center_of_mass(data, data, index=ids))
+
     print_with_datetime("coms", logger)
-    for id in ids:
-        coms.append(np.mean(np.argwhere(data == id), axis=0))
-        # coms.append(center_of_mass(data == id))
+    coms = find_centers(data, ids)
     coms = np.array(coms)
     print_with_datetime(data.dtype, logger)
     bounding_boxes = find_objects(data)
