@@ -13,7 +13,9 @@ from skimage import measure
 from skimage.segmentation import expand_labels, find_boundaries
 from sklearn.metrics.pairwise import pairwise_distances
 from skimage.morphology import erosion
-from cellmap_analyze.util.bresenham3d import bresenham3DWithMask
+
+# from cellmap_analyze.util.bresenham3D import bresenham3DWithMask
+from cellmap_analyze.cythonizing.bresenham3D import bresenham3DWithMask
 import logging
 from cellmap_analyze.process.connected_components import ConnectedComponents
 import pandas as pd
@@ -159,63 +161,6 @@ class ContactSites:
             surface_voxels_2,
         )
 
-    # @staticmethod
-    # def tmp_get_current_pair_contact_sites(
-    #     object_1_surface_voxels,
-    #     object_2_surface_voxels,
-    #     contact_distance_voxels,
-    #     overlap_voxels,
-    #     mask=None,
-    #     method="geodesic",
-    # ):
-    #     if method == "geodesic":
-    #         return ContactSites.get_current_pair_contact_sites_geodesic(
-    #             object_1_surface_voxels,
-    #             object_2_surface_voxels,
-    #             contact_distance_voxels,
-    #             overlap_voxels,
-    #             mask,
-    #         )
-    #     else:
-    #         return ContactSites.get_current_pair_contact_sites_bresenham(
-    #             object_1_surface_voxels,
-    #             object_2_surface_voxels,
-    #             contact_distance_voxels,
-    #             overlap_voxels,
-    #             mask,
-    #         )
-
-    # @staticmethod
-    # def get_current_pair_contact_sites_geodesic(
-    #     object_1,
-    #     object_2,
-    #     contact_distance_voxels,
-    #     overlap_voxels,
-    #     mask=None,
-    # ):
-    #     current_pair_contact_voxels = np.zeros_like(object_1_surface_voxels, np.uint64)
-
-    #     organelle_masked = ma.masked_array(
-    #         organelle_2 == 0,
-    #         mask=(organelle_1 > 0) | (interior_2 > 0),
-    #     )
-
-    #     if len(overlap_voxels) > 0:
-    #         indices = tuple(zip(*overlap_voxels))
-    #         current_pair_contact_voxels[indices] = 1
-    #     for contact_voxel_1, contact_voxel_2 in zip(contact_voxels_1, contact_voxels_2):
-    #         valid_voxels = bresenham3DWithMask(
-    #             *contact_voxel_1, *contact_voxel_2, mask=mask
-    #         )
-    #         if valid_voxels:
-    #             indices = tuple(zip(*valid_voxels))
-    #             current_pair_contact_voxels[indices] = 1
-
-    #     current_pair_contact_sites = measure.label(
-    #         current_pair_contact_voxels, connectivity=2
-    #     )
-    #     return current_pair_contact_sites.astype(np.uint64)
-
     @staticmethod
     def get_ndarray_contact_sites_bresenham(
         object_1_surface_voxels,
@@ -249,26 +194,13 @@ class ContactSites:
         contact_voxels_pairs = np.array(contact_voxels_pairs).T
         print_with_datetime("got contact voxels", logger)
 
-        # distances = pairwise_distances(
-        #     object_1_surface_voxel_coordinates[contact_voxels_pairs],
-        #     object_2_surface_voxel_coordinates[contact_voxels_pairs],
-        #     "euclidean",
-        # )
-        # contact_voxels_pairs = np.argwhere(distances <= contact_distance_voxels)
         contact_voxels_1 = object_1_surface_voxel_coordinates[contact_voxels_pairs[0]]
         contact_voxels_2 = object_2_surface_voxel_coordinates[contact_voxels_pairs[1]]
         if len(overlap_voxels) > 0:
             indices = tuple(zip(*overlap_voxels))
             current_pair_contact_voxels[indices] = 1
-        # x_coords, y_coords, z_coords = bresenhamline_with_mask(
-        #     np.array(contact_voxels_1),
-        #     np.array(contact_voxels_2),
-        #     mask=mask,
-        #     max_iter=-1,
-        # )
-        # current_pair_contact_voxels[x_coords, y_coords, z_coords] = 1
-        # print_with_datetime(f"Bresenham line {x_coords[:10]}", logger)
-        # current_pair_contact_voxels[valid_voxels] = 1
+
+        print_with_datetime("do bresenham", logger)
         all_valid_voxels = set()
         for contact_voxel_1, contact_voxel_2 in zip(contact_voxels_1, contact_voxels_2):
             valid_voxels = bresenham3DWithMask(
@@ -279,18 +211,7 @@ class ContactSites:
                 all_valid_voxels.update(valid_voxels)
         x_coords, y_coords, z_coords = zip(*all_valid_voxels)
         current_pair_contact_voxels[x_coords, y_coords, z_coords] = 1
-        # for valid_voxel in valid_voxels:
-        #     assert (
-        #         current_pair_contact_voxels[
-        #             valid_voxel[0], valid_voxel[1], valid_voxel[2]
-        #         ]
-        #         == 1
-        #     )
-
-        # if (88, 65, 36) in valid_voxels:
-        #     Warning(
-        #         f"valid voxels {contact_voxel_1}, {contact_voxel_2}, {valid_voxels}"
-        #     )
+        print_with_datetime("bresenham done", logger)
 
         # need connectivity of 3 due to bresenham allowing diagonals
         current_pair_contact_sites = measure.label(
@@ -314,7 +235,6 @@ class ContactSites:
         )
 
         # outputs
-        # pairwise_contact_sites = np.zeros_like(organelle_1, np.uint64)
         df = pd.DataFrame(
             columns=[
                 "object_1_ids",
@@ -332,13 +252,7 @@ class ContactSites:
         )
 
         if np.any(contact_sites):
-            # previous_max_id = np.amax(pairwise_contact_sites)
             current_contact_site_ids = np.unique(contact_sites[contact_sites > 0])
-            # np.putmask(
-            #     pairwise_contact_sites,
-            #     current_pair_contact_sites > 0,
-            #     current_pair_contact_sites + previous_max_id,
-            # )
 
             # Note some contact site ids may be overwritten but that shouldnt be an issue
             for current_contact_site_id in current_contact_site_ids:
@@ -351,152 +265,6 @@ class ContactSites:
                 df.loc[len(df)] = new_row
 
         return contact_sites, df
-
-    # @staticmethod
-    # def get_pairwise_contact_sites(
-    #     organelle_1,
-    #     organelle_2,
-    #     surface_voxels_1,
-    #     surface_voxels_2,
-    #     contact_distance_voxels,
-    #     mask=None,
-    # ):
-
-    #     # outputs
-    #     pairwise_contact_sites = np.zeros_like(organelle_1, np.uint64)
-    #     df = pd.DataFrame(
-    #         columns=[
-    #             "object_1_id",
-    #             "object_2_id",
-    #             "global_blockwise_contact_site",
-    #         ]
-    #     )
-
-    #     for object_1 in np.unique(organelle_1[organelle_1 > 0]):
-    #         for object_2 in np.unique(organelle_2[organelle_2 > 0]):
-    #             # print_with_datetime(f"{object_1},{object_2}", logger)
-    #             # if np.any(
-    #             #     np.logical_and(
-    #             #         contact_boundary_1 == object_1, contact_boundary_2 == object_2
-    #             #     )
-    #             # ):
-    #             object_1_surface_voxels = surface_voxels_1 == object_1
-    #             object_2_surface_voxels = surface_voxels_2 == object_2
-    #             overlap_voxels = np.argwhere(
-    #                 (organelle_1 == object_1) & (organelle_2 == object_2)
-    #             )
-
-    #             current_pair_contact_sites = (
-    #                 ContactSites.get_current_pair_contact_sites(
-    #                     object_1_surface_voxels,
-    #                     object_2_surface_voxels,
-    #                     contact_distance_voxels,
-    #                     overlap_voxels,
-    #                     mask,
-    #                 )
-    #             )
-
-    #             if np.any(current_pair_contact_sites):
-    #                 previous_max_id = np.amax(pairwise_contact_sites)
-    #                 current_contact_site_ids = np.unique(
-    #                     current_pair_contact_sites[current_pair_contact_sites > 0]
-    #                 )
-    #                 np.putmask(
-    #                     pairwise_contact_sites,
-    #                     current_pair_contact_sites > 0,
-    #                     current_pair_contact_sites + previous_max_id,
-    #                 )
-
-    #                 # Note some contact site ids may be overwritten but that shouldnt be an issue
-    #                 for current_contact_site_id in current_contact_site_ids:
-    #                     new_row = {
-    #                         "object_1_id": object_1,
-    #                         "object_2_id": object_2,
-    #                         "global_blockwise_contact_site": current_contact_site_id
-    #                         + previous_max_id,
-    #                     }
-    #                     df.loc[len(df)] = new_row
-
-    #     return pairwise_contact_sites, df
-
-    # @staticmethod
-    # def get_ndarray_contact_sites_geodesic(
-    #     organelle_1, organelle_2, contact_distance_voxels
-    # ):
-    #     # erode organelles to get surface voxels
-    #     # surface_voxels_1 = organelle_1 - erosion(organelle_1, selem=np.ones((3, 3, 3)))
-
-    #     surface_voxels_1 = organelle_1 * find_boundaries(organelle_1, mode="inner")
-    #     surface_voxels_2 = organelle_2 * find_boundaries(organelle_2, mode="inner")
-
-    #     nonsurface_voxels_1 = organelle_1 - surface_voxels_1
-    #     nonsurface_voxels_2 = organelle_2 - surface_voxels_2
-
-    #     # only care about analyzing nonsurface voxel space; we want to include the surface in distance calculations
-    #     mask = (nonsurface_voxels_2 + nonsurface_voxels_1) > 0
-    #     organelle_1_masked = ma.masked_array(surface_voxels_1 == 0, mask=mask)
-    #     distance_from_organelle_1 = skfmm.distance(
-    #         organelle_1_masked, dx=1, narrow=np.ceil(contact_distance_voxels)
-    #     )
-    #     # convert masked array values to nan
-    #     distance_from_organelle_1 = distance_from_organelle_1.filled(np.nan)
-
-    #     organelle_2_masked = ma.masked_array(surface_voxels_2 == 0, mask=mask)
-    #     distance_from_organelle_2 = skfmm.distance(
-    #         organelle_2_masked, dx=1, narrow=np.ceil(contact_distance_voxels)
-    #     )
-    #     # convert masked array values to nan
-    #     distance_from_organelle_2 = distance_from_organelle_2.filled(np.nan)
-    #     overlapping_voxels = (organelle_1 > 0) & (organelle_2 > 0)
-    #     voxels_part_of_contact_sites = (
-    #         distance_from_organelle_1 + distance_from_organelle_2
-    #     ) < contact_distance_voxels
-    #     voxels_part_of_contact_sites = np.multiply(
-    #         voxels_part_of_contact_sites, 1 - mask
-    #     )
-
-    #     voxels_part_of_contact_sites = voxels_part_of_contact_sites | overlapping_voxels
-
-    #     contact_sites = measure.label(voxels_part_of_contact_sites, connectivity=2)
-
-    #     return (contact_sites.astype(np.uint64),)
-
-    # @staticmethod
-    # def get_ndarray_contact_site_information_bresenham(
-    #     organelle_1, organelle_2, contact_distance_voxels
-    # ):
-    #     surface_voxels_1, surface_voxels_2 = ContactSites.get_surface_voxels(
-    #         organelle_1, organelle_2
-    #     )
-    #     # use nonsurface voxels as mask
-    #     mask = ((organelle_1 > 0) & (surface_voxels_1 == 0)) | (
-    #         (organelle_2 > 0) & (surface_voxels_2 == 0)
-    #     )
-
-    #     contact_sites, df = ContactSites.get_ndarray_contact_sites_bresenham(
-    #         # contact_sites, df = ContactSites.get_pairwise_contact_sites(
-    #         organelle_1,
-    #         organelle_2,
-    #         surface_voxels_1,
-    #         surface_voxels_2,
-    #         contact_distance_voxels,
-    #         mask,
-    #     )
-
-    #     return surface_voxels_1, surface_voxels_2, mask, contact_sites
-
-    # @staticmethod
-    # def get_ndarray_contact_sites(
-    #     organelle_1, organelle_2, contact_distance_voxels, method="bresenham"
-    # ):
-    #     # if method == "geodesic":
-    #     #     return ContactSites.get_ndarray_contact_sites_geodesic(
-    #     #         organelle_1, organelle_2, contact_distance_voxels
-    #     #     )
-    #     # elif method == "bresenham":
-    #     return ContactSites.get_ndarray_contact_site_information_bresenham(
-    #         organelle_1, organelle_2, contact_distance_voxels
-    #     )
 
     @staticmethod
     def get_contacting_organelle_information(
@@ -554,9 +322,7 @@ class ContactSites:
         )
         return contacting_organelle_information_1, contacting_organelle_information_2
 
-    def get_block_contact_site_information(
-        self, block: dask_util.DaskBlock, method="bresenham"
-    ):
+    def get_block_contact_site_information(self, block: dask_util.DaskBlock):
         print_with_datetime(f"Calculating contact site information for", logger)
         organelle_1 = self.organelle_1.to_ndarray(block.roi)
         organelle_2 = self.organelle_2.to_ndarray(block.roi)
@@ -565,9 +331,7 @@ class ContactSites:
         contact_sites, df = ContactSites.get_ndarray_contact_site_information(
             organelle_1, organelle_2, self.contact_distance_voxels
         )
-        # self.sv1 = sv1
-        # self.sv2 = sv2
-        # self.mask = mask
+
         print_with_datetime(f"blockwise_contact_sites done", logger)
 
         print_with_datetime(f"region props", logger)
@@ -598,19 +362,26 @@ class ContactSites:
             organelle_2,
             trim=self.padding_voxels,
         )
-
+        # return organelle_1, organelle_2, contact_sites
         print_with_datetime(f"contacting organelle information done", logger)
-        # return organelle_1, organelle_2, blockwise_contact_sites
+        return organelle_1, organelle_2, contact_sites
         csi = {}
         for _, region_prop in self.region_props.iterrows():
-            id = region_prop["id"]
-            print_with_datetime(f"{id}, {contacting_organelle_information_1}", logger)
+            id = region_prop["ID"]
+            # print_with_datetime(
+            #     f"{id}, {self.contacting_organelle_information_1}", logger
+            # )
             csi[id] = ContactSiteInformation(
-                volume=region_prop["volume"],
-                surface_area=region_prop["surface_area"],
-                com=region_prop["com"],
-                id_to_surface_area_dict_1=contacting_organelle_information_1[id],
-                id_to_surface_area_dict_2=contacting_organelle_information_2[id],
+                volume=region_prop["Volume (nm^3)"],
+                surface_area=region_prop["Surface Area (nm^2)"],
+                com=region_prop[["COM Z (nm)", "COM Y (nm)", "COM X (nm)"]].to_numpy(),
+                # if the id is outside of the non-paded crop it wont exist in the following dicts
+                id_to_surface_area_dict_1=self.contacting_organelle_information_1.get(
+                    id, {}
+                ),
+                id_to_surface_area_dict_2=self.contacting_organelle_information_2.get(
+                    id, {}
+                ),
             )
 
         return csi
