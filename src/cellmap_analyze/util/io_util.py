@@ -14,10 +14,43 @@ import argparse
 from typing import Tuple
 import yaml
 from yaml.loader import SafeLoader
+import tensorstore as ts
 
 # Much below taken from flyemflows: https://github.com/janelia-flyem/flyemflows/blob/master/flyemflows/util/util.py
 logging.basicConfig(format="%(levelname)s:%(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def tensorstore_open_ds(dataset_path: str, mode="r"):
+
+    # Open the Zarr dataset with TensorStore
+    spec = {
+        "driver": "zarr",
+        "kvstore": {"driver": "file", "path": dataset_path},
+    }
+    if mode == "r":
+        dataset_future = ts.open(spec, read=True, write=False)
+    else:
+        dataset_future = ts.open(spec, read=False, write=True)
+
+    return dataset_future.result()
+
+
+def to_ndarray_tensorstore(dataset, roi):
+    """Read a region of a tensorstore dataset and return it as a numpy array
+
+    Args:
+        dataset ('tensorstore.dataset'): Tensorstore dataset
+        roi ('funlib.geometry.Roi'): Region of interest to read
+
+    Returns:
+        Numpy array of the region
+    """
+
+    # Read the region of interest from the dataset
+    data = dataset[roi.to_slices()].read().result()
+
+    return data
 
 
 def split_dataset_path(dataset_path) -> tuple[str, str]:

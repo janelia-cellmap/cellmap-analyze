@@ -26,7 +26,8 @@ logger = logging.getLogger(__name__)
 @dataclass
 class DaskBlock:
     id: int
-    roi: Roi
+    read_roi: Roi
+    write_roi: Roi
 
 
 def create_blocks(
@@ -70,7 +71,11 @@ def create_blocks(
                         block_roi = block_roi.grow(padding, padding)
                     if not extend_beyond_roi:
                         block_roi = block_roi.intersect(roi)
-                    block_rois[index] = DaskBlock(block_id, block_roi)
+                    block_rois[index] = DaskBlock(
+                        block_id,
+                        block_roi,
+                        block_roi.grow(-padding, -padding) if padding else block_roi,
+                    )
                     index += 1
 
         if index < len(block_rois):

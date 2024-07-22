@@ -1,3 +1,4 @@
+import os
 from funlib.persistence import open_ds
 from funlib.geometry import Roi
 import numpy as np
@@ -29,6 +30,8 @@ from cellmap_analyze.util.analysis_util import (
     calculate_surface_areas_voxelwise,
     get_region_properties,
 )
+from cellmap_analyze.util.io_util import tensorstore_open_ds, to_ndarray_tensorstore
+from funlib.persistence import open_ds, prepare_ds
 
 
 logging.basicConfig(
@@ -115,12 +118,15 @@ class ContactSites:
         self,
         organelle_1_path,
         organelle_2_path,
+        output_path,
         contact_distance_nm=30,
         minimum_volume_nm_3=20_000,
         num_workers=10,
         roi=None,
     ):
 
+        self.organelle_1_tensorstore = tensorstore_open_ds(organelle_1_path)
+        self.organelle_2_tensorstore = tensorstore_open_ds(organelle_2_path)
         self.organelle_1 = open_ds(*split_dataset_path(organelle_1_path))
         self.organelle_2 = open_ds(*split_dataset_path(organelle_2_path))
 
@@ -142,10 +148,26 @@ class ContactSites:
         if self.roi is None:
             self.roi = self.organelle_1.roi
 
+        self.output_path = output_path
+
         self.minimum_volume_voxels = minimum_volume_nm_3 / np.prod(self.voxel_size)
         self.num_workers = num_workers
         self.voxel_volume = np.prod(self.voxel_size)
         self.voxel_face_area = self.voxel_size[1] * self.voxel_size[2]
+
+        filename, dataset = split_dataset_path(self.output_path)
+
+        self.contact_sites_ds = prepare_ds(
+            filename=filename,
+            ds_name=dataset,
+            dtype=np.uint64,
+            voxel_size=self.organelle_1.voxel_size,
+            total_roi=self.roi,
+            write_size=self.organelle_1.chunk_shape * self.organelle_1.voxel_size,
+            force_exact_write_size=True,
+            multiscales_metadata=True,
+            delete=True,
+        )
 
     @staticmethod
     def get_surface_voxels(organelle_1, organelle_2):
@@ -324,9 +346,13 @@ class ContactSites:
 
     def get_block_contact_site_information(self, block: dask_util.DaskBlock):
         print_with_datetime(f"Calculating contact site information for", logger)
-        organelle_1 = self.organelle_1.to_ndarray(block.roi)
-        organelle_2 = self.organelle_2.to_ndarray(block.roi)
-        print_with_datetime(f"ndarray done {block.roi}, {block.id}", logger)
+        organelle_1 = to_ndarray_tensorstore(
+            self.organelle_1_tensorstore, block.read_roi / self.voxel_size
+        )
+        organelle_2 = to_ndarray_tensorstore(
+            self.organelle_2_tensorstore, block.read_roi / self.voxel_size
+        )
+        print_with_datetime(f"ndarray done {block.read_roi}, {block.id}", logger)
 
         contact_sites, df = ContactSites.get_ndarray_contact_site_information(
             organelle_1, organelle_2, self.contact_distance_voxels
@@ -340,7 +366,7 @@ class ContactSites:
         # voxel_surface_area
         # voxel_volume
         global_id_offset = ConnectedComponents.convertPositionToGlobalID(
-            block.roi.get_begin() / self.voxel_size, organelle_1.shape
+            block.read_roi.get_begin() / self.voxel_size, organelle_1.shape
         )
         self.region_props = get_region_properties(
             contact_sites,
@@ -348,10 +374,12 @@ class ContactSites:
             self.voxel_volume,
             trim=self.padding_voxels,
         )
-        if self.region_props is None:
-            return None
-        self.region_props["ID"] += global_id_offset
         contact_sites[contact_sites > 0] += global_id_offset
+
+        if self.region_props is None:
+            return {}
+        self.region_props["ID"] += global_id_offset
+
         print_with_datetime(f"region props done", logger)
         (
             self.contacting_organelle_information_1,
@@ -364,7 +392,6 @@ class ContactSites:
         )
         # return organelle_1, organelle_2, contact_sites
         print_with_datetime(f"contacting organelle information done", logger)
-        return organelle_1, organelle_2, contact_sites
         csi = {}
         for _, region_prop in self.region_props.iterrows():
             id = region_prop["ID"]
@@ -384,10 +411,16 @@ class ContactSites:
                 ),
             )
 
+        self.contact_sites_ds[block.write_roi] = trim_array(
+            contact_sites, self.padding_voxels
+        )
+        print_with_datetime(f"writing done", logger)
+
         return csi
         # write out blockwise_contact_site
 
     def get_contact_site_information_with_dask(self):
+
         b = db.from_sequence(self.blocks, npartitions=self.num_workers * 10).map(
             self.get_block_contact_site_information
         )
