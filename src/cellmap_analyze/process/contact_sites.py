@@ -188,10 +188,10 @@ class ContactSites:
     def get_surface_voxels(organelle_1, organelle_2):
         surface_voxels_1 = find_boundaries(
             organelle_1, mode="inner"
-        )  # organelle_1 * find_boundaries(organelle_1, mode="inner")
+        ) 
         surface_voxels_2 = find_boundaries(
             organelle_2, mode="inner"
-        )  # organelle_2 * find_boundaries(organelle_2, mode="inner")
+        )
 
         return (
             surface_voxels_1,
@@ -199,21 +199,30 @@ class ContactSites:
         )
 
     @staticmethod
-    def get_ndarray_contact_sites_bresenham(
-        object_1_surface_voxels,
-        object_2_surface_voxels,
+    def get_ndarray_contact_sites(
+        organelle_1,
+        organelle_2,
         contact_distance_voxels,
-        overlap_voxels,
-        mask=None,
     ):
+        # bresenham method
+        surface_voxels_1, surface_voxels_2 = ContactSites.get_surface_voxels(
+            organelle_1, organelle_2
+        )
+        # use nonsurface voxels as mask
+        mask = ((organelle_1 > 0) & (surface_voxels_1 == 0)) | (
+            (organelle_2 > 0) & (surface_voxels_2 == 0)
+        )
+
+        overlap_voxels = np.argwhere((organelle_1 > 0) & (organelle_2 > 0))
+
         print_with_datetime("get_current_pair_contact_sites", logger)
-        current_pair_contact_voxels = np.zeros_like(object_1_surface_voxels, np.uint64)
+        current_pair_contact_voxels = np.zeros_like(surface_voxels_1, np.uint64)
 
         # get all voxel pairs that are within the contact distance
         # get npwhere result as array of coordinates
 
-        object_1_surface_voxel_coordinates = np.argwhere(object_1_surface_voxels)
-        object_2_surface_voxel_coordinates = np.argwhere(object_2_surface_voxels)
+        object_1_surface_voxel_coordinates = np.argwhere(surface_voxels_1)
+        object_2_surface_voxel_coordinates = np.argwhere(surface_voxels_2)
 
         # Create KD-trees for efficient distance computation
         tree1 = KDTree(object_1_surface_voxel_coordinates)
@@ -271,50 +280,56 @@ class ContactSites:
         return current_pair_contact_sites.astype(np.uint64)
 
     @staticmethod
-    def get_ndarray_contact_site_information(
+    def get_contact_sites_information(
+        contact_sites,
         organelle_1,
         organelle_2,
-        contact_distance_voxels,
+        voxel_face_area,
+        voxel_volume,
+        padding_voxels,
+        id_offset = 0,
     ):
-        surface_voxels_1, surface_voxels_2 = ContactSites.get_surface_voxels(
-            organelle_1, organelle_2
-        )
-        # use nonsurface voxels as mask
-        mask = ((organelle_1 > 0) & (surface_voxels_1 == 0)) | (
-            (organelle_2 > 0) & (surface_voxels_2 == 0)
-        )
-
-        # outputs
-        df = pd.DataFrame(
-            columns=[
-                "object_1_ids",
-                "object_2_ids",
-                "global_blockwise_contact_site",
-            ]
-        )
-        overlap_voxels = np.argwhere((organelle_1 > 0) & (organelle_2 > 0))
-        contact_sites = ContactSites.get_ndarray_contact_sites_bresenham(
-            surface_voxels_1,
-            surface_voxels_2,
-            contact_distance_voxels,
-            overlap_voxels,
-            mask,
-        )
-
+        csis = {}
         if np.any(contact_sites):
-            current_contact_site_ids = np.unique(contact_sites[contact_sites > 0])
+            (
+                contacting_organelle_information_1,
+                contacting_organelle_information_2,
+            ) = ContactSites.get_contacting_organelles_information(
+                contact_sites,
+                organelle_1,
+                organelle_2,
+                trim=padding_voxels,
+            )
+            region_props = get_region_properties(
+                contact_sites,
+                voxel_face_area,
+                voxel_volume,
+                trim=padding_voxels,
+            )
+            # # # current_contact_site_ids = np.unique(contact_sites[contact_sites > 0])
 
             # Note some contact site ids may be overwritten but that shouldnt be an issue
-            for current_contact_site_id in current_contact_site_ids:
-                current_contact_site = contact_sites == current_contact_site_id
-                new_row = {
-                    "object_1_ids": list(np.unique(organelle_1[current_contact_site])),
-                    "object_2_ids": list(np.unique(organelle_2[current_contact_site])),
-                    "global_blockwise_contact_site": current_contact_site_id,
-                }
-                df.loc[len(df)] = new_row
-
-        return contact_sites, df
+            for _, region_prop in region_props.iterrows():
+                # need to add global_id_offset here rather than before because region_props find_objects creates an array that is the length of the max id in the array
+                id = region_prop["ID"]+ id_offset
+                # print_with_datetime(
+                #     f"{id}, {self.contacting_organelle_information_1}", logger
+                # )
+                csis[id] = ContactSiteInformation(
+                    volume=region_prop["Volume (nm^3)"],
+                    surface_area=region_prop["Surface Area (nm^2)"],
+                    com=region_prop[
+                        ["COM Z (nm)", "COM Y (nm)", "COM X (nm)"]
+                    ].to_numpy(),
+                    # if the id is outside of the non-paded crop it wont exist in the following dicts
+                    id_to_surface_area_dict_1=contacting_organelle_information_1.get(
+                        id, {}
+                    ),
+                    id_to_surface_area_dict_2=contacting_organelle_information_2.get(
+                        id, {}
+                    ),
+                )
+        return csis
 
     @staticmethod
     def get_contacting_organelle_information(
@@ -372,7 +387,7 @@ class ContactSites:
         )
         return contacting_organelle_information_1, contacting_organelle_information_2
 
-    def get_block_contact_site_information(self, block: dask_util.DaskBlock):
+    def get_block_contact_sites_and_information(self, block: dask_util.DaskBlock):
         print_with_datetime(f"Calculating contact site information for", logger)
         organelle_1 = to_ndarray_tensorstore(
             self.organelle_1_tensorstore, block.read_roi / self.voxel_size
@@ -381,76 +396,34 @@ class ContactSites:
             self.organelle_2_tensorstore, block.read_roi / self.voxel_size
         )
         print_with_datetime(f"ndarray done {block.read_roi}, {block.id}", logger)
-
-        contact_sites, df = ContactSites.get_ndarray_contact_site_information(
-            organelle_1, organelle_2, self.contact_distance_voxels
-        )
-
-        print_with_datetime(f"blockwise_contact_sites done", logger)
-
-        print_with_datetime(f"region props", logger)
-        # get which objects from organelle_1 and organelle_2 overlap with which ids from blockwise_contact_sites
-        # get surface area of organelle 1
-        # voxel_surface_area
-        # voxel_volume
         global_id_offset = ConnectedComponents.convertPositionToGlobalID(
             block.read_roi.get_begin() / self.voxel_size, organelle_1.shape
         )
-        self.region_props = get_region_properties(
-            contact_sites,
-            self.voxel_face_area,
-            self.voxel_volume,
-            trim=self.padding_voxels,
+        contact_sites = ContactSites.get_ndarray_contact_sites(
+            organelle_1, organelle_2, self.contact_distance_voxels
         )
-        contact_sites[contact_sites > 0] += global_id_offset
-
-        if self.region_props is None:
-            return {}
-        self.region_props["ID"] += global_id_offset
-
-        print_with_datetime(f"region props done", logger)
-        (
-            self.contacting_organelle_information_1,
-            self.contacting_organelle_information_2,
-        ) = ContactSites.get_contacting_organelles_information(
+        csis = ContactSites.get_contact_sites_information(
             contact_sites,
             organelle_1,
             organelle_2,
-            trim=self.padding_voxels,
+            self.voxel_face_area,
+            self.voxel_volume,
+            self.padding_voxels,
+            global_id_offset,
         )
-        # return organelle_1, organelle_2, contact_sites
-        print_with_datetime(f"contacting organelle information done", logger)
-        csi = {}
-        for _, region_prop in self.region_props.iterrows():
-            id = region_prop["ID"]
-            # print_with_datetime(
-            #     f"{id}, {self.contacting_organelle_information_1}", logger
-            # )
-            csi[id] = ContactSiteInformation(
-                volume=region_prop["Volume (nm^3)"],
-                surface_area=region_prop["Surface Area (nm^2)"],
-                com=region_prop[["COM Z (nm)", "COM Y (nm)", "COM X (nm)"]].to_numpy(),
-                # if the id is outside of the non-paded crop it wont exist in the following dicts
-                id_to_surface_area_dict_1=self.contacting_organelle_information_1.get(
-                    id, {}
-                ),
-                id_to_surface_area_dict_2=self.contacting_organelle_information_2.get(
-                    id, {}
-                ),
-            )
-
+        contact_sites[contact_sites>0] += global_id_offset
         self.contact_sites_ds[block.write_roi] = trim_array(
             contact_sites, self.padding_voxels
         )
         print_with_datetime(f"writing done", logger)
 
-        return csi
+        return csis
         # write out blockwise_contact_site
 
     def get_contact_site_information_with_dask(self):
 
-        b = db.from_sequence(self.blocks, npartitions=self.num_workers * 10).map(
-            self.get_block_contact_site_information
+        b = db.from_sequence(self.blocks, npartitions=min(len(self.blocks),self.num_workers * 10)).map(
+            self.get_block_contact_sites_and_information
         )
 
         with dask_util.start_dask(
