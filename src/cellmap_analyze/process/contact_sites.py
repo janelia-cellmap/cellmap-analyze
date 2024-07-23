@@ -32,6 +32,8 @@ from cellmap_analyze.util.analysis_util import (
 )
 from cellmap_analyze.util.io_util import tensorstore_open_ds, to_ndarray_tensorstore
 from funlib.persistence import open_ds, prepare_ds
+import shutil
+from cellmap_analyze.util.zarr_util import write_multiscales_metadata
 
 
 logging.basicConfig(
@@ -157,9 +159,13 @@ class ContactSites:
 
         filename, dataset = split_dataset_path(self.output_path)
 
+        if "zarr" in filename or "n5" in filename and os.path.exists(self.output_path):
+            # open zarr store
+            shutil.rmtree(self.output_path)
+
         self.contact_sites_ds = prepare_ds(
             filename=filename,
-            ds_name=dataset,
+            ds_name=dataset + "/s0",
             dtype=np.uint64,
             voxel_size=self.organelle_1.voxel_size,
             total_roi=self.roi,
@@ -167,6 +173,15 @@ class ContactSites:
             force_exact_write_size=True,
             multiscales_metadata=True,
             delete=True,
+        )
+
+        write_multiscales_metadata(
+            self.output_path,
+            "s0",
+            self.voxel_size,
+            self.roi.get_begin(),
+            "nanometer",
+            ["z", "y", "x"],
         )
 
     @staticmethod
@@ -208,31 +223,44 @@ class ContactSites:
         contact_voxels_list_of_lists = tree1.query_ball_tree(
             tree2, contact_distance_voxels
         )
+        print_with_datetime("list of lists", logger)
         contact_voxels_pairs = [
             [i, j]
             for i, sublist in enumerate(contact_voxels_list_of_lists)
             for j in sublist
         ]
-        contact_voxels_pairs = np.array(contact_voxels_pairs).T
-        print_with_datetime("got contact voxels", logger)
 
-        contact_voxels_1 = object_1_surface_voxel_coordinates[contact_voxels_pairs[0]]
-        contact_voxels_2 = object_2_surface_voxel_coordinates[contact_voxels_pairs[1]]
+        if len(contact_voxels_pairs) > 0:
+
+            contact_voxels_pairs = np.array(contact_voxels_pairs).T
+            print_with_datetime("got contact voxels", logger)
+
+            contact_voxels_1 = object_1_surface_voxel_coordinates[
+                contact_voxels_pairs[0]
+            ]
+            contact_voxels_2 = object_2_surface_voxel_coordinates[
+                contact_voxels_pairs[1]
+            ]
+
+            print_with_datetime("do bresenham", logger)
+            all_valid_voxels = set()
+            for contact_voxel_1, contact_voxel_2 in zip(
+                contact_voxels_1, contact_voxels_2
+            ):
+                valid_voxels = bresenham3DWithMask(
+                    *contact_voxel_1, *contact_voxel_2, mask=mask
+                )
+
+                if valid_voxels:
+                    all_valid_voxels.update(valid_voxels)
+
+            x_coords, y_coords, z_coords = zip(*all_valid_voxels)
+            current_pair_contact_voxels[x_coords, y_coords, z_coords] = 1
+
         if len(overlap_voxels) > 0:
             indices = tuple(zip(*overlap_voxels))
             current_pair_contact_voxels[indices] = 1
 
-        print_with_datetime("do bresenham", logger)
-        all_valid_voxels = set()
-        for contact_voxel_1, contact_voxel_2 in zip(contact_voxels_1, contact_voxels_2):
-            valid_voxels = bresenham3DWithMask(
-                *contact_voxel_1, *contact_voxel_2, mask=mask
-            )
-
-            if valid_voxels:
-                all_valid_voxels.update(valid_voxels)
-        x_coords, y_coords, z_coords = zip(*all_valid_voxels)
-        current_pair_contact_voxels[x_coords, y_coords, z_coords] = 1
         print_with_datetime("bresenham done", logger)
 
         # need connectivity of 3 due to bresenham allowing diagonals
