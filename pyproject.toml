@@ -14,4 +14,4 @@ readme = "README.md"
 license = {file = "LICENSE.txt"}
 
 [project.scripts]
-contact-sites = "cellmap_analyze.process.contact_sites:contact-sites"
+contact-sites = "cli.cli:contact_sites"
