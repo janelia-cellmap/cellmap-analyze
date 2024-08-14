@@ -15,17 +15,30 @@ from typing import Tuple
 import yaml
 from yaml.loader import SafeLoader
 import tensorstore as ts
+import numpy as np
+from funlib.geometry import Coordinate
+from funlib.geometry import Roi
 
 # Much below taken from flyemflows: https://github.com/janelia-flyem/flyemflows/blob/master/flyemflows/util/util.py
 logging.basicConfig(format="%(levelname)s:%(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def tensorstore_open_ds(dataset_path: str, mode="r"):
+def get_name_from_path(path):
+    _, data_name = split_dataset_path(path)
+    if data_name.startswith("/"):
+        data_name = data_name[1:]
+    data_name = data_name.split("/s")[0]
+    return data_name
 
-    # Open the Zarr dataset with TensorStore
+
+def open_ds_tensorstore(dataset_path: str, mode="r"):
+    # open with zarr or n5 depending
+    filetype = (
+        "zarr" if dataset_path.rfind(".zarr") > dataset_path.rfind(".n5") else "n5"
+    )
     spec = {
-        "driver": "zarr",
+        "driver": filetype,
         "kvstore": {"driver": "file", "path": dataset_path},
     }
     if mode == "r":
@@ -36,7 +49,7 @@ def tensorstore_open_ds(dataset_path: str, mode="r"):
     return dataset_future.result()
 
 
-def to_ndarray_tensorstore(dataset, roi):
+def to_ndarray_tensorstore(dataset, roi=None, voxel_size=None, offset=None):
     """Read a region of a tensorstore dataset and return it as a numpy array
 
     Args:
@@ -46,18 +59,63 @@ def to_ndarray_tensorstore(dataset, roi):
     Returns:
         Numpy array of the region
     """
+    if roi is None:
+        return dataset.read().result()
+
+    if offset is None:
+        offset = Coordinate(np.zeros(roi.dims, dtype=int))
+
+    roi -= offset
+    roi /= voxel_size
+
+    # Specify the range
+    roi_slices = roi.to_slices()
+
+    domain = dataset.domain
+    # Compute the valid range
+    valid_slices = tuple(
+        [
+            slice(max(s.start, inclusive_min), min(s.stop, exclusive_max))
+            for s, inclusive_min, exclusive_max in zip(
+                roi_slices, domain.inclusive_min, domain.exclusive_max
+            )
+        ]
+    )
+
+    # Create an array to hold the requested data, filled with a default value (e.g., zeros)
+    output_shape = [s.stop - s.start for s in roi_slices]
+
+    if not dataset.fill_value:
+        fill_value = 0
+    padded_data = np.ones(output_shape, dtype=dataset.dtype.numpy_dtype) * fill_value
+    padded_slices = tuple(
+        slice(valid_slice.start - s.start, valid_slice.stop - s.start)
+        for s, valid_slice in zip(roi_slices, valid_slices)
+    )
+    #         )
+    # padded_slices = tuple(
+    #     [
+    #         slice(
+    #             max(inclusive_min - s.start, 0),
+    #             min(exclusive_max, s.stop) + max(inclusive_min - s.start, 0),
+    #         )
+    #         for s, inclusive_min, exclusive_max in zip(
+    #             roi_slices, domain.inclusive_min, domain.exclusive_max
+    #         )
+    #     ]
+    # )
 
     # Read the region of interest from the dataset
-    data = dataset[roi.to_slices()].read().result()
+    padded_data[padded_slices] = dataset[valid_slices].read().result()
+    return padded_data
 
-    return data
 
-
-def split_dataset_path(dataset_path) -> tuple[str, str]:
+def split_dataset_path(dataset_path, scale=None) -> tuple[str, str]:
     """Split the dataset path into the filename and dataset
 
     Args:
         dataset_path ('str'): Path to the dataset
+        scale ('int'): Scale to use, if present
 
     Returns:
         Tuple of filename and dataset
@@ -67,7 +125,13 @@ def split_dataset_path(dataset_path) -> tuple[str, str]:
     splitter = (
         ".zarr" if dataset_path.rfind(".zarr") > dataset_path.rfind(".n5") else ".n5"
     )
+
     filename, dataset = dataset_path.split(splitter)
+
+    # include scale if present
+    if scale is not None:
+        dataset += f"/s{scale}"
+
     return filename + splitter, dataset
 
 
@@ -123,21 +187,23 @@ def read_run_config(config_path):
         Dicts of required_settings and optional_decimation_settings
     """
 
+    def get_roi_from_string(roi_string):
+        # roi will look like this ["z_start:z_end", "y_start:y_end", "x_start:x_end"]. split it and convert to tuple
+        roi_start = [int(d.split(":")[0]) for d in roi_string]
+        roi_ends = [int(d.split(":")[1]) for d in roi_string]
+
+        roi_extents = [int(roi_ends[i] - roi_start[i]) for i in range(len(roi_string))]
+        roi = Roi(roi_start, roi_extents)
+        return roi
+
     with open(f"{config_path}/run-config.yaml") as f:
         config = yaml.load(f, Loader=SafeLoader)
-        required_settings = config["required_settings"]
-        optional_decimation_settings = config.get("optional_decimation_settings", {})
 
-        if "skip_decimation" not in optional_decimation_settings:
-            optional_decimation_settings["skip_decimation"] = False
-        if "decimation_factor" not in optional_decimation_settings:
-            optional_decimation_settings["decimation_factor"] = 2
-        if "aggressiveness" not in optional_decimation_settings:
-            optional_decimation_settings["aggressiveness"] = 7
-        if "delete_decimated_meshes" not in optional_decimation_settings:
-            optional_decimation_settings["delete_decimated_meshes"] = False
+    for key in config.keys():
+        if "roi" in key:
+            config[key] = get_roi_from_string(config[key])
 
-        return required_settings, optional_decimation_settings
+    return config
 
 
 def parser_params():
