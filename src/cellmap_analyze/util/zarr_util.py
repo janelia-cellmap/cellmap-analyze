@@ -1,4 +1,10 @@
 import json
+import shutil
+
+from cellmap_analyze.util.io_util import split_dataset_path
+from funlib.persistence import prepare_ds
+import os
+import shutil
 
 
 # From Yuri
@@ -74,3 +80,35 @@ def write_multiscales_metadata(
     # write out metadata to .zattrs file
     with open(f"{base_ds_path}/.zattrs", "w") as f:
         json.dump(multiscales_metadata, f, indent=3)
+
+
+def create_multiscale_dataset(
+    output_path, dtype, voxel_size, total_roi, write_size, scale=0
+):
+
+    filename, dataset = split_dataset_path(output_path, scale=scale)
+    if ("zarr" in filename or "n5" in filename) and os.path.exists(output_path):
+        # open zarr store
+        shutil.rmtree(output_path)
+
+    ds = prepare_ds(
+        filename=filename,
+        ds_name=dataset,
+        dtype=dtype,
+        voxel_size=voxel_size,
+        total_roi=total_roi,
+        write_size=write_size,
+        force_exact_write_size=True,
+        multiscales_metadata=True,
+        delete=True,
+    )
+
+    write_multiscales_metadata(
+        filename + "/" + dataset.rsplit(f"/s{scale}")[0],
+        f"s{scale}",
+        voxel_size,
+        total_roi.get_begin(),
+        "nanometer",
+        ["z", "y", "x"],
+    )
+    return ds
