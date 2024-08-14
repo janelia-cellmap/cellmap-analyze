@@ -14,6 +14,8 @@ from funlib.persistence import Array
 from funlib.geometry import Coordinate, Roi
 import numpy as np
 import logging
+from contextlib import contextmanager, nullcontext
+
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -125,7 +127,7 @@ def set_local_directory(cluster_type):
 
 
 @contextmanager
-def start_dask(num_workers, msg, logger):
+def start_dask(num_workers, msg, logger, client=None):
     """Context manager used for starting/shutting down dask
 
     Args:
@@ -136,43 +138,48 @@ def start_dask(num_workers, msg, logger):
     Yields:
         client: Dask client
     """
+    if num_workers == 1:
+        # then dont need to startup dask
+        with nullcontext():
+            yield
 
-    # Update dask
-    with open("dask-config.yaml") as f:
-        config = yaml.load(f, Loader=SafeLoader)
-        dask.config.update(dask.config.config, config)
-
-    cluster_type = next(iter(dask.config.config["jobqueue"]))
-    set_local_directory(cluster_type)
-
-    if cluster_type == "local":
-        from dask.distributed import LocalCluster
-
-        cluster = LocalCluster(n_workers=num_workers, threads_per_worker=1)
     else:
-        if cluster_type == "lsf":
-            from dask_jobqueue import LSFCluster
+        # Update dask
+        with open("dask-config.yaml") as f:
+            config = yaml.load(f, Loader=SafeLoader)
+            dask.config.update(dask.config.config, config)
 
-            cluster = LSFCluster()
-        elif cluster_type == "slurm":
-            from dask_jobqueue import SLURMCluster
+        cluster_type = next(iter(dask.config.config["jobqueue"]))
+        set_local_directory(cluster_type)
 
-            cluster = SLURMCluster()
-        elif cluster_type == "sge":
-            from dask_jobqueue import SGECluster
+        if cluster_type == "local":
+            from dask.distributed import LocalCluster
 
-            cluster = SGECluster()
-        cluster.scale(num_workers)
-    try:
-        with Timing_Messager(f"Starting dask cluster for {msg}", logger):
-            client = Client(cluster)
-        print_with_datetime(
-            f"Check {client.cluster.dashboard_link} for {msg} status.", logger
-        )
-        yield client
-    finally:
-        client.shutdown()
-        client.close()
+            cluster = LocalCluster(n_workers=num_workers, threads_per_worker=1)
+        else:
+            if cluster_type == "lsf":
+                from dask_jobqueue import LSFCluster
+
+                cluster = LSFCluster()
+            elif cluster_type == "slurm":
+                from dask_jobqueue import SLURMCluster
+
+                cluster = SLURMCluster()
+            elif cluster_type == "sge":
+                from dask_jobqueue import SGECluster
+
+                cluster = SGECluster()
+            cluster.scale(num_workers)
+        try:
+            with Timing_Messager(f"Starting dask cluster for {msg}", logger):
+                client = Client(cluster)
+            print_with_datetime(
+                f"Check {client.cluster.dashboard_link} for {msg} status.", logger
+            )
+            yield client
+        finally:
+            client.shutdown()
+            client.close()
 
 
 def setup_execution_directory(config_path, logger):
