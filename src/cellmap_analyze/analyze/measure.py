@@ -2,7 +2,11 @@ from funlib.persistence import open_ds
 import numpy as np
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util import io_util
-from cellmap_analyze.util.dask_util import DaskBlock, create_blocks
+from cellmap_analyze.util.dask_util import (
+    DaskBlock,
+    create_blocks,
+    guesstimate_npartitions,
+)
 from cellmap_analyze.util.information_holders import ObjectInformation
 from cellmap_analyze.util.io_util import (
     get_name_from_path,
@@ -41,6 +45,7 @@ class Measure:
         self.output_path = output_path
 
         self.contact_sites = False
+        self.get_measurements_blockwise_extra_kwargs = {}
         if "organelle_1_path" in kwargs.keys() or "organelle_2_path" in kwargs.keys():
             if not (
                 "organelle_1_path" in kwargs.keys()
@@ -55,6 +60,20 @@ class Measure:
             self.organelle_2_ds = open_ds(*split_dataset_path(self.organelle_2_path))
             self.organelle_1_ds_tensorstore = open_ds_tensorstore(self.organelle_1_path)
             self.organelle_2_ds_tensorstore = open_ds_tensorstore(self.organelle_2_path)
+
+            self.get_measurements_blockwise_extra_kwargs["organelle_1_ds"] = (
+                self.organelle_1_ds
+            )
+            self.get_measurements_blockwise_extra_kwargs["organelle_2_ds"] = (
+                self.organelle_2_ds
+            )
+            self.get_measurements_blockwise_extra_kwargs[
+                "organelle_1_ds_tensorstore"
+            ] = self.organelle_1_ds_tensorstore
+            self.get_measurements_blockwise_extra_kwargs[
+                "organelle_2_ds_tensorstore"
+            ] = self.organelle_2_ds_tensorstore
+
             self.contact_sites = True
 
         self.global_offset = np.zeros((3,))
@@ -65,56 +84,82 @@ class Measure:
             self.roi = roi
         self.voxel_size = self.input_ds.voxel_size
         self.num_workers = num_workers
-        self.client = client
+        self.compute_args = {}
+        if self.num_workers == 1:
+            self.compute_args = {"scheduler": "single-threaded"}
 
-    def get_measurements_blockwise(self, block: DaskBlock):
+    @staticmethod
+    def get_measurements_blockwise(
+        block: DaskBlock,
+        input_ds,
+        input_ds_tensorstore,
+        voxel_size,
+        global_offset,
+        contact_sites,
+        **kwargs,
+    ):
         data = to_ndarray_tensorstore(
-            self.input_ds_tensorstore,
+            input_ds_tensorstore,
             block.read_roi,
-            self.voxel_size,
-            self.input_ds.roi.offset,
+            voxel_size,
+            input_ds.roi.offset,
         )
 
         extra_kwargs = {}
-        if self.contact_sites:
+        if contact_sites:
+            organelle_1_ds = kwargs.get("organelle_1_ds")
+            organelle_1_ds_tensorstore = kwargs.get("organelle_1_ds_tensorstore")
+            organelle_2_ds = kwargs.get("organelle_2_ds")
+            organelle_2_ds_tensorstore = kwargs.get("organelle_2_ds_tensorstore")
+
             extra_kwargs["organelle_1"] = to_ndarray_tensorstore(
-                self.organelle_1_ds_tensorstore,
+                organelle_1_ds_tensorstore,
                 block.read_roi,
-                self.voxel_size,
-                self.organelle_1_ds.roi.offset,
+                voxel_size,
+                organelle_1_ds.roi.offset,
             )
             extra_kwargs["organelle_2"] = to_ndarray_tensorstore(
-                self.organelle_2_ds_tensorstore,
+                organelle_2_ds_tensorstore,
                 block.read_roi,
-                self.voxel_size,
-                self.organelle_2_ds.roi.offset,
+                voxel_size,
+                organelle_2_ds.roi.offset,
             )
 
         # get information only from actual block(not including padding)
-        block_offset = np.array(block.write_roi.begin) + self.global_offset
+        block_offset = np.array(block.write_roi.begin) + global_offset
         object_informations = get_object_information(
-            data, self.voxel_size[0], trim=1, offset=block_offset, **extra_kwargs
+            data, voxel_size[0], trim=1, offset=block_offset, **extra_kwargs
         )
         return object_informations
 
+    @staticmethod
+    def __summer(object_information_dicts):
+        output_dict = {}
+        for object_information_dict in object_information_dicts:
+            for id, oi in object_information_dict.items():
+                if id in output_dict:
+                    output_dict[id] += oi
+                else:
+                    output_dict[id] = oi
+
+        return output_dict
+
     def measure(self):
-        def __summer(object_information_dicts):
-            output_dict = {}
-            for object_information_dict in object_information_dicts:
-                for id, oi in object_information_dict.items():
-                    if id in output_dict:
-                        output_dict[id] += oi
-                    else:
-                        output_dict[id] = oi
-
-            return output_dict
-
         b = (
             db.from_sequence(
-                self.blocks, npartitions=min(len(self.blocks), self.num_workers * 10)
+                self.blocks,
+                npartitions=guesstimate_npartitions(self.blocks, self.num_workers),
             )
-            .map(self.get_measurements_blockwise)
-            .reduction(__summer, __summer)
+            .map(
+                Measure.get_measurements_blockwise,
+                self.input_ds,
+                self.input_ds_tensorstore,
+                self.voxel_size,
+                self.global_offset,
+                self.contact_sites,
+                **self.get_measurements_blockwise_extra_kwargs,
+            )
+            .reduction(Measure.__summer, Measure.__summer)
         )
 
         with dask_util.start_dask(
@@ -123,7 +168,7 @@ class Measure:
             logger,
         ):
             with io_util.Timing_Messager("Measuring object information", logger):
-                self.measurements = b.compute()
+                self.measurements = b.compute(**self.compute_args)
 
     def write_measurements(self):
         os.makedirs(self.output_path, exist_ok=True)

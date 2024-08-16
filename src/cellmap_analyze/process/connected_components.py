@@ -3,10 +3,15 @@ from funlib.geometry import Roi
 import numpy as np
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util import io_util
-from cellmap_analyze.util.dask_util import DaskBlock, create_blocks
+from cellmap_analyze.util.dask_util import (
+    DaskBlock,
+    create_blocks,
+    guesstimate_npartitions,
+)
 from cellmap_analyze.util.io_util import (
     get_name_from_path,
     open_ds_tensorstore,
+    print_with_datetime,
     split_dataset_path,
     to_ndarray_tensorstore,
 )
@@ -56,6 +61,9 @@ class ConnectedComponents:
         self.minimum_volume_voxels = minimum_volume_nm_3 / np.prod(self.voxel_size)
         self.connectivity = connectivity
         self.num_workers = num_workers
+        self.compute_args = {}
+        if self.num_workers == 1:
+            self.compute_args = {"scheduler": "single-threaded"}
 
     @staticmethod
     def convert_position_to_global_id(position, dimensions):
@@ -121,12 +129,15 @@ class ConnectedComponents:
                 removed_ids.append(current_connected_ids)
         return kept_ids, removed_ids
 
-    def get_connected_component_information_blockwise(self, block: DaskBlock):
+    @staticmethod
+    def get_connected_component_information_blockwise(
+        block, tmp_blockwise_ds_tensorstore, voxel_size, tmp_blockwise_ds, connectivity
+    ):
         data = to_ndarray_tensorstore(
-            self.tmp_blockwise_ds_tensorstore,
+            tmp_blockwise_ds_tensorstore,
             block.read_roi,
-            self.voxel_size,
-            self.tmp_blockwise_ds.roi.offset,
+            voxel_size,
+            tmp_blockwise_ds.roi.offset,
         )
         # if roi.shape != self.ds.intersect(roi).shape:
         #     data = self.ds.to_ndarray(roi, fill_value=0)
@@ -136,12 +147,13 @@ class ConnectedComponents:
         mask = data.astype(bool)
         mask[2:, 2:, 2:] = False
         touching_ids = ConnectedComponents.get_touching_ids(
-            data, mask=mask, connectivity=self.connectivity
+            data, mask=mask, connectivity=connectivity
         )
 
         # get information only from actual block(not including padding)
         id_to_volume_dict = ConnectedComponents.get_object_sizes(data[1:-1, 1:-1, 1:-1])
-        return id_to_volume_dict, touching_ids
+        block.relabeling_dict = {id: 0 for id in id_to_volume_dict.keys()}
+        return [block], id_to_volume_dict, touching_ids
 
     @staticmethod
     def __combine_id_to_volume_dicts(dict1, dict2):
@@ -156,22 +168,36 @@ class ConnectedComponents:
 
     @staticmethod
     def __combine_results(results):
+        blocks = []
         id_to_volume_dict = {}
         touching_ids = set()
         if type(results) is tuple:
             results = [results]
 
-        for current_id_to_volume_dict, current_touching_ids in results:
+        for block, current_id_to_volume_dict, current_touching_ids in results:
+            blocks += block
             id_to_volume_dict = ConnectedComponents.__combine_id_to_volume_dicts(
                 id_to_volume_dict, current_id_to_volume_dict
             )
             touching_ids.update(current_touching_ids)
-        return id_to_volume_dict, touching_ids
+
+        return blocks, id_to_volume_dict, touching_ids
 
     def get_connected_component_information(self):
-        b = db.from_sequence(
-            self.blocks, npartitions=min(len(self.blocks), self.num_workers * 10)
-        ).map(self.get_connected_component_information_blockwise)
+        b = (
+            db.from_sequence(
+                self.blocks,
+                npartitions=guesstimate_npartitions(self.blocks, self.num_workers),
+            )
+            .map(
+                ConnectedComponents.get_connected_component_information_blockwise,
+                self.tmp_blockwise_ds_tensorstore,
+                self.voxel_size,
+                self.tmp_blockwise_ds,
+                self.connectivity,
+            )
+            .reduction(self.__combine_results, self.__combine_results)
+        )
 
         with dask_util.start_dask(
             self.num_workers,
@@ -181,24 +207,11 @@ class ConnectedComponents:
             with io_util.Timing_Messager(
                 "Calculating connected component information", logger
             ):
-                self.blockwise_results = b.compute()
-
-    def combine_blockwise_results(self):
-        b = db.from_sequence(
-            self.blockwise_results,
-            npartitions=min(len(self.blockwise_results), self.num_workers * 10),
-        ).map(self.__combine_results)
-
-        with dask_util.start_dask(
-            self.num_workers, "combine blockwise results", logger
-        ):
-            with io_util.Timing_Messager("Combining blockwise results", logger):
-                bagged_results = b.compute()
-
-        with io_util.Timing_Messager("Combining bagged results", logger):
-            self.id_to_volume_dict, self.touching_ids = self.__combine_results(
-                bagged_results
-            )
+                blocks_with_dict, self.id_to_volume_dict, self.touching_ids = b.compute(
+                    **self.compute_args
+                )
+                for block in blocks_with_dict:
+                    self.blocks[block.index] = block
 
     def get_final_connected_components(self):
         with io_util.Timing_Messager("Finding connected components", logger):
@@ -213,6 +226,7 @@ class ConnectedComponents:
                     self.id_to_volume_dict,
                     self.minimum_volume_voxels,
                 )
+        del self.id_to_volume_dict, self.touching_ids
         # sort connected_ids by the minimum id in each connected component
         new_ids = [[i + 1] * len(ids) for i, ids in enumerate(connected_ids)]
         old_ids = connected_ids
@@ -221,31 +235,44 @@ class ConnectedComponents:
         old_ids = list(itertools.chain(*old_ids))
 
         if len(new_ids) == 0:
-            self.relabeling_dictionary = None
             self.new_dtype = np.uint8
         else:
-            self.relabeling_dictionary = dict(zip(old_ids, new_ids))
             self.new_dtype = np.min_scalar_type(max(new_ids))
+            relabeling_dict = dict(zip(old_ids, new_ids))
+            # update blockwise relabeing dicts
+            for block in self.blocks:
+                block.relabeling_dict = {
+                    id: relabeling_dict.get(id, 0)
+                    for id in block.relabeling_dict.keys()
+                }
 
-    def relabel_block(self, block: DaskBlock):
+            del relabeling_dict
+
+    @staticmethod
+    def relabel_block(
+        block: DaskBlock,
+        tmp_blockwise_ds_tensorstore,
+        voxel_size,
+        tmp_blockwise_ds,
+        new_dtype,
+        output_ds,
+    ):
+        # print_with_datetime(block.relabeling_dict, logger)
         data = to_ndarray_tensorstore(
-            self.tmp_blockwise_ds_tensorstore,
+            tmp_blockwise_ds_tensorstore,
             block.write_roi,
-            self.voxel_size,
-            self.tmp_blockwise_ds.roi.offset,
+            voxel_size,
+            tmp_blockwise_ds.roi.offset,
         )
 
-        if self.relabeling_dictionary is None:
-            new_data = data.astype(self.new_dtype)
+        if len(block.relabeling_dict) == 0:
+            new_data = data.astype(new_dtype)
         else:
-            new_data = np.zeros_like(data, dtype=self.new_dtype)
-
-            # get keys and values as lists from self.relabeling_dictionary
-            keys, values = zip(*self.relabeling_dictionary.items())
+            new_data = np.zeros_like(data, dtype=new_dtype)
+            keys, values = zip(*block.relabeling_dict.items())
             replace_values(data, list(keys), list(values), new_data)
         del data
-        self.output_ds[block.write_roi] = new_data
-        return block.write_roi
+        output_ds[block.write_roi] = new_data
 
     def relabel_dataset(self):
         self.output_ds = create_multiscale_dataset(
@@ -259,36 +286,44 @@ class ConnectedComponents:
 
         b = db.from_sequence(
             self.blocks,
-            npartitions=min(len(self.blocks), self.num_workers * 10),
-        ).map(self.relabel_block)
+            npartitions=guesstimate_npartitions(self.blocks, self.num_workers),
+        ).map(
+            ConnectedComponents.relabel_block,
+            self.tmp_blockwise_ds_tensorstore,
+            self.voxel_size,
+            self.tmp_blockwise_ds,
+            self.new_dtype,
+            self.output_ds,
+        )
 
         with dask_util.start_dask(self.num_workers, "relabel dataset", logger):
             with io_util.Timing_Messager("Relabeling dataset", logger):
-                b.compute()
+                b.compute(**self.compute_args)
+
+    @staticmethod
+    def delete_chunks(block_coords, tmp_blockwise_ds_path):
+        block_coords_string = "/".join([str(c) for c in block_coords])
+        delete_name = f"{tmp_blockwise_ds_path}/{block_coords_string}"
+        if os.path.exists(delete_name) and (
+            os.path.isfile(delete_name) or os.listdir(delete_name) == []
+        ):
+            os.system(f"rm -rf {delete_name}")
 
     def delete_tmp_dataset(self):
-        def delete_block(block, depth):
-            block_coords = (block.write_roi.begin - self.tmp_blockwise_ds.roi.begin) / (
-                self.tmp_blockwise_ds.chunk_shape * self.tmp_blockwise_ds.voxel_size
-            )
-            block_coords_string = "/".join(
-                [f"{block_coords[i]}" for i in range(depth + 1)]
-            )
-            os.system(f"rm -rf {self.tmp_blockwise_ds_path}/{block_coords_string}")
-
-        for depth in range(2, -1, -1):
+        for depth in range(3, 0, -1):
+            all_block_coords = set([block.coords[:depth] for block in self.blocks])
             b = db.from_sequence(
-                self.blocks,
-                npartitions=min(len(self.blocks), self.num_workers * 10),
-            ).map(delete_block, depth)
+                all_block_coords,
+                npartitions=guesstimate_npartitions(self.blocks, self.num_workers),
+            ).map(ConnectedComponents.delete_chunks, self.tmp_blockwise_ds_path)
 
             with dask_util.start_dask(
                 self.num_workers, f"delete blockwise depth: {depth}", logger
             ):
                 with io_util.Timing_Messager(
-                    f"Deleting blockwise depth:{depth}", logger
+                    f"Deleting blockwise depth: {depth}", logger
                 ):
-                    b.compute()
+                    b.compute(**self.compute_args)
 
         base_path, _ = split_dataset_path(self.tmp_blockwise_ds_path)
         os.system(
@@ -300,7 +335,6 @@ class ConnectedComponents:
             self.roi, self.tmp_blockwise_ds, padding=self.tmp_blockwise_ds.voxel_size
         )
         self.get_connected_component_information()
-        self.combine_blockwise_results()
         self.get_final_connected_components()
         self.relabel_dataset()
         self.delete_tmp_dataset()
