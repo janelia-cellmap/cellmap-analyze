@@ -27,13 +27,16 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class DaskBlock:
+    index: int
     id: int
+    coords: tuple
     read_roi: Roi
     write_roi: Roi
+    relabeling_dict: dict
 
 
 def create_blocks(
-    roi: Roi, ds: Array, block_size=None, padding=None, extend_beyond_roi=True
+    roi: Roi, ds: Array, block_size=None, padding=None, read_beyond_roi=True
 ):
     def get_global_block_id(
         roi_shape_voxels: Coordinate, block_roi: Roi, voxel_size: Coordinate
@@ -65,24 +68,38 @@ def create_blocks(
         for z in range(roi.get_begin()[2], roi.get_end()[2], block_size[2]):
             for y in range(roi.get_begin()[1], roi.get_end()[1], block_size[1]):
                 for x in range(roi.get_begin()[0], roi.get_end()[0], block_size[0]):
-                    block_roi = Roi((x, y, z), block_size).intersect(roi)
+                    write_roi = Roi((x, y, z), block_size).intersect(roi)
                     block_id = get_global_block_id(
-                        roi_shape_voxels, block_roi, ds.voxel_size
+                        roi_shape_voxels, write_roi, ds.voxel_size
                     )
+
                     if padding:
-                        block_roi = block_roi.grow(padding, padding)
-                    if not extend_beyond_roi:
-                        block_roi = block_roi.intersect(roi)
+                        read_roi = write_roi.grow(padding, padding)
+
+                    if not read_beyond_roi:
+                        read_roi = read_roi.intersect(roi)
+
+                    coords = (write_roi.begin - roi.begin) / block_size
+
                     block_rois[index] = DaskBlock(
+                        index,
                         block_id,
-                        block_roi,
-                        block_roi.grow(-padding, -padding) if padding else block_roi,
+                        coords,
+                        read_roi,
+                        write_roi,
+                        {},
                     )
                     index += 1
 
         if index < len(block_rois):
             block_rois[index:] = []
     return block_rois
+
+
+def guesstimate_npartitions(sequence, num_workers, scaling=4):
+    # if num_workers == 1:
+    #     return 1
+    return min(len(sequence), num_workers * scaling)
 
 
 def set_local_directory(cluster_type):
@@ -127,7 +144,7 @@ def set_local_directory(cluster_type):
 
 
 @contextmanager
-def start_dask(num_workers, msg, logger, client=None):
+def start_dask(num_workers, msg, logger):
     """Context manager used for starting/shutting down dask
 
     Args:
@@ -160,7 +177,16 @@ def start_dask(num_workers, msg, logger, client=None):
             if cluster_type == "lsf":
                 from dask_jobqueue import LSFCluster
 
-                cluster = LSFCluster()
+                cluster = LSFCluster(
+                    job_script_prologue=[
+                        "export NUMEXPR_MAX_THREADS=1",
+                        "export MKL_NUM_THREADS=1",
+                        "export NUM_MKL_THREADS=1",
+                        "export OPENBLAS_NUM_THREADS=1",
+                        "export OPENMP_NUM_THREADS=1",
+                        "export OMP_NUM_THREADS=1",
+                    ]
+                )
             elif cluster_type == "slurm":
                 from dask_jobqueue import SLURMCluster
 
@@ -171,7 +197,10 @@ def start_dask(num_workers, msg, logger, client=None):
                 cluster = SGECluster()
             cluster.scale(num_workers)
         try:
-            with Timing_Messager(f"Starting dask cluster for {msg}", logger):
+            with Timing_Messager(
+                f"Starting {cluster_type} dask cluster for {msg} with {num_workers} workers",
+                logger,
+            ):
                 client = Client(cluster)
             print_with_datetime(
                 f"Check {client.cluster.dashboard_link} for {msg} status.", logger
