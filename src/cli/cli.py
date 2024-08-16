@@ -27,7 +27,6 @@ def contact_sites():
     from cellmap_analyze.process.contact_sites import ContactSites
 
     rp = RunProperties()
-    # Start mesh creation
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
         contact_sites = ContactSites(**rp.run_config)
