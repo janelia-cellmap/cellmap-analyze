@@ -8,17 +8,12 @@ from cellmap_analyze.util.dask_util import (
     create_blocks,
     guesstimate_npartitions,
 )
+from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.io_util import (
     get_name_from_path,
-    open_ds_tensorstore,
-    print_with_datetime,
     split_dataset_path,
-    to_ndarray_tensorstore,
 )
-from skimage import measure
-from skimage.segmentation import expand_labels, find_boundaries
-from sklearn.metrics.pairwise import pairwise_distances
-from cellmap_analyze.util.bresenham3D import bresenham3DWithMask
+
 import logging
 from skimage.graph import pixel_graph
 import networkx as nx
@@ -47,17 +42,14 @@ class ConnectedComponents:
         connectivity=2,
     ):
         self.tmp_blockwise_ds_path = tmp_blockwise_ds_path
-        self.tmp_blockwise_ds = open_ds(*split_dataset_path(self.tmp_blockwise_ds_path))
-        self.tmp_blockwise_ds_tensorstore = open_ds_tensorstore(
-            self.tmp_blockwise_ds_path
-        )
+        self.tmp_blockwise_idi = ImageDataInterface(self.tmp_blockwise_ds_path)
         self.output_ds_path = output_ds_path
 
         if roi is None:
-            self.roi = self.tmp_blockwise_ds.roi
+            self.roi = self.tmp_blockwise_idi.roi
         else:
             self.roi = roi
-        self.voxel_size = self.tmp_blockwise_ds.voxel_size
+        self.voxel_size = self.tmp_blockwise_idi.voxel_size
         self.minimum_volume_voxels = minimum_volume_nm_3 / np.prod(self.voxel_size)
         self.connectivity = connectivity
         self.num_workers = num_workers
@@ -131,13 +123,10 @@ class ConnectedComponents:
 
     @staticmethod
     def get_connected_component_information_blockwise(
-        block, tmp_blockwise_ds_tensorstore, voxel_size, tmp_blockwise_ds, connectivity
+        block, tmp_blockwise_idi: ImageDataInterface, connectivity
     ):
-        data = to_ndarray_tensorstore(
-            tmp_blockwise_ds_tensorstore,
+        data = tmp_blockwise_idi.to_ndarray_ts(
             block.read_roi,
-            voxel_size,
-            tmp_blockwise_ds.roi.offset,
         )
         # if roi.shape != self.ds.intersect(roi).shape:
         #     data = self.ds.to_ndarray(roi, fill_value=0)
@@ -191,9 +180,7 @@ class ConnectedComponents:
             )
             .map(
                 ConnectedComponents.get_connected_component_information_blockwise,
-                self.tmp_blockwise_ds_tensorstore,
-                self.voxel_size,
-                self.tmp_blockwise_ds,
+                self.tmp_blockwise_idi,
                 self.connectivity,
             )
             .reduction(self.__combine_results, self.__combine_results)
@@ -251,18 +238,13 @@ class ConnectedComponents:
     @staticmethod
     def relabel_block(
         block: DaskBlock,
-        tmp_blockwise_ds_tensorstore,
-        voxel_size,
-        tmp_blockwise_ds,
+        tmp_blockwise_idi: ImageDataInterface,
         new_dtype,
-        output_ds,
+        output_idi: ImageDataInterface,
     ):
         # print_with_datetime(block.relabeling_dict, logger)
-        data = to_ndarray_tensorstore(
-            tmp_blockwise_ds_tensorstore,
+        data = tmp_blockwise_idi.to_ndarray_ts(
             block.write_roi,
-            voxel_size,
-            tmp_blockwise_ds.roi.offset,
         )
 
         if len(block.relabeling_dict) == 0:
@@ -272,28 +254,27 @@ class ConnectedComponents:
             keys, values = zip(*block.relabeling_dict.items())
             replace_values(data, list(keys), list(values), new_data)
         del data
-        output_ds[block.write_roi] = new_data
+        output_idi.ds[block.write_roi] = new_data
 
     def relabel_dataset(self):
-        self.output_ds = create_multiscale_dataset(
+        create_multiscale_dataset(
             self.output_ds_path,
             dtype=self.new_dtype,
             voxel_size=self.voxel_size,
             total_roi=self.roi,
-            write_size=self.tmp_blockwise_ds.chunk_shape
-            * self.tmp_blockwise_ds.voxel_size,
+            write_size=self.tmp_blockwise_idi.chunk_shape
+            * self.tmp_blockwise_idi.voxel_size,
         )
+        self.output_idi = ImageDataInterface(self.output_ds_path + "/s0", mode="r+")
 
         b = db.from_sequence(
             self.blocks,
             npartitions=guesstimate_npartitions(self.blocks, self.num_workers),
         ).map(
             ConnectedComponents.relabel_block,
-            self.tmp_blockwise_ds_tensorstore,
-            self.voxel_size,
-            self.tmp_blockwise_ds,
+            self.tmp_blockwise_idi,
             self.new_dtype,
-            self.output_ds,
+            self.output_idi,
         )
 
         with dask_util.start_dask(self.num_workers, "relabel dataset", logger):
@@ -332,7 +313,7 @@ class ConnectedComponents:
 
     def merge_connected_components_across_blocks(self):
         self.blocks = create_blocks(
-            self.roi, self.tmp_blockwise_ds, padding=self.tmp_blockwise_ds.voxel_size
+            self.roi, self.tmp_blockwise_idi, padding=self.tmp_blockwise_idi.voxel_size
         )
         self.get_connected_component_information()
         self.get_final_connected_components()

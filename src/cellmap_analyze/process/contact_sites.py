@@ -4,6 +4,7 @@ import numpy as np
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util import io_util
 from cellmap_analyze.util.dask_util import create_blocks, guesstimate_npartitions
+from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.io_util import print_with_datetime, split_dataset_path
 from skimage import measure
 from skimage.segmentation import find_boundaries
@@ -14,7 +15,7 @@ import logging
 from cellmap_analyze.process.connected_components import ConnectedComponents
 from scipy.spatial import KDTree
 import dask.bag as db
-from cellmap_analyze.util.tmp_analysis_util import trim_array
+from cellmap_analyze.util.measure_util import trim_array
 from cellmap_analyze.util.io_util import open_ds_tensorstore, to_ndarray_tensorstore
 from funlib.persistence import open_ds
 from cellmap_analyze.util.zarr_util import (
@@ -41,24 +42,16 @@ class ContactSites:
         num_workers=10,
         roi=None,
     ):
-        self.organelle_1_tensorstore = open_ds_tensorstore(organelle_1_path)
-        self.organelle_2_tensorstore = open_ds_tensorstore(organelle_2_path)
-        self.organelle_1_ds = open_ds(*split_dataset_path(organelle_1_path))
-        self.organelle_2_ds = open_ds(*split_dataset_path(organelle_2_path))
-
-        self.rescale_factor = (
-            self.organelle_1_ds.voxel_size[0] / self.organelle_2_ds.voxel_size[0]
+        self.organelle_1_idi = ImageDataInterface(organelle_1_path)
+        self.organelle_2_idi = ImageDataInterface(organelle_2_path)
+        output_voxel_size = min(
+            self.organelle_1_idi.voxel_size, self.organelle_2_idi.voxel_size
         )
-
-        if self.organelle_1_ds.voxel_size != self.organelle_2_ds.voxel_size:
-            raise ValueError("Voxel sizes of organelles do not match")
-        self.voxel_size = self.organelle_1_ds.voxel_size
-
-        if self.organelle_1_ds.roi != self.organelle_2_ds.roi:
-            raise ValueError("ROIs of organelles do not match")
-
+        self.organelle_2_idi.output_voxel_size = output_voxel_size
+        self.organelle_1_idi.output_voxel_size = output_voxel_size
+        self.voxel_size = output_voxel_size
         self.contact_distance_voxels = (
-            contact_distance_nm / self.organelle_1_ds.voxel_size[0]
+            contact_distance_nm / self.organelle_1_idi.voxel_size[0]
         )
 
         self.padding_voxels = int(np.ceil(self.contact_distance_voxels) + 1)
@@ -66,7 +59,7 @@ class ContactSites:
 
         self.roi = roi
         if self.roi is None:
-            self.roi = self.organelle_1_ds.roi
+            self.roi = self.organelle_1_idi.roi
 
         self.output_path = output_path
         self.output_path_blockwise = output_path + "_blockwise"
@@ -81,12 +74,17 @@ class ContactSites:
         self.voxel_volume = np.prod(self.voxel_size)
         self.voxel_face_area = self.voxel_size[1] * self.voxel_size[2]
 
-        self.contact_sites_blockwise_ds = create_multiscale_dataset(
+        create_multiscale_dataset(
             self.output_path_blockwise,
             dtype=np.uint64,
             voxel_size=self.voxel_size,
             total_roi=self.roi,
-            write_size=self.organelle_1_ds.chunk_shape * self.organelle_1_ds.voxel_size,
+            write_size=self.organelle_1_idi.chunk_shape
+            * self.organelle_1_idi.voxel_size,
+        )
+
+        self.contact_sites_blockwise_idi = ImageDataInterface(
+            self.output_path_blockwise + "/s0", mode="r+"
         )
 
         self.compute_args = {}
@@ -177,37 +175,25 @@ class ContactSites:
     @staticmethod
     def calculate_block_contact_sites(
         block: dask_util.DaskBlock,
-        organelle_1_ds,
-        organelle_2_ds,
-        contact_sites_blockwise_ds,
-        organelle_1_tensorstore,
-        organelle_2_tensorstore,
-        voxel_size,
+        organelle_1_idi: ImageDataInterface,
+        organelle_2_idi: ImageDataInterface,
+        contact_sites_blockwise_idi: ImageDataInterface,
         contact_distance_voxels,
         padding_voxels,
     ):
-        organelle_1 = to_ndarray_tensorstore(
-            organelle_1_tensorstore,
-            block.read_roi,
-            voxel_size,
-            organelle_1_ds.roi.offset,
-        )
-        organelle_2 = to_ndarray_tensorstore(
-            organelle_2_tensorstore,
-            block.read_roi,
-            voxel_size,
-            organelle_2_ds.roi.offset,
-        )
+        organelle_1 = organelle_1_idi.to_ndarray_ts(block.read_roi)
+        organelle_2 = organelle_2_idi.to_ndarray_ts(block.read_roi)
         global_id_offset = ConnectedComponents.convert_position_to_global_id(
-            block.write_roi.get_begin() / voxel_size,
-            organelle_1_ds.roi.shape / voxel_size,
+            block.write_roi.begin / contact_sites_blockwise_idi.voxel_size,
+            contact_sites_blockwise_idi.roi.shape
+            / contact_sites_blockwise_idi.voxel_size,
         )
         contact_sites = ContactSites.get_ndarray_contact_sites(
             organelle_1, organelle_2, contact_distance_voxels
         )
 
         contact_sites[contact_sites > 0] += global_id_offset
-        contact_sites_blockwise_ds[block.write_roi] = trim_array(
+        contact_sites_blockwise_idi.ds[block.write_roi] = trim_array(
             contact_sites, padding_voxels
         )
 
@@ -218,12 +204,9 @@ class ContactSites:
             npartitions=guesstimate_npartitions(self.blocks, self.num_workers),
         ).map(
             ContactSites.calculate_block_contact_sites,
-            self.organelle_1_ds,
-            self.organelle_2_ds,
-            self.contact_sites_blockwise_ds,
-            self.organelle_1_tensorstore,
-            self.organelle_2_tensorstore,
-            self.voxel_size,
+            self.organelle_1_idi,
+            self.organelle_2_idi,
+            self.contact_sites_blockwise_idi,
             self.contact_distance_voxels,
             self.padding_voxels,
         )
@@ -239,8 +222,8 @@ class ContactSites:
     def get_contact_sites(self):
         self.blocks = create_blocks(
             self.roi,
-            self.organelle_1_ds,
-            padding=self.organelle_1_ds.voxel_size * self.padding_voxels,
+            self.organelle_1_idi,
+            padding=self.organelle_1_idi.voxel_size * self.padding_voxels,
         )
         self.calculate_contact_sites_blockwise()
 
