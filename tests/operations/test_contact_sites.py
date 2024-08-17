@@ -2,7 +2,10 @@ import pytest
 from cellmap_analyze.process.contact_sites import ContactSites
 import numpy as np
 
-from cellmap_analyze.util.io_util import open_ds_tensorstore, to_ndarray_tensorstore
+from cellmap_analyze.util.image_data_interface import (
+    open_ds_tensorstore,
+    to_ndarray_tensorstore,
+)
 
 
 def test_contact_site_whole_1(segmentation_1, segmentation_2, contact_sites_distance_1):
