@@ -83,7 +83,7 @@ def write_multiscales_metadata(
 
 
 def create_multiscale_dataset(
-    output_path, dtype, voxel_size, total_roi, write_size, scale=0
+    output_path, dtype, voxel_size, total_roi, write_size, scale=0, mode="w"
 ):
 
     filename, dataset = split_dataset_path(output_path, scale=scale)
@@ -100,7 +100,7 @@ def create_multiscale_dataset(
         write_size=write_size,
         force_exact_write_size=True,
         multiscales_metadata=True,
-        delete=True,
+        delete=mode == "w",
     )
 
     write_multiscales_metadata(

@@ -117,6 +117,7 @@ def to_ndarray_tensorstore(
 
 class ImageDataInterface:
     def __init__(self, dataset_path, mode="r"):
+        self.path = dataset_path
         filename, dataset = split_dataset_path(dataset_path)
         self.ds = open_ds(filename, dataset, mode=mode)
         self.ts = open_ds_tensorstore(dataset_path)
