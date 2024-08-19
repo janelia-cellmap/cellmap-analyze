@@ -5,6 +5,8 @@ from dask.distributed import Client
 import getpass
 import tempfile
 import shutil
+
+from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from .io_util import Timing_Messager, print_with_datetime
 from datetime import datetime
 import yaml
@@ -35,64 +37,115 @@ class DaskBlock:
     relabeling_dict: dict
 
 
-def create_blocks(
-    roi: Roi, ds: Array, block_size=None, padding=None, read_beyond_roi=True
+def get_global_block_id(
+    roi_shape_voxels: Coordinate, block_roi: Roi, voxel_size: Coordinate
 ):
-    def get_global_block_id(
-        roi_shape_voxels: Coordinate, block_roi: Roi, voxel_size: Coordinate
-    ):
-        block_start_voxels = block_roi.get_begin() / voxel_size
-        id = (
-            roi_shape_voxels[0] * roi_shape_voxels[1] * block_start_voxels[2]
-            + roi_shape_voxels[0] * block_start_voxels[1]
-            + block_start_voxels[0]
-            + 1
-        )
-        return id
+    block_start_voxels = block_roi.get_begin() / voxel_size
+    id = (
+        roi_shape_voxels[0] * roi_shape_voxels[1] * block_start_voxels[2]
+        + roi_shape_voxels[0] * block_start_voxels[1]
+        + block_start_voxels[0]
+        + 1
+    )
+    return id
 
-    with Timing_Messager("Generating blocks", logger):
-        # roi = roi.snap_to_grid(ds.chunk_shape * ds.voxel_size)
-        if not block_size:
-            block_size = ds.chunk_shape * ds.voxel_size
 
-        num_expected_blocks = int(
-            np.prod(
-                [np.ceil(roi.shape[i] / block_size[i]) for i in range(len(block_size))]
-            )
+def create_block(
+    roi, block_begin, block_size, voxel_size, padding, index, read_beyond_roi=True
+):
+    roi_shape_voxels = roi.shape / voxel_size
+    write_roi = Roi(block_begin, block_size).intersect(roi)
+    block_id = get_global_block_id(roi_shape_voxels, write_roi, voxel_size)
+    read_roi = write_roi
+    if padding:
+        read_roi = write_roi.grow(padding, padding)
+
+    if not read_beyond_roi:
+        read_roi = read_roi.intersect(roi)
+
+    coords = (write_roi.begin - roi.begin) / block_size
+
+    return DaskBlock(
+        index,
+        block_id,
+        coords,
+        read_roi,
+        write_roi,
+        {},
+    )
+
+
+def create_block_from_index(
+    idi: ImageDataInterface,
+    index,
+    padding=0,
+    roi=None,
+    block_size=None,
+    read_beyond_roi=True,
+):
+    if not roi:
+        roi = idi.roi
+
+    if not block_size:
+        block_size = idi.chunk_shape * idi.voxel_size
+    roi_start = roi.get_begin()
+    roi_end = roi.get_end()
+    nchunks = np.ceil(np.array(roi_end - roi_start) / block_size).astype(int)
+    block_begin = np.array(np.unravel_index(index, nchunks)) * block_size + roi_start
+    return create_block(
+        roi,
+        block_begin,
+        block_size,
+        idi.voxel_size,
+        padding,
+        index,
+        read_beyond_roi,
+    )
+
+
+def get_num_blocks(idi, block_size=None):
+    if not block_size:
+        block_size = idi.chunk_shape * idi.voxel_size
+    num_blocks = int(
+        np.prod(
+            [np.ceil(idi.roi.shape[i] / block_size[i]) for i in range(len(block_size))]
         )
-        roi_shape_voxels = roi.shape / ds.voxel_size
+    )
+    return num_blocks
+
+
+def create_blocks(
+    idi: ImageDataInterface,
+    roi: Roi = None,
+    block_size=None,
+    padding=0,
+    read_beyond_roi=True,
+):
+    if not roi:
+        roi = idi.roi
+    if not block_size:
+        block_size = idi.chunk_shape * idi.voxel_size
+
+    # roi = roi.snap_to_grid(ds.chunk_shape * ds.voxel_size)
+    num_blocks = get_num_blocks(idi)
+
+    with Timing_Messager(f"Generating {num_blocks} blocks", logger):
 
         # create an empty list with num_expected_blocks elements
-        block_rois = [None] * num_expected_blocks
+        block_rois = [None] * num_blocks
         index = 0
-        for z in range(roi.get_begin()[2], roi.get_end()[2], block_size[2]):
-            for y in range(roi.get_begin()[1], roi.get_end()[1], block_size[1]):
-                for x in range(roi.get_begin()[0], roi.get_end()[0], block_size[0]):
-                    write_roi = Roi((x, y, z), block_size).intersect(roi)
-                    block_id = get_global_block_id(
-                        roi_shape_voxels, write_roi, ds.voxel_size
-                    )
-
-                    if padding:
-                        read_roi = write_roi.grow(padding, padding)
-
-                    if not read_beyond_roi:
-                        read_roi = read_roi.intersect(roi)
-
-                    coords = (write_roi.begin - roi.begin) / block_size
-
-                    block_rois[index] = DaskBlock(
-                        index,
-                        block_id,
-                        coords,
-                        read_roi,
-                        write_roi,
-                        {},
+        roi_start = roi.get_begin()
+        roi_end = roi.get_end()
+        for z in range(roi_start[0], roi_end[0], block_size[0]):
+            for y in range(roi_start[1], roi_end[1], block_size[1]):
+                for x in range(roi_start[2], roi_end[2], block_size[2]):
+                    block_rois[index] = create_block_from_index(
+                        idi, index, padding, roi, block_size, read_beyond_roi
                     )
                     index += 1
 
-        if index < len(block_rois):
-            block_rois[index:] = []
+        # if index < len(block_rois):
+        #     block_rois[index:] = []
     return block_rois
 
 

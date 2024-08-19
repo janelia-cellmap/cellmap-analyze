@@ -1,3 +1,4 @@
+import pickle
 from funlib.persistence import Array, open_ds
 from funlib.geometry import Roi
 import numpy as np
@@ -5,6 +6,7 @@ from cellmap_analyze.util import dask_util
 from cellmap_analyze.util import io_util
 from cellmap_analyze.util.dask_util import (
     DaskBlock,
+    create_block_from_index,
     create_blocks,
     guesstimate_npartitions,
 )
@@ -44,6 +46,7 @@ class ConnectedComponents:
         self.tmp_blockwise_ds_path = tmp_blockwise_ds_path
         self.tmp_blockwise_idi = ImageDataInterface(self.tmp_blockwise_ds_path)
         self.output_ds_path = output_ds_path
+        self.tmp_block_info_path = f"{self.output_ds_path}_tmp_relabeling_dicts"
 
         if roi is None:
             self.roi = self.tmp_blockwise_idi.roi
@@ -123,8 +126,11 @@ class ConnectedComponents:
 
     @staticmethod
     def get_connected_component_information_blockwise(
-        block, tmp_blockwise_idi: ImageDataInterface, connectivity
+        block_index, tmp_blockwise_idi: ImageDataInterface, connectivity
     ):
+        block = create_block_from_index(
+            tmp_blockwise_idi, block_index, padding=tmp_blockwise_idi.voxel_size
+        )
         data = tmp_blockwise_idi.to_ndarray_ts(
             block.read_roi,
         )
@@ -173,10 +179,12 @@ class ConnectedComponents:
         return blocks, id_to_volume_dict, touching_ids
 
     def get_connected_component_information(self):
+        num_blocks = dask_util.get_num_blocks(self.tmp_blockwise_idi)
+        block_indexes = list(range(num_blocks))
         b = (
             db.from_sequence(
-                self.blocks,
-                npartitions=guesstimate_npartitions(self.blocks, self.num_workers),
+                block_indexes,
+                npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
             )
             .map(
                 ConnectedComponents.get_connected_component_information_blockwise,
@@ -197,8 +205,9 @@ class ConnectedComponents:
                 blocks_with_dict, self.id_to_volume_dict, self.touching_ids = b.compute(
                     **self.compute_args
                 )
-                for block in blocks_with_dict:
-                    self.blocks[block.index] = block
+        self.blocks = [None] * num_blocks
+        for block in blocks_with_dict:
+            self.blocks[block.index] = block
 
     def get_final_connected_components(self):
         with io_util.Timing_Messager("Finding connected components", logger):
@@ -232,16 +241,29 @@ class ConnectedComponents:
                     id: relabeling_dict.get(id, 0)
                     for id in block.relabeling_dict.keys()
                 }
-
             del relabeling_dict
+
+        with io_util.Timing_Messager("Writing out blocks", logger):
+            for block in self.blocks:
+                block_coords_string = "/".join([str(c) for c in block.coords])
+                output_path = f"{self.tmp_blockwise_idi.path}/{block_coords_string}.pkl"
+                # write relabeling dict to pkl file
+                with open(f"{output_path}", "wb") as handle:
+                    pickle.dump(block, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     @staticmethod
     def relabel_block(
-        block: DaskBlock,
+        block_coords,
         tmp_blockwise_idi: ImageDataInterface,
         new_dtype,
         output_idi: ImageDataInterface,
     ):
+        # read block from pickle file
+        block_coords_string = "/".join([str(c) for c in block_coords])
+        with open(
+            f"{tmp_blockwise_idi.path}/{block_coords_string}.pkl", "rb"
+        ) as handle:
+            block = pickle.load(handle)
         # print_with_datetime(block.relabeling_dict, logger)
         data = tmp_blockwise_idi.to_ndarray_ts(
             block.write_roi,
@@ -267,8 +289,9 @@ class ConnectedComponents:
         )
         self.output_idi = ImageDataInterface(self.output_ds_path + "/s0", mode="r+")
 
+        block_coords = [block.coords for block in self.blocks]
         b = db.from_sequence(
-            self.blocks,
+            block_coords,
             npartitions=guesstimate_npartitions(self.blocks, self.num_workers),
         ).map(
             ConnectedComponents.relabel_block,
@@ -289,6 +312,9 @@ class ConnectedComponents:
             os.path.isfile(delete_name) or os.listdir(delete_name) == []
         ):
             os.system(f"rm -rf {delete_name}")
+            if len(block_coords) == 3:
+                # if it is the highest level then we also remove the pkl file
+                os.system(f"rm -rf {delete_name}.pkl")
 
     def delete_tmp_dataset(self):
         for depth in range(3, 0, -1):
@@ -310,11 +336,9 @@ class ConnectedComponents:
         os.system(
             f"rm -rf {base_path}/{get_name_from_path(self.tmp_blockwise_ds_path)}"
         )
+        os.system(f"rm -rf {self.tmp_block_info_path}")
 
     def merge_connected_components_across_blocks(self):
-        self.blocks = create_blocks(
-            self.roi, self.tmp_blockwise_idi, padding=self.tmp_blockwise_idi.voxel_size
-        )
         self.get_connected_component_information()
         self.get_final_connected_components()
         self.relabel_dataset()
