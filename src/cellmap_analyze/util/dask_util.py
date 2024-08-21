@@ -6,6 +6,8 @@ import getpass
 import tempfile
 import shutil
 
+from distributed import progress
+
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from .io_util import Timing_Messager, print_with_datetime
 from datetime import datetime
@@ -155,6 +157,21 @@ def guesstimate_npartitions(sequence, num_workers, scaling=4):
     return min(len(sequence), num_workers * scaling)
 
 
+def dask_computer(b, num_workers, **kwargs):
+    if num_workers == 1:
+        return b.compute(**kwargs)
+    if num_workers > 1:
+        b = b.persist(**kwargs)  # start computation in the background
+        if num_workers <= 100:
+            interval = "3s"
+        elif num_workers <= 500:
+            interval = "30s"
+        else:
+            interval = "300s"
+        progress(b, interval=interval)  # watch progress
+        return b.compute(**kwargs)
+
+
 def set_local_directory(cluster_type):
     """Sets local directory used for dask outputs
 
@@ -197,71 +214,77 @@ def set_local_directory(cluster_type):
 
 
 @contextmanager
-def start_dask(num_workers, msg, logger):
+def start_dask(num_workers=1, msg="processing", logger=None, config=None):
     """Context manager used for starting/shutting down dask
 
     Args:
         num_workers (`int`): Number of dask workers
         msg (`str`): Message for timer
         logger: The logger being used
+        config: Overload configuration for dask
 
     Yields:
         client: Dask client
     """
-    if num_workers == 1:
-        # then dont need to startup dask
-        with nullcontext():
-            yield
+    job_script_prologue = [
+        "export NUMEXPR_MAX_THREADS=1",
+        "export MKL_NUM_THREADS=1",
+        "export NUM_MKL_THREADS=1",
+        "export OPENBLAS_NUM_THREADS=1",
+        "export OPENMP_NUM_THREADS=1",
+        "export OMP_NUM_THREADS=1",
+    ]
 
-    else:
+    if not config:
+        if num_workers == 1:
+            # then dont need to startup dask
+            with nullcontext():
+                yield
+                return
+
         # Update dask
         with open("dask-config.yaml") as f:
             config = yaml.load(f, Loader=SafeLoader)
-            dask.config.update(dask.config.config, config)
 
-        cluster_type = next(iter(dask.config.config["jobqueue"]))
-        set_local_directory(cluster_type)
+    dask.config.update(dask.config.config, config)
+    cluster_type = next(iter(dask.config.config["jobqueue"]))
+    set_local_directory(cluster_type)
 
-        if cluster_type == "local":
-            from dask.distributed import LocalCluster
+    if cluster_type == "local":
+        from dask.distributed import LocalCluster
 
-            cluster = LocalCluster(n_workers=num_workers, threads_per_worker=1)
-        else:
-            if cluster_type == "lsf":
-                from dask_jobqueue import LSFCluster
+        cluster = LocalCluster(
+            n_workers=num_workers,
+            threads_per_worker=1,
+            job_script_prologue=job_script_prologue,
+        )
+    else:
+        if cluster_type == "lsf":
+            from dask_jobqueue import LSFCluster
 
-                cluster = LSFCluster(
-                    job_script_prologue=[
-                        "export NUMEXPR_MAX_THREADS=1",
-                        "export MKL_NUM_THREADS=1",
-                        "export NUM_MKL_THREADS=1",
-                        "export OPENBLAS_NUM_THREADS=1",
-                        "export OPENMP_NUM_THREADS=1",
-                        "export OMP_NUM_THREADS=1",
-                    ]
-                )
-            elif cluster_type == "slurm":
-                from dask_jobqueue import SLURMCluster
+            cluster = LSFCluster(job_script_prologue=job_script_prologue)
+        elif cluster_type == "slurm":
+            from dask_jobqueue import SLURMCluster
 
-                cluster = SLURMCluster()
-            elif cluster_type == "sge":
-                from dask_jobqueue import SGECluster
+            cluster = SLURMCluster()
+        elif cluster_type == "sge":
+            from dask_jobqueue import SGECluster
 
-                cluster = SGECluster()
-            cluster.scale(num_workers)
-        try:
-            with Timing_Messager(
-                f"Starting {cluster_type} dask cluster for {msg} with {num_workers} workers",
-                logger,
-            ):
-                client = Client(cluster)
-            print_with_datetime(
-                f"Check {client.cluster.dashboard_link} for {msg} status.", logger
-            )
-            yield client
-        finally:
-            client.shutdown()
-            client.close()
+            cluster = SGECluster()
+        cluster.scale(num_workers)
+    try:
+        with Timing_Messager(
+            f"Starting {cluster_type} dask cluster for {msg} with {num_workers} workers",
+            logger,
+        ):
+            client = Client(cluster)
+        print_with_datetime(
+            f"Check {client.cluster.dashboard_link} for {msg} status.", logger
+        )
+        yield client
+    finally:
+        client.shutdown()
+        client.close()
 
 
 def setup_execution_directory(config_path, logger):
