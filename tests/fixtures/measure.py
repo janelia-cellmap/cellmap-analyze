@@ -1,14 +1,12 @@
 import pytest
 from cellmap_analyze.analyze.measure import Measure
 from cellmap_analyze.util.information_holders import ObjectInformation
-from cellmap_analyze.util.measure_util import get_object_information
 
 import numpy as np
 
-from cellmap_analyze.util.io_util import open_ds_tensorstore, to_ndarray_tensorstore
-
 
 def simple_surface_area(data, voxel_surface_area):
+    data = np.pad(data, 1)
     s = data.shape
     sa = 0
     for i in range(1, s[0] - 1):

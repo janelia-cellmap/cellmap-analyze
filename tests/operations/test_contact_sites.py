@@ -9,17 +9,23 @@ from cellmap_analyze.util.image_data_interface import (
 
 
 def test_contact_site_whole_1(segmentation_1, segmentation_2, contact_sites_distance_1):
-    cs = ContactSites.get_ndarray_contact_sites(segmentation_1, segmentation_2, 1)
+    cs = ContactSites.get_ndarray_contact_sites(
+        segmentation_1, segmentation_2, 1, zero_pad=True
+    )
     assert np.array_equal(cs, contact_sites_distance_1)
 
 
 def test_contact_site_whole_2(segmentation_1, segmentation_2, contact_sites_distance_2):
-    cs = ContactSites.get_ndarray_contact_sites(segmentation_1, segmentation_2, 2)
+    cs = ContactSites.get_ndarray_contact_sites(
+        segmentation_1, segmentation_2, 2, zero_pad=True
+    )
     assert np.array_equal(cs, contact_sites_distance_2)
 
 
 def test_contact_site_whole_3(segmentation_1, segmentation_2, contact_sites_distance_3):
-    cs = ContactSites.get_ndarray_contact_sites(segmentation_1, segmentation_2, 3)
+    cs = ContactSites.get_ndarray_contact_sites(
+        segmentation_1, segmentation_2, 3, zero_pad=True
+    )
     assert np.array_equal(cs, contact_sites_distance_3)
 
 
@@ -43,7 +49,7 @@ def test_contact_site_blocks(tmp_zarr, voxel_size, contact_distance):
 
     test_path = f"{tmp_zarr}/test_contact_sites_distance_{contact_distance}/s0"
     test_data = to_ndarray_tensorstore(open_ds_tensorstore(test_path))
-
+    print(np.sum(test_data != ground_truth))
     assert np.array_equal(
         test_data,
         ground_truth,

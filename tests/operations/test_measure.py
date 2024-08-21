@@ -7,6 +7,7 @@ import numpy as np
 
 
 def simple_surface_area(data, voxel_surface_area):
+    data = np.pad(data, 1)
     s = data.shape
     sa = 0
     for i in range(1, s[0] - 1):
@@ -25,6 +26,8 @@ def simple_surface_area(data, voxel_surface_area):
 
 
 def simple_contacting_surface_area(contact_site, segmentation, voxel_surface_area):
+    segmentation = np.pad(segmentation, 1)
+    contact_site = np.pad(contact_site, 1)
     s = contact_site.shape
     sa = 0
     for i in range(1, s[0] - 1):
