@@ -1687,21 +1687,32 @@ struct __pyx_opt_args_7cpython_11contextvars_get_value_no_default {
   PyObject *default_value;
 };
 struct __pyx_opt_args_11bresenham3D_append_if_not_masked;
+struct __pyx_opt_args_11bresenham3D_bresenham3DWithMaskSingleInline;
 struct __pyx_defaults;
 typedef struct __pyx_defaults __pyx_defaults;
 struct __pyx_defaults1;
 typedef struct __pyx_defaults1 __pyx_defaults1;
-struct __pyx_defaults2;
-typedef struct __pyx_defaults2 __pyx_defaults2;
 
 /* "bresenham3D.pyx":7
  * from typing import List, Tuple
  * 
- * cdef inline bint append_if_not_masked(int x, int y, int z, list points, unsigned char[:,:,:] mask=None):             # <<<<<<<<<<<<<<
+ * cdef inline bint append_if_not_masked(int x, int y, int z, int idx, list points, unsigned char[:,:,:] mask=None):             # <<<<<<<<<<<<<<
  *     if mask is not None and mask[x,y,z]:
  *         return False
  */
 struct __pyx_opt_args_11bresenham3D_append_if_not_masked {
+  int __pyx_n;
+  __Pyx_memviewslice mask;
+};
+
+/* "bresenham3D.pyx":93
+ *     return idx
+ * 
+ * cdef inline int bresenham3DWithMaskSingleInline(             # <<<<<<<<<<<<<<
+ *     int x1, int y1, int z1, int x2, int y2, int z2,
+ *     list points,
+ */
+struct __pyx_opt_args_11bresenham3D_bresenham3DWithMaskSingleInline {
   int __pyx_n;
   __Pyx_memviewslice mask;
 };
@@ -1710,9 +1721,6 @@ struct __pyx_defaults {
 };
 struct __pyx_defaults1 {
   __Pyx_memviewslice __pyx_arg_mask;
-};
-struct __pyx_defaults2 {
-  PyObject *__pyx_arg__fused_sigindex;
 };
 
 /* "View.MemoryView":114
@@ -2432,123 +2440,14 @@ static CYTHON_INLINE int __Pyx_HasAttr(PyObject *, PyObject *);
 /* BufferIndexError.proto */
 static void __Pyx_RaiseBufferIndexError(int axis);
 
-/* ListAppend.proto */
-#if CYTHON_USE_PYLIST_INTERNALS && CYTHON_ASSUME_SAFE_MACROS
-static CYTHON_INLINE int __Pyx_PyList_Append(PyObject* list, PyObject* x) {
-    PyListObject* L = (PyListObject*) list;
-    Py_ssize_t len = Py_SIZE(list);
-    if (likely(L->allocated > len) & likely(len > (L->allocated >> 1))) {
-        Py_INCREF(x);
-        #if CYTHON_COMPILING_IN_CPYTHON && PY_VERSION_HEX >= 0x030d0000
-        L->ob_item[len] = x;
-        #else
-        PyList_SET_ITEM(list, len, x);
-        #endif
-        __Pyx_SET_SIZE(list, len + 1);
-        return 0;
-    }
-    return PyList_Append(list, x);
-}
+/* SliceTupleAndList.proto */
+#if CYTHON_COMPILING_IN_CPYTHON
+static CYTHON_INLINE PyObject* __Pyx_PyList_GetSlice(PyObject* src, Py_ssize_t start, Py_ssize_t stop);
+static CYTHON_INLINE PyObject* __Pyx_PyTuple_GetSlice(PyObject* src, Py_ssize_t start, Py_ssize_t stop);
 #else
-#define __Pyx_PyList_Append(L,x) PyList_Append(L,x)
+#define __Pyx_PyList_GetSlice(seq, start, stop)   PySequence_GetSlice(seq, start, stop)
+#define __Pyx_PyTuple_GetSlice(seq, start, stop)  PySequence_GetSlice(seq, start, stop)
 #endif
-
-/* IterFinish.proto */
-static CYTHON_INLINE int __Pyx_IterFinish(void);
-
-/* UnpackItemEndCheck.proto */
-static int __Pyx_IternextUnpackEndCheck(PyObject *retval, Py_ssize_t expected);
-
-/* PyDictContains.proto */
-static CYTHON_INLINE int __Pyx_PyDict_ContainsTF(PyObject* item, PyObject* dict, int eq) {
-    int result = PyDict_Contains(dict, item);
-    return unlikely(result < 0) ? result : (result == (eq == Py_EQ));
-}
-
-/* DictGetItem.proto */
-#if PY_MAJOR_VERSION >= 3 && !CYTHON_COMPILING_IN_PYPY
-static PyObject *__Pyx_PyDict_GetItem(PyObject *d, PyObject* key);
-#define __Pyx_PyObject_Dict_GetItem(obj, name)\
-    (likely(PyDict_CheckExact(obj)) ?\
-     __Pyx_PyDict_GetItem(obj, name) : PyObject_GetItem(obj, name))
-#else
-#define __Pyx_PyDict_GetItem(d, key) PyObject_GetItem(d, key)
-#define __Pyx_PyObject_Dict_GetItem(obj, name)  PyObject_GetItem(obj, name)
-#endif
-
-/* UnicodeAsUCS4.proto */
-static CYTHON_INLINE Py_UCS4 __Pyx_PyUnicode_AsPy_UCS4(PyObject*);
-
-/* object_ord.proto */
-#if PY_MAJOR_VERSION >= 3
-#define __Pyx_PyObject_Ord(c)\
-    (likely(PyUnicode_Check(c)) ? (long)__Pyx_PyUnicode_AsPy_UCS4(c) : __Pyx__PyObject_Ord(c))
-#else
-#define __Pyx_PyObject_Ord(c) __Pyx__PyObject_Ord(c)
-#endif
-static long __Pyx__PyObject_Ord(PyObject* c);
-
-/* memoryview_get_from_buffer.proto */
-#if !CYTHON_COMPILING_IN_LIMITED_API || CYTHON_LIMITED_API >= 0x030b0000
-#define __Pyx_PyMemoryView_Get_itemsize(o) PyMemoryView_GET_BUFFER(o)->itemsize
-#else
- // can't get format like this unfortunately. It's unicode via getattr
-static Py_ssize_t __Pyx_PyMemoryView_Get_itemsize(PyObject *obj);
-#endif
-
-/* memoryview_get_from_buffer.proto */
-#if !CYTHON_COMPILING_IN_LIMITED_API || CYTHON_LIMITED_API >= 0x030b0000
-#define __Pyx_PyMemoryView_Get_ndim(o) PyMemoryView_GET_BUFFER(o)->ndim
-#else
- // can't get format like this unfortunately. It's unicode via getattr
-static int __Pyx_PyMemoryView_Get_ndim(PyObject *obj);
-#endif
-
-/* PyObjectCallNoArg.proto */
-static CYTHON_INLINE PyObject* __Pyx_PyObject_CallNoArg(PyObject *func);
-
-/* PyObjectGetMethod.proto */
-static int __Pyx_PyObject_GetMethod(PyObject *obj, PyObject *name, PyObject **method);
-
-/* PyObjectCallMethod0.proto */
-static PyObject* __Pyx_PyObject_CallMethod0(PyObject* obj, PyObject* method_name);
-
-/* UnpackTupleError.proto */
-static void __Pyx_UnpackTupleError(PyObject *, Py_ssize_t index);
-
-/* UnpackTuple2.proto */
-#define __Pyx_unpack_tuple2(tuple, value1, value2, is_tuple, has_known_size, decref_tuple)\
-    (likely(is_tuple || PyTuple_Check(tuple)) ?\
-        (likely(has_known_size || PyTuple_GET_SIZE(tuple) == 2) ?\
-            __Pyx_unpack_tuple2_exact(tuple, value1, value2, decref_tuple) :\
-            (__Pyx_UnpackTupleError(tuple, 2), -1)) :\
-        __Pyx_unpack_tuple2_generic(tuple, value1, value2, has_known_size, decref_tuple))
-static CYTHON_INLINE int __Pyx_unpack_tuple2_exact(
-    PyObject* tuple, PyObject** value1, PyObject** value2, int decref_tuple);
-static int __Pyx_unpack_tuple2_generic(
-    PyObject* tuple, PyObject** value1, PyObject** value2, int has_known_size, int decref_tuple);
-
-/* dict_iter.proto */
-static CYTHON_INLINE PyObject* __Pyx_dict_iterator(PyObject* dict, int is_dict, PyObject* method_name,
-                                                   Py_ssize_t* p_orig_length, int* p_is_dict);
-static CYTHON_INLINE int __Pyx_dict_iter_next(PyObject* dict_or_iter, Py_ssize_t orig_length, Py_ssize_t* ppos,
-                                              PyObject** pkey, PyObject** pvalue, PyObject** pitem, int is_dict);
-
-/* ListExtend.proto */
-static CYTHON_INLINE int __Pyx_PyList_Extend(PyObject* L, PyObject* v) {
-#if CYTHON_COMPILING_IN_CPYTHON && PY_VERSION_HEX < 0x030d0000
-    PyObject* none = _PyList_Extend((PyListObject*)L, v);
-    if (unlikely(!none))
-        return -1;
-    Py_DECREF(none);
-    return 0;
-#else
-    return PyList_SetSlice(L, PY_SSIZE_T_MAX, PY_SSIZE_T_MAX, v);
-#endif
-}
-
-/* py_dict_values.proto */
-static CYTHON_INLINE PyObject* __Pyx_PyDict_Values(PyObject* d);
 
 /* UnpackUnboundCMethod.proto */
 typedef struct {
@@ -2559,29 +2458,6 @@ typedef struct {
     int flag;
 } __Pyx_CachedCFunction;
 
-/* CallUnboundCMethod0.proto */
-static PyObject* __Pyx__CallUnboundCMethod0(__Pyx_CachedCFunction* cfunc, PyObject* self);
-#if CYTHON_COMPILING_IN_CPYTHON
-#define __Pyx_CallUnboundCMethod0(cfunc, self)\
-    (likely((cfunc)->func) ?\
-        (likely((cfunc)->flag == METH_NOARGS) ?  (*((cfunc)->func))(self, NULL) :\
-         (PY_VERSION_HEX >= 0x030600B1 && likely((cfunc)->flag == METH_FASTCALL) ?\
-            (PY_VERSION_HEX >= 0x030700A0 ?\
-                (*(__Pyx_PyCFunctionFast)(void*)(PyCFunction)(cfunc)->func)(self, &__pyx_empty_tuple, 0) :\
-                (*(__Pyx_PyCFunctionFastWithKeywords)(void*)(PyCFunction)(cfunc)->func)(self, &__pyx_empty_tuple, 0, NULL)) :\
-          (PY_VERSION_HEX >= 0x030700A0 && (cfunc)->flag == (METH_FASTCALL | METH_KEYWORDS) ?\
-            (*(__Pyx_PyCFunctionFastWithKeywords)(void*)(PyCFunction)(cfunc)->func)(self, &__pyx_empty_tuple, 0, NULL) :\
-            (likely((cfunc)->flag == (METH_VARARGS | METH_KEYWORDS)) ?  ((*(PyCFunctionWithKeywords)(void*)(PyCFunction)(cfunc)->func)(self, __pyx_empty_tuple, NULL)) :\
-               ((cfunc)->flag == METH_VARARGS ?  (*((cfunc)->func))(self, __pyx_empty_tuple) :\
-               __Pyx__CallUnboundCMethod0(cfunc, self)))))) :\
-        __Pyx__CallUnboundCMethod0(cfunc, self))
-#else
-#define __Pyx_CallUnboundCMethod0(cfunc, self)  __Pyx__CallUnboundCMethod0(cfunc, self)
-#endif
-
-/* dict_getitem_default.proto */
-static PyObject* __Pyx_PyDict_GetItemDefault(PyObject* d, PyObject* key, PyObject* default_value);
-
 /* CallUnboundCMethod1.proto */
 static PyObject* __Pyx__CallUnboundCMethod1(__Pyx_CachedCFunction* cfunc, PyObject* self, PyObject* arg);
 #if CYTHON_COMPILING_IN_CPYTHON
@@ -2590,13 +2466,19 @@ static CYTHON_INLINE PyObject* __Pyx_CallUnboundCMethod1(__Pyx_CachedCFunction* 
 #define __Pyx_CallUnboundCMethod1(cfunc, self, arg)  __Pyx__CallUnboundCMethod1(cfunc, self, arg)
 #endif
 
-/* CallUnboundCMethod2.proto */
-static PyObject* __Pyx__CallUnboundCMethod2(__Pyx_CachedCFunction* cfunc, PyObject* self, PyObject* arg1, PyObject* arg2);
-#if CYTHON_COMPILING_IN_CPYTHON && PY_VERSION_HEX >= 0x030600B1
-static CYTHON_INLINE PyObject *__Pyx_CallUnboundCMethod2(__Pyx_CachedCFunction *cfunc, PyObject *self, PyObject *arg1, PyObject *arg2);
-#else
-#define __Pyx_CallUnboundCMethod2(cfunc, self, arg1, arg2)  __Pyx__CallUnboundCMethod2(cfunc, self, arg1, arg2)
-#endif
+/* IterFinish.proto */
+static CYTHON_INLINE int __Pyx_IterFinish(void);
+
+/* set_iter.proto */
+static CYTHON_INLINE PyObject* __Pyx_set_iterator(PyObject* iterable, int is_set,
+                                                  Py_ssize_t* p_orig_length, int* p_source_is_set);
+static CYTHON_INLINE int __Pyx_set_iter_next(
+        PyObject* iter_obj, Py_ssize_t orig_length,
+        Py_ssize_t* ppos, PyObject **value,
+        int source_is_set);
+
+/* UnpackItemEndCheck.proto */
+static int __Pyx_IternextUnpackEndCheck(PyObject *retval, Py_ssize_t expected);
 
 /* PyObject_GenericGetAttrNoDict.proto */
 #if CYTHON_USE_TYPE_SLOTS && CYTHON_USE_PYTYPE_LOOKUP && PY_VERSION_HEX < 0x03070000
@@ -2619,6 +2501,15 @@ static PyObject* __Pyx_PyObject_GenericGetAttr(PyObject* obj, PyObject* attr_nam
 #if CYTHON_USE_TYPE_SPECS
 static int __Pyx_fix_up_extension_type_from_spec(PyType_Spec *spec, PyTypeObject *type);
 #endif
+
+/* PyObjectCallNoArg.proto */
+static CYTHON_INLINE PyObject* __Pyx_PyObject_CallNoArg(PyObject *func);
+
+/* PyObjectGetMethod.proto */
+static int __Pyx_PyObject_GetMethod(PyObject *obj, PyObject *name, PyObject **method);
+
+/* PyObjectCallMethod0.proto */
+static PyObject* __Pyx_PyObject_CallMethod0(PyObject* obj, PyObject* method_name);
 
 /* ValidateBasesTuple.proto */
 #if CYTHON_COMPILING_IN_CPYTHON || CYTHON_COMPILING_IN_LIMITED_API || CYTHON_USE_TYPE_SPECS
@@ -2803,20 +2694,6 @@ static PyObject *__Pyx_CyFunction_New(PyMethodDef *ml,
                                       PyObject *module, PyObject *globals,
                                       PyObject* code);
 
-/* FusedFunction.proto */
-typedef struct {
-    __pyx_CyFunctionObject func;
-    PyObject *__signatures__;
-    PyObject *self;
-} __pyx_FusedFunctionObject;
-static PyObject *__pyx_FusedFunction_New(PyMethodDef *ml, int flags,
-                                         PyObject *qualname, PyObject *closure,
-                                         PyObject *module, PyObject *globals,
-                                         PyObject *code);
-static int __pyx_FusedFunction_clear(__pyx_FusedFunctionObject *self);
-static int __pyx_FusedFunction_init(PyObject *module);
-#define __Pyx_FusedFunction_USED
-
 /* CLineInTraceback.proto */
 #ifdef CYTHON_CLINE_IN_TRACEBACK
 #define __Pyx_CLineForTraceback(tstate, c_line)  (((CYTHON_CLINE_IN_TRACEBACK)) ? c_line : 0)
@@ -2902,15 +2779,6 @@ static int __Pyx_ValidateAndInit_memviewslice(
 /* ObjectToMemviewSlice.proto */
 static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(PyObject *, int writable_flag);
 
-/* ObjectToMemviewSlice.proto */
-static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_short(PyObject *, int writable_flag);
-
-/* ObjectToMemviewSlice.proto */
-static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_int(PyObject *, int writable_flag);
-
-/* ObjectToMemviewSlice.proto */
-static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(PyObject *, int writable_flag);
-
 /* MemviewDtypeToObject.proto */
 static CYTHON_INLINE PyObject *__pyx_memview_get_unsigned_char(const char *itemp);
 static CYTHON_INLINE int __pyx_memview_set_unsigned_char(const char *itemp, PyObject *obj);
@@ -2918,12 +2786,8 @@ static CYTHON_INLINE int __pyx_memview_set_unsigned_char(const char *itemp, PyOb
 /* ObjectToMemviewSlice.proto */
 static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_dsds_int(PyObject *, int writable_flag);
 
-/* MemviewDtypeToObject.proto */
-static CYTHON_INLINE PyObject *__pyx_memview_get_int(const char *itemp);
-static CYTHON_INLINE int __pyx_memview_set_int(const char *itemp, PyObject *obj);
-
-/* PyUCS4InUnicode.proto */
-static CYTHON_INLINE int __Pyx_UnicodeContainsUCS4(PyObject* unicode, Py_UCS4 character);
+/* ObjectToMemviewSlice.proto */
+static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_dsds_long(PyObject *, int writable_flag);
 
 /* MemviewSliceCopyTemplate.proto */
 static __Pyx_memviewslice
@@ -2960,24 +2824,20 @@ static CYTHON_INLINE void __Pyx_XCLEAR_MEMVIEW(__Pyx_memviewslice *, int, int);
 /* CIntFromPy.proto */
 static CYTHON_INLINE int __Pyx_PyInt_As_int(PyObject *);
 
+/* CIntToPy.proto */
+static CYTHON_INLINE PyObject* __Pyx_PyInt_From_unsigned_char(unsigned char value);
+
 /* CIntFromPy.proto */
 static CYTHON_INLINE unsigned char __Pyx_PyInt_As_unsigned_char(PyObject *);
 
 /* CIntToPy.proto */
-static CYTHON_INLINE PyObject* __Pyx_PyInt_From_unsigned_char(unsigned char value);
-
-/* CIntToPy.proto */
 static CYTHON_INLINE PyObject* __Pyx_PyInt_From_int(int value);
-
-/* CIntToPy.proto */
-static CYTHON_INLINE PyObject* __Pyx_PyInt_From_long(long value);
-
-/* ImportNumPyArray.proto */
-static PyObject *__pyx_numpy_ndarray = NULL;
-static PyObject* __Pyx_ImportNumPyArrayTypeIfAvailable(void);
 
 /* CIntFromPy.proto */
 static CYTHON_INLINE long __Pyx_PyInt_As_long(PyObject *);
+
+/* CIntToPy.proto */
+static CYTHON_INLINE PyObject* __Pyx_PyInt_From_long(long value);
 
 /* CIntFromPy.proto */
 static CYTHON_INLINE char __Pyx_PyInt_As_char(PyObject *);
@@ -3115,7 +2975,8 @@ static PyObject *contiguous = 0;
 static PyObject *indirect_contiguous = 0;
 static int __pyx_memoryview_thread_locks_used;
 static PyThread_type_lock __pyx_memoryview_thread_locks[8];
-static CYTHON_INLINE int __pyx_f_11bresenham3D_append_if_not_masked(int, int, int, PyObject *, struct __pyx_opt_args_11bresenham3D_append_if_not_masked *__pyx_optional_args); /*proto*/
+static CYTHON_INLINE int __pyx_f_11bresenham3D_append_if_not_masked(int, int, int, int, PyObject *, struct __pyx_opt_args_11bresenham3D_append_if_not_masked *__pyx_optional_args); /*proto*/
+static CYTHON_INLINE int __pyx_f_11bresenham3D_bresenham3DWithMaskSingleInline(int, int, int, int, int, int, PyObject *, struct __pyx_opt_args_11bresenham3D_bresenham3DWithMaskSingleInline *__pyx_optional_args); /*proto*/
 static int __pyx_array_allocate_buffer(struct __pyx_array_obj *); /*proto*/
 static struct __pyx_array_obj *__pyx_array_new(PyObject *, Py_ssize_t, char *, char *, char *); /*proto*/
 static PyObject *__pyx_memoryview_new(PyObject *, int, int, __Pyx_TypeInfo *); /*proto*/
@@ -3152,10 +3013,8 @@ static void __pyx_memoryview__slice_assign_scalar(char *, Py_ssize_t *, Py_ssize
 static PyObject *__pyx_unpickle_Enum__set_state(struct __pyx_MemviewEnum_obj *, PyObject *); /*proto*/
 /* #### Code section: typeinfo ### */
 static __Pyx_TypeInfo __Pyx_TypeInfo_unsigned_char = { "unsigned char", NULL, sizeof(unsigned char), { 0 }, 0, __PYX_IS_UNSIGNED(unsigned char) ? 'U' : 'I', __PYX_IS_UNSIGNED(unsigned char), 0 };
-static __Pyx_TypeInfo __Pyx_TypeInfo_unsigned_short = { "unsigned short", NULL, sizeof(unsigned short), { 0 }, 0, __PYX_IS_UNSIGNED(unsigned short) ? 'U' : 'I', __PYX_IS_UNSIGNED(unsigned short), 0 };
-static __Pyx_TypeInfo __Pyx_TypeInfo_unsigned_int = { "unsigned int", NULL, sizeof(unsigned int), { 0 }, 0, __PYX_IS_UNSIGNED(unsigned int) ? 'U' : 'I', __PYX_IS_UNSIGNED(unsigned int), 0 };
-static __Pyx_TypeInfo __Pyx_TypeInfo_unsigned_PY_LONG_LONG = { "unsigned long long", NULL, sizeof(unsigned PY_LONG_LONG), { 0 }, 0, __PYX_IS_UNSIGNED(unsigned PY_LONG_LONG) ? 'U' : 'I', __PYX_IS_UNSIGNED(unsigned PY_LONG_LONG), 0 };
 static __Pyx_TypeInfo __Pyx_TypeInfo_int = { "int", NULL, sizeof(int), { 0 }, 0, __PYX_IS_UNSIGNED(int) ? 'U' : 'I', __PYX_IS_UNSIGNED(int), 0 };
+static __Pyx_TypeInfo __Pyx_TypeInfo_long = { "long", NULL, sizeof(long), { 0 }, 0, __PYX_IS_UNSIGNED(long) ? 'U' : 'I', __PYX_IS_UNSIGNED(long), 0 };
 /* #### Code section: before_global_var ### */
 #define __Pyx_MODULE_NAME "bresenham3D"
 extern int __pyx_module_is_main_bresenham3D;
@@ -3163,13 +3022,12 @@ int __pyx_module_is_main_bresenham3D = 0;
 
 /* Implementation of "bresenham3D" */
 /* #### Code section: global_var ### */
-static PyObject *__pyx_builtin_zip;
-static PyObject *__pyx_builtin_TypeError;
-static PyObject *__pyx_builtin_ValueError;
 static PyObject *__pyx_builtin_range;
-static PyObject *__pyx_builtin___import__;
-static PyObject *__pyx_builtin_MemoryError;
 static PyObject *__pyx_builtin_enumerate;
+static PyObject *__pyx_builtin___import__;
+static PyObject *__pyx_builtin_ValueError;
+static PyObject *__pyx_builtin_MemoryError;
+static PyObject *__pyx_builtin_TypeError;
 static PyObject *__pyx_builtin_AssertionError;
 static PyObject *__pyx_builtin_Ellipsis;
 static PyObject *__pyx_builtin_id;
@@ -3178,7 +3036,8 @@ static PyObject *__pyx_builtin_IndexError;
 static const char __pyx_k_[] = ": ";
 static const char __pyx_k_O[] = "O";
 static const char __pyx_k_c[] = "c";
-static const char __pyx_k_s[] = "s";
+static const char __pyx_k_i[] = "i";
+static const char __pyx_k_j[] = "j";
 static const char __pyx_k_x[] = "x";
 static const char __pyx_k_y[] = "y";
 static const char __pyx_k_z[] = "z";
@@ -3191,9 +3050,6 @@ static const char __pyx_k_dy[] = "dy";
 static const char __pyx_k_dz[] = "dz";
 static const char __pyx_k_gc[] = "gc";
 static const char __pyx_k_id[] = "id";
-static const char __pyx_k_nx[] = "nx";
-static const char __pyx_k_ny[] = "ny";
-static const char __pyx_k_nz[] = "nz";
 static const char __pyx_k_p1[] = "p1";
 static const char __pyx_k_p2[] = "p2";
 static const char __pyx_k_x1[] = "x1";
@@ -3205,28 +3061,25 @@ static const char __pyx_k_ys[] = "ys";
 static const char __pyx_k_z1[] = "z1";
 static const char __pyx_k_z2[] = "z2";
 static const char __pyx_k_zs[] = "zs";
-static const char __pyx_k__10[] = "()";
-static const char __pyx_k__11[] = "|";
-static const char __pyx_k__31[] = "?";
+static const char __pyx_k__26[] = "_";
+static const char __pyx_k__29[] = "?";
 static const char __pyx_k_abc[] = "abc";
 static const char __pyx_k_and[] = " and ";
-static const char __pyx_k_get[] = "get";
 static const char __pyx_k_got[] = " (got ";
+static const char __pyx_k_idx[] = "idx";
 static const char __pyx_k_new[] = "__new__";
 static const char __pyx_k_obj[] = "obj";
 static const char __pyx_k_sys[] = "sys";
-static const char __pyx_k_zip[] = "zip";
 static const char __pyx_k_List[] = "List";
-static const char __pyx_k_args[] = "args";
 static const char __pyx_k_base[] = "base";
 static const char __pyx_k_dict[] = "__dict__";
-static const char __pyx_k_kind[] = "kind";
 static const char __pyx_k_main[] = "__main__";
 static const char __pyx_k_mask[] = "mask";
 static const char __pyx_k_mode[] = "mode";
 static const char __pyx_k_name[] = "name";
 static const char __pyx_k_ndim[] = "ndim";
 static const char __pyx_k_pack[] = "pack";
+static const char __pyx_k_rows[] = "rows";
 static const char __pyx_k_size[] = "size";
 static const char __pyx_k_spec[] = "__spec__";
 static const char __pyx_k_step[] = "step";
@@ -3236,37 +3089,31 @@ static const char __pyx_k_ASCII[] = "ASCII";
 static const char __pyx_k_Tuple[] = "Tuple";
 static const char __pyx_k_class[] = "__class__";
 static const char __pyx_k_count[] = "count";
-static const char __pyx_k_dtype[] = "dtype";
 static const char __pyx_k_error[] = "error";
 static const char __pyx_k_flags[] = "flags";
 static const char __pyx_k_index[] = "index";
-static const char __pyx_k_numpy[] = "numpy";
+static const char __pyx_k_point[] = "point";
 static const char __pyx_k_range[] = "range";
 static const char __pyx_k_shape[] = "shape";
-static const char __pyx_k_split[] = "split";
 static const char __pyx_k_start[] = "start";
-static const char __pyx_k_strip[] = "strip";
 static const char __pyx_k_enable[] = "enable";
 static const char __pyx_k_encode[] = "encode";
 static const char __pyx_k_format[] = "format";
 static const char __pyx_k_import[] = "__import__";
-static const char __pyx_k_kwargs[] = "kwargs";
 static const char __pyx_k_name_2[] = "__name__";
 static const char __pyx_k_pickle[] = "pickle";
+static const char __pyx_k_points[] = "points";
 static const char __pyx_k_reduce[] = "__reduce__";
-static const char __pyx_k_return[] = "return";
 static const char __pyx_k_struct[] = "struct";
 static const char __pyx_k_typing[] = "typing";
 static const char __pyx_k_unpack[] = "unpack";
 static const char __pyx_k_update[] = "update";
-static const char __pyx_k_values[] = "values";
-static const char __pyx_k_volume[] = "volume";
 static const char __pyx_k_disable[] = "disable";
 static const char __pyx_k_fortran[] = "fortran";
 static const char __pyx_k_memview[] = "memview";
+static const char __pyx_k_sublist[] = "sublist";
 static const char __pyx_k_Ellipsis[] = "Ellipsis";
 static const char __pyx_k_Sequence[] = "Sequence";
-static const char __pyx_k_defaults[] = "defaults";
 static const char __pyx_k_getstate[] = "__getstate__";
 static const char __pyx_k_itemsize[] = "itemsize";
 static const char __pyx_k_pyx_type[] = "__pyx_type";
@@ -3280,60 +3127,55 @@ static const char __pyx_k_reduce_ex[] = "__reduce_ex__";
 static const char __pyx_k_IndexError[] = "IndexError";
 static const char __pyx_k_ValueError[] = "ValueError";
 static const char __pyx_k_ends_array[] = "ends_array";
+static const char __pyx_k_output_set[] = "output_set";
 static const char __pyx_k_pyx_result[] = "__pyx_result";
 static const char __pyx_k_pyx_vtable[] = "__pyx_vtable__";
-static const char __pyx_k_signatures[] = "signatures";
 static const char __pyx_k_MemoryError[] = "MemoryError";
 static const char __pyx_k_PickleError[] = "PickleError";
 static const char __pyx_k_bresenham3D[] = "bresenham3D";
 static const char __pyx_k_collections[] = "collections";
-static const char __pyx_k_current_end[] = "current_end";
 static const char __pyx_k_output_list[] = "output_list";
-static const char __pyx_k_voxel_value[] = "voxel_value";
 static const char __pyx_k_initializing[] = "_initializing";
 static const char __pyx_k_is_coroutine[] = "_is_coroutine";
-static const char __pyx_k_listOfPoints[] = "listOfPoints";
 static const char __pyx_k_pyx_checksum[] = "__pyx_checksum";
 static const char __pyx_k_starts_array[] = "starts_array";
 static const char __pyx_k_stringsource[] = "<stringsource>";
-static const char __pyx_k_unsigned_int[] = "unsigned int";
 static const char __pyx_k_version_info[] = "version_info";
 static const char __pyx_k_class_getitem[] = "__class_getitem__";
-static const char __pyx_k_current_start[] = "current_start";
-static const char __pyx_k_find_boundary[] = "find_boundary";
 static const char __pyx_k_reduce_cython[] = "__reduce_cython__";
-static const char __pyx_k_unsigned_char[] = "unsigned char";
 static const char __pyx_k_AssertionError[] = "AssertionError";
-static const char __pyx_k_fused_sigindex[] = "_fused_sigindex";
-static const char __pyx_k_surface_voxels[] = "surface_voxels";
-static const char __pyx_k_unsigned_short[] = "unsigned short";
+static const char __pyx_k_max_num_voxels[] = "max_num_voxels";
 static const char __pyx_k_View_MemoryView[] = "View.MemoryView";
 static const char __pyx_k_allocate_buffer[] = "allocate_buffer";
 static const char __pyx_k_bresenham3D_pyx[] = "bresenham3D.pyx";
 static const char __pyx_k_collections_abc[] = "collections.abc";
+static const char __pyx_k_contact_voxel_1[] = "contact_voxel_1";
+static const char __pyx_k_contact_voxel_2[] = "contact_voxel_2";
 static const char __pyx_k_dtype_is_object[] = "dtype_is_object";
 static const char __pyx_k_pyx_PickleError[] = "__pyx_PickleError";
 static const char __pyx_k_setstate_cython[] = "__setstate_cython__";
+static const char __pyx_k_all_valid_voxels[] = "all_valid_voxels";
 static const char __pyx_k_pyx_unpickle_Enum[] = "__pyx_unpickle_Enum";
 static const char __pyx_k_asyncio_coroutines[] = "asyncio.coroutines";
+static const char __pyx_k_bresenham_3D_lines[] = "bresenham_3D_lines";
 static const char __pyx_k_cline_in_traceback[] = "cline_in_traceback";
 static const char __pyx_k_strided_and_direct[] = "<strided and direct>";
-static const char __pyx_k_unsigned_long_long[] = "unsigned long long";
 static const char __pyx_k_bresenham3DWithMask[] = "bresenham3DWithMask";
+static const char __pyx_k_found_contact_voxels[] = "found_contact_voxels";
 static const char __pyx_k_strided_and_indirect[] = "<strided and indirect>";
 static const char __pyx_k_Invalid_shape_in_axis[] = "Invalid shape in axis ";
 static const char __pyx_k_contiguous_and_direct[] = "<contiguous and direct>";
 static const char __pyx_k_Cannot_index_with_type[] = "Cannot index with type '";
-static const char __pyx_k_List_Tuple_int_int_int[] = "List[Tuple[int, int, int]]";
 static const char __pyx_k_MemoryView_of_r_object[] = "<MemoryView of %r object>";
 static const char __pyx_k_MemoryView_of_r_at_0x_x[] = "<MemoryView of %r at 0x%x>";
 static const char __pyx_k_contiguous_and_indirect[] = "<contiguous and indirect>";
 static const char __pyx_k_Dimension_d_is_not_direct[] = "Dimension %d is not direct";
 static const char __pyx_k_bresenham3DWithMaskSingle[] = "bresenham3DWithMaskSingle";
 static const char __pyx_k_Index_out_of_bounds_axis_d[] = "Index out of bounds (axis %d)";
-static const char __pyx_k_No_matching_signature_found[] = "No matching signature found";
+static const char __pyx_k_current_pair_contact_sites[] = "current_pair_contact_sites";
 static const char __pyx_k_Step_may_not_be_zero_axis_d[] = "Step may not be zero (axis %d)";
 static const char __pyx_k_itemsize_0_for_cython_array[] = "itemsize <= 0 for cython.array";
+static const char __pyx_k_contact_voxels_list_of_lists[] = "contact_voxels_list_of_lists";
 static const char __pyx_k_unable_to_allocate_array_data[] = "unable to allocate array data.";
 static const char __pyx_k_strided_and_direct_or_indirect[] = "<strided and direct or indirect>";
 static const char __pyx_k_All_dimensions_preceding_dimensi[] = "All dimensions preceding dimension %d must be indexed and not sliced";
@@ -3343,8 +3185,6 @@ static const char __pyx_k_Cannot_assign_to_read_only_memor[] = "Cannot assign to
 static const char __pyx_k_Cannot_create_writable_memory_vi[] = "Cannot create writable memory view from read-only memoryview";
 static const char __pyx_k_Cannot_transpose_memoryview_with[] = "Cannot transpose memoryview with indirect dimensions";
 static const char __pyx_k_Empty_shape_tuple_for_cython_arr[] = "Empty shape tuple for cython.array";
-static const char __pyx_k_Expected_at_least_d_argument_s_g[] = "Expected at least %d argument%s, got %d";
-static const char __pyx_k_Function_call_with_ambiguous_arg[] = "Function call with ambiguous argument types";
 static const char __pyx_k_Incompatible_checksums_0x_x_vs_0[] = "Incompatible checksums (0x%x vs (0x82a3537, 0x6ae9995, 0xb068931) = (name))";
 static const char __pyx_k_Indirect_dimensions_not_supporte[] = "Indirect dimensions not supported";
 static const char __pyx_k_Invalid_mode_expected_c_or_fortr[] = "Invalid mode, expected 'c' or 'fortran', got ";
@@ -3352,6 +3192,8 @@ static const char __pyx_k_Out_of_bounds_on_buffer_access_a[] = "Out of bounds on
 static const char __pyx_k_Unable_to_convert_item_to_object[] = "Unable to convert item to object";
 static const char __pyx_k_got_differing_extents_in_dimensi[] = "got differing extents in dimension ";
 static const char __pyx_k_no_default___reduce___due_to_non[] = "no default __reduce__ due to non-trivial __cinit__";
+static const char __pyx_k_object_1_surface_voxel_coordinat[] = "object_1_surface_voxel_coordinates";
+static const char __pyx_k_object_2_surface_voxel_coordinat[] = "object_2_surface_voxel_coordinates";
 static const char __pyx_k_unable_to_allocate_shape_and_str[] = "unable to allocate shape and strides.";
 /* #### Code section: decls ### */
 static int __pyx_array___pyx_pf_15View_dot_MemoryView_5array___cinit__(struct __pyx_array_obj *__pyx_v_self, PyObject *__pyx_v_shape, Py_ssize_t __pyx_v_itemsize, PyObject *__pyx_v_format, PyObject *__pyx_v_mode, int __pyx_v_allocate_buffer); /* proto */
@@ -3395,21 +3237,16 @@ static void __pyx_memoryviewslice___pyx_pf_15View_dot_MemoryView_16_memoryviewsl
 static PyObject *__pyx_pf___pyx_memoryviewslice___reduce_cython__(CYTHON_UNUSED struct __pyx_memoryviewslice_obj *__pyx_v_self); /* proto */
 static PyObject *__pyx_pf___pyx_memoryviewslice_2__setstate_cython__(CYTHON_UNUSED struct __pyx_memoryviewslice_obj *__pyx_v_self, CYTHON_UNUSED PyObject *__pyx_v___pyx_state); /* proto */
 static PyObject *__pyx_pf_15View_dot_MemoryView___pyx_unpickle_Enum(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v___pyx_type, long __pyx_v___pyx_checksum, PyObject *__pyx_v___pyx_state); /* proto */
-static PyObject *__pyx_pf_11bresenham3D_16__defaults__(CYTHON_UNUSED PyObject *__pyx_self); /* proto */
-static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED PyObject *__pyx_self, int __pyx_v_x1, int __pyx_v_y1, int __pyx_v_z1, int __pyx_v_x2, int __pyx_v_y2, int __pyx_v_z2, __Pyx_memviewslice __pyx_v_mask); /* proto */
-static PyObject *__pyx_pf_11bresenham3D_18__defaults__(CYTHON_UNUSED PyObject *__pyx_self); /* proto */
+static PyObject *__pyx_pf_11bresenham3D_6__defaults__(CYTHON_UNUSED PyObject *__pyx_self); /* proto */
+static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED PyObject *__pyx_self, int __pyx_v_x1, int __pyx_v_y1, int __pyx_v_z1, int __pyx_v_x2, int __pyx_v_y2, int __pyx_v_z2, PyObject *__pyx_v_points, __Pyx_memviewslice __pyx_v_mask); /* proto */
+static PyObject *__pyx_pf_11bresenham3D_8__defaults__(CYTHON_UNUSED PyObject *__pyx_self); /* proto */
 static PyObject *__pyx_pf_11bresenham3D_2bresenham3DWithMask(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_starts_array, __Pyx_memviewslice __pyx_v_ends_array, __Pyx_memviewslice __pyx_v_mask); /* proto */
-static PyObject *__pyx_pf_11bresenham3D_4find_boundary(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_signatures, PyObject *__pyx_v_args, PyObject *__pyx_v_kwargs, CYTHON_UNUSED PyObject *__pyx_v_defaults, PyObject *__pyx_v__fused_sigindex); /* proto */
-static PyObject *__pyx_pf_11bresenham3D_6find_boundary(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_volume, __Pyx_memviewslice __pyx_v_surface_voxels); /* proto */
-static PyObject *__pyx_pf_11bresenham3D_8find_boundary(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_volume, __Pyx_memviewslice __pyx_v_surface_voxels); /* proto */
-static PyObject *__pyx_pf_11bresenham3D_10find_boundary(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_volume, __Pyx_memviewslice __pyx_v_surface_voxels); /* proto */
-static PyObject *__pyx_pf_11bresenham3D_12find_boundary(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_volume, __Pyx_memviewslice __pyx_v_surface_voxels); /* proto */
+static PyObject *__pyx_pf_11bresenham3D_4bresenham_3D_lines(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_contact_voxels_list_of_lists, __Pyx_memviewslice __pyx_v_object_1_surface_voxel_coordinates, __Pyx_memviewslice __pyx_v_object_2_surface_voxel_coordinates, __Pyx_memviewslice __pyx_v_current_pair_contact_sites, int __pyx_v_max_num_voxels, __Pyx_memviewslice __pyx_v_mask); /* proto */
 static PyObject *__pyx_tp_new_array(PyTypeObject *t, PyObject *a, PyObject *k); /*proto*/
 static PyObject *__pyx_tp_new_Enum(PyTypeObject *t, PyObject *a, PyObject *k); /*proto*/
 static PyObject *__pyx_tp_new_memoryview(PyTypeObject *t, PyObject *a, PyObject *k); /*proto*/
 static PyObject *__pyx_tp_new__memoryviewslice(PyTypeObject *t, PyObject *a, PyObject *k); /*proto*/
-static __Pyx_CachedCFunction __pyx_umethod_PyDict_Type_get = {0, 0, 0, 0, 0};
-static __Pyx_CachedCFunction __pyx_umethod_PyDict_Type_values = {0, 0, 0, 0, 0};
+static __Pyx_CachedCFunction __pyx_umethod_PySet_Type_update = {0, 0, 0, 0, 0};
 /* #### Code section: late_includes ### */
 /* #### Code section: module_state ### */
 typedef struct {
@@ -3551,8 +3388,6 @@ typedef struct {
   PyObject *__pyx_kp_s_Dimension_d_is_not_direct;
   PyObject *__pyx_n_s_Ellipsis;
   PyObject *__pyx_kp_s_Empty_shape_tuple_for_cython_arr;
-  PyObject *__pyx_kp_s_Expected_at_least_d_argument_s_g;
-  PyObject *__pyx_kp_s_Function_call_with_ambiguous_arg;
   PyObject *__pyx_kp_s_Incompatible_checksums_0x_x_vs_0;
   PyObject *__pyx_n_s_IndexError;
   PyObject *__pyx_kp_s_Index_out_of_bounds_axis_d;
@@ -3560,11 +3395,9 @@ typedef struct {
   PyObject *__pyx_kp_u_Invalid_mode_expected_c_or_fortr;
   PyObject *__pyx_kp_u_Invalid_shape_in_axis;
   PyObject *__pyx_n_s_List;
-  PyObject *__pyx_kp_s_List_Tuple_int_int_int;
   PyObject *__pyx_n_s_MemoryError;
   PyObject *__pyx_kp_s_MemoryView_of_r_at_0x_x;
   PyObject *__pyx_kp_s_MemoryView_of_r_object;
-  PyObject *__pyx_kp_s_No_matching_signature_found;
   PyObject *__pyx_n_b_O;
   PyObject *__pyx_kp_u_Out_of_bounds_on_buffer_access_a;
   PyObject *__pyx_n_s_PickleError;
@@ -3575,24 +3408,23 @@ typedef struct {
   PyObject *__pyx_kp_s_Unable_to_convert_item_to_object;
   PyObject *__pyx_n_s_ValueError;
   PyObject *__pyx_n_s_View_MemoryView;
-  PyObject *__pyx_kp_s__10;
-  PyObject *__pyx_kp_s__11;
-  PyObject *__pyx_kp_u__11;
   PyObject *__pyx_kp_u__2;
+  PyObject *__pyx_n_s__26;
+  PyObject *__pyx_n_s__29;
   PyObject *__pyx_n_s__3;
-  PyObject *__pyx_n_s__31;
   PyObject *__pyx_kp_u__6;
   PyObject *__pyx_kp_u__7;
   PyObject *__pyx_n_s_abc;
+  PyObject *__pyx_n_s_all_valid_voxels;
   PyObject *__pyx_n_s_allocate_buffer;
   PyObject *__pyx_kp_u_and;
-  PyObject *__pyx_n_s_args;
   PyObject *__pyx_n_s_asyncio_coroutines;
   PyObject *__pyx_n_s_base;
   PyObject *__pyx_n_s_bresenham3D;
   PyObject *__pyx_n_s_bresenham3DWithMask;
   PyObject *__pyx_n_s_bresenham3DWithMaskSingle;
   PyObject *__pyx_kp_s_bresenham3D_pyx;
+  PyObject *__pyx_n_s_bresenham_3D_lines;
   PyObject *__pyx_n_s_c;
   PyObject *__pyx_n_u_c;
   PyObject *__pyx_n_s_class;
@@ -3600,15 +3432,15 @@ typedef struct {
   PyObject *__pyx_n_s_cline_in_traceback;
   PyObject *__pyx_n_s_collections;
   PyObject *__pyx_kp_s_collections_abc;
+  PyObject *__pyx_n_s_contact_voxel_1;
+  PyObject *__pyx_n_s_contact_voxel_2;
+  PyObject *__pyx_n_s_contact_voxels_list_of_lists;
   PyObject *__pyx_kp_s_contiguous_and_direct;
   PyObject *__pyx_kp_s_contiguous_and_indirect;
   PyObject *__pyx_n_s_count;
-  PyObject *__pyx_n_s_current_end;
-  PyObject *__pyx_n_s_current_start;
-  PyObject *__pyx_n_s_defaults;
+  PyObject *__pyx_n_s_current_pair_contact_sites;
   PyObject *__pyx_n_s_dict;
   PyObject *__pyx_kp_u_disable;
-  PyObject *__pyx_n_s_dtype;
   PyObject *__pyx_n_s_dtype_is_object;
   PyObject *__pyx_n_s_dx;
   PyObject *__pyx_n_s_dy;
@@ -3618,18 +3450,18 @@ typedef struct {
   PyObject *__pyx_n_s_ends_array;
   PyObject *__pyx_n_s_enumerate;
   PyObject *__pyx_n_s_error;
-  PyObject *__pyx_n_s_find_boundary;
   PyObject *__pyx_n_s_flags;
   PyObject *__pyx_n_s_format;
   PyObject *__pyx_n_s_fortran;
   PyObject *__pyx_n_u_fortran;
-  PyObject *__pyx_n_s_fused_sigindex;
+  PyObject *__pyx_n_s_found_contact_voxels;
   PyObject *__pyx_kp_u_gc;
-  PyObject *__pyx_n_s_get;
   PyObject *__pyx_n_s_getstate;
   PyObject *__pyx_kp_u_got;
   PyObject *__pyx_kp_u_got_differing_extents_in_dimensi;
+  PyObject *__pyx_n_s_i;
   PyObject *__pyx_n_s_id;
+  PyObject *__pyx_n_s_idx;
   PyObject *__pyx_n_s_import;
   PyObject *__pyx_n_s_index;
   PyObject *__pyx_n_s_initializing;
@@ -3637,11 +3469,10 @@ typedef struct {
   PyObject *__pyx_kp_u_isenabled;
   PyObject *__pyx_n_s_itemsize;
   PyObject *__pyx_kp_s_itemsize_0_for_cython_array;
-  PyObject *__pyx_n_s_kind;
-  PyObject *__pyx_n_s_kwargs;
-  PyObject *__pyx_n_s_listOfPoints;
+  PyObject *__pyx_n_s_j;
   PyObject *__pyx_n_s_main;
   PyObject *__pyx_n_s_mask;
+  PyObject *__pyx_n_s_max_num_voxels;
   PyObject *__pyx_n_s_memview;
   PyObject *__pyx_n_s_mode;
   PyObject *__pyx_n_s_name;
@@ -3649,16 +3480,17 @@ typedef struct {
   PyObject *__pyx_n_s_ndim;
   PyObject *__pyx_n_s_new;
   PyObject *__pyx_kp_s_no_default___reduce___due_to_non;
-  PyObject *__pyx_n_s_numpy;
-  PyObject *__pyx_n_s_nx;
-  PyObject *__pyx_n_s_ny;
-  PyObject *__pyx_n_s_nz;
   PyObject *__pyx_n_s_obj;
+  PyObject *__pyx_n_s_object_1_surface_voxel_coordinat;
+  PyObject *__pyx_n_s_object_2_surface_voxel_coordinat;
   PyObject *__pyx_n_s_output_list;
+  PyObject *__pyx_n_s_output_set;
   PyObject *__pyx_n_s_p1;
   PyObject *__pyx_n_s_p2;
   PyObject *__pyx_n_s_pack;
   PyObject *__pyx_n_s_pickle;
+  PyObject *__pyx_n_s_point;
+  PyObject *__pyx_n_s_points;
   PyObject *__pyx_n_s_pyx_PickleError;
   PyObject *__pyx_n_s_pyx_checksum;
   PyObject *__pyx_n_s_pyx_result;
@@ -3671,15 +3503,12 @@ typedef struct {
   PyObject *__pyx_n_s_reduce_cython;
   PyObject *__pyx_n_s_reduce_ex;
   PyObject *__pyx_n_s_register;
-  PyObject *__pyx_n_s_return;
-  PyObject *__pyx_n_s_s;
+  PyObject *__pyx_n_s_rows;
   PyObject *__pyx_n_s_setstate;
   PyObject *__pyx_n_s_setstate_cython;
   PyObject *__pyx_n_s_shape;
-  PyObject *__pyx_n_s_signatures;
   PyObject *__pyx_n_s_size;
   PyObject *__pyx_n_s_spec;
-  PyObject *__pyx_n_s_split;
   PyObject *__pyx_n_s_start;
   PyObject *__pyx_n_s_starts_array;
   PyObject *__pyx_n_s_step;
@@ -3688,24 +3517,16 @@ typedef struct {
   PyObject *__pyx_kp_s_strided_and_direct_or_indirect;
   PyObject *__pyx_kp_s_strided_and_indirect;
   PyObject *__pyx_kp_s_stringsource;
-  PyObject *__pyx_n_s_strip;
   PyObject *__pyx_n_s_struct;
-  PyObject *__pyx_n_s_surface_voxels;
+  PyObject *__pyx_n_s_sublist;
   PyObject *__pyx_n_s_sys;
   PyObject *__pyx_n_s_test;
   PyObject *__pyx_n_s_typing;
   PyObject *__pyx_kp_s_unable_to_allocate_array_data;
   PyObject *__pyx_kp_s_unable_to_allocate_shape_and_str;
   PyObject *__pyx_n_s_unpack;
-  PyObject *__pyx_kp_s_unsigned_char;
-  PyObject *__pyx_kp_s_unsigned_int;
-  PyObject *__pyx_kp_s_unsigned_long_long;
-  PyObject *__pyx_kp_s_unsigned_short;
   PyObject *__pyx_n_s_update;
-  PyObject *__pyx_n_s_values;
   PyObject *__pyx_n_s_version_info;
-  PyObject *__pyx_n_s_volume;
-  PyObject *__pyx_n_s_voxel_value;
   PyObject *__pyx_n_s_x;
   PyObject *__pyx_n_s_x1;
   PyObject *__pyx_n_s_x2;
@@ -3717,20 +3538,20 @@ typedef struct {
   PyObject *__pyx_n_s_z;
   PyObject *__pyx_n_s_z1;
   PyObject *__pyx_n_s_z2;
-  PyObject *__pyx_n_s_zip;
   PyObject *__pyx_n_s_zs;
   PyObject *__pyx_int_0;
   PyObject *__pyx_int_1;
-  PyObject *__pyx_int_2;
   PyObject *__pyx_int_3;
   PyObject *__pyx_int_112105877;
   PyObject *__pyx_int_136983863;
   PyObject *__pyx_int_184977713;
   PyObject *__pyx_int_neg_1;
   __Pyx_memviewslice __pyx_k__9;
+  __Pyx_memviewslice __pyx_k__10;
   PyObject *__pyx_slice__5;
   PyObject *__pyx_tuple__4;
   PyObject *__pyx_tuple__8;
+  PyObject *__pyx_tuple__11;
   PyObject *__pyx_tuple__12;
   PyObject *__pyx_tuple__13;
   PyObject *__pyx_tuple__14;
@@ -3740,16 +3561,13 @@ typedef struct {
   PyObject *__pyx_tuple__18;
   PyObject *__pyx_tuple__19;
   PyObject *__pyx_tuple__20;
-  PyObject *__pyx_tuple__21;
   PyObject *__pyx_tuple__22;
-  PyObject *__pyx_tuple__23;
-  PyObject *__pyx_tuple__25;
+  PyObject *__pyx_tuple__24;
   PyObject *__pyx_tuple__27;
-  PyObject *__pyx_tuple__29;
-  PyObject *__pyx_codeobj__24;
-  PyObject *__pyx_codeobj__26;
+  PyObject *__pyx_codeobj__21;
+  PyObject *__pyx_codeobj__23;
+  PyObject *__pyx_codeobj__25;
   PyObject *__pyx_codeobj__28;
-  PyObject *__pyx_codeobj__30;
 } __pyx_mstate;
 
 #if CYTHON_USE_MODULE_STATE
@@ -3816,8 +3634,6 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_kp_s_Dimension_d_is_not_direct);
   Py_CLEAR(clear_module_state->__pyx_n_s_Ellipsis);
   Py_CLEAR(clear_module_state->__pyx_kp_s_Empty_shape_tuple_for_cython_arr);
-  Py_CLEAR(clear_module_state->__pyx_kp_s_Expected_at_least_d_argument_s_g);
-  Py_CLEAR(clear_module_state->__pyx_kp_s_Function_call_with_ambiguous_arg);
   Py_CLEAR(clear_module_state->__pyx_kp_s_Incompatible_checksums_0x_x_vs_0);
   Py_CLEAR(clear_module_state->__pyx_n_s_IndexError);
   Py_CLEAR(clear_module_state->__pyx_kp_s_Index_out_of_bounds_axis_d);
@@ -3825,11 +3641,9 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_kp_u_Invalid_mode_expected_c_or_fortr);
   Py_CLEAR(clear_module_state->__pyx_kp_u_Invalid_shape_in_axis);
   Py_CLEAR(clear_module_state->__pyx_n_s_List);
-  Py_CLEAR(clear_module_state->__pyx_kp_s_List_Tuple_int_int_int);
   Py_CLEAR(clear_module_state->__pyx_n_s_MemoryError);
   Py_CLEAR(clear_module_state->__pyx_kp_s_MemoryView_of_r_at_0x_x);
   Py_CLEAR(clear_module_state->__pyx_kp_s_MemoryView_of_r_object);
-  Py_CLEAR(clear_module_state->__pyx_kp_s_No_matching_signature_found);
   Py_CLEAR(clear_module_state->__pyx_n_b_O);
   Py_CLEAR(clear_module_state->__pyx_kp_u_Out_of_bounds_on_buffer_access_a);
   Py_CLEAR(clear_module_state->__pyx_n_s_PickleError);
@@ -3840,24 +3654,23 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_kp_s_Unable_to_convert_item_to_object);
   Py_CLEAR(clear_module_state->__pyx_n_s_ValueError);
   Py_CLEAR(clear_module_state->__pyx_n_s_View_MemoryView);
-  Py_CLEAR(clear_module_state->__pyx_kp_s__10);
-  Py_CLEAR(clear_module_state->__pyx_kp_s__11);
-  Py_CLEAR(clear_module_state->__pyx_kp_u__11);
   Py_CLEAR(clear_module_state->__pyx_kp_u__2);
+  Py_CLEAR(clear_module_state->__pyx_n_s__26);
+  Py_CLEAR(clear_module_state->__pyx_n_s__29);
   Py_CLEAR(clear_module_state->__pyx_n_s__3);
-  Py_CLEAR(clear_module_state->__pyx_n_s__31);
   Py_CLEAR(clear_module_state->__pyx_kp_u__6);
   Py_CLEAR(clear_module_state->__pyx_kp_u__7);
   Py_CLEAR(clear_module_state->__pyx_n_s_abc);
+  Py_CLEAR(clear_module_state->__pyx_n_s_all_valid_voxels);
   Py_CLEAR(clear_module_state->__pyx_n_s_allocate_buffer);
   Py_CLEAR(clear_module_state->__pyx_kp_u_and);
-  Py_CLEAR(clear_module_state->__pyx_n_s_args);
   Py_CLEAR(clear_module_state->__pyx_n_s_asyncio_coroutines);
   Py_CLEAR(clear_module_state->__pyx_n_s_base);
   Py_CLEAR(clear_module_state->__pyx_n_s_bresenham3D);
   Py_CLEAR(clear_module_state->__pyx_n_s_bresenham3DWithMask);
   Py_CLEAR(clear_module_state->__pyx_n_s_bresenham3DWithMaskSingle);
   Py_CLEAR(clear_module_state->__pyx_kp_s_bresenham3D_pyx);
+  Py_CLEAR(clear_module_state->__pyx_n_s_bresenham_3D_lines);
   Py_CLEAR(clear_module_state->__pyx_n_s_c);
   Py_CLEAR(clear_module_state->__pyx_n_u_c);
   Py_CLEAR(clear_module_state->__pyx_n_s_class);
@@ -3865,15 +3678,15 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_n_s_cline_in_traceback);
   Py_CLEAR(clear_module_state->__pyx_n_s_collections);
   Py_CLEAR(clear_module_state->__pyx_kp_s_collections_abc);
+  Py_CLEAR(clear_module_state->__pyx_n_s_contact_voxel_1);
+  Py_CLEAR(clear_module_state->__pyx_n_s_contact_voxel_2);
+  Py_CLEAR(clear_module_state->__pyx_n_s_contact_voxels_list_of_lists);
   Py_CLEAR(clear_module_state->__pyx_kp_s_contiguous_and_direct);
   Py_CLEAR(clear_module_state->__pyx_kp_s_contiguous_and_indirect);
   Py_CLEAR(clear_module_state->__pyx_n_s_count);
-  Py_CLEAR(clear_module_state->__pyx_n_s_current_end);
-  Py_CLEAR(clear_module_state->__pyx_n_s_current_start);
-  Py_CLEAR(clear_module_state->__pyx_n_s_defaults);
+  Py_CLEAR(clear_module_state->__pyx_n_s_current_pair_contact_sites);
   Py_CLEAR(clear_module_state->__pyx_n_s_dict);
   Py_CLEAR(clear_module_state->__pyx_kp_u_disable);
-  Py_CLEAR(clear_module_state->__pyx_n_s_dtype);
   Py_CLEAR(clear_module_state->__pyx_n_s_dtype_is_object);
   Py_CLEAR(clear_module_state->__pyx_n_s_dx);
   Py_CLEAR(clear_module_state->__pyx_n_s_dy);
@@ -3883,18 +3696,18 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_n_s_ends_array);
   Py_CLEAR(clear_module_state->__pyx_n_s_enumerate);
   Py_CLEAR(clear_module_state->__pyx_n_s_error);
-  Py_CLEAR(clear_module_state->__pyx_n_s_find_boundary);
   Py_CLEAR(clear_module_state->__pyx_n_s_flags);
   Py_CLEAR(clear_module_state->__pyx_n_s_format);
   Py_CLEAR(clear_module_state->__pyx_n_s_fortran);
   Py_CLEAR(clear_module_state->__pyx_n_u_fortran);
-  Py_CLEAR(clear_module_state->__pyx_n_s_fused_sigindex);
+  Py_CLEAR(clear_module_state->__pyx_n_s_found_contact_voxels);
   Py_CLEAR(clear_module_state->__pyx_kp_u_gc);
-  Py_CLEAR(clear_module_state->__pyx_n_s_get);
   Py_CLEAR(clear_module_state->__pyx_n_s_getstate);
   Py_CLEAR(clear_module_state->__pyx_kp_u_got);
   Py_CLEAR(clear_module_state->__pyx_kp_u_got_differing_extents_in_dimensi);
+  Py_CLEAR(clear_module_state->__pyx_n_s_i);
   Py_CLEAR(clear_module_state->__pyx_n_s_id);
+  Py_CLEAR(clear_module_state->__pyx_n_s_idx);
   Py_CLEAR(clear_module_state->__pyx_n_s_import);
   Py_CLEAR(clear_module_state->__pyx_n_s_index);
   Py_CLEAR(clear_module_state->__pyx_n_s_initializing);
@@ -3902,11 +3715,10 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_kp_u_isenabled);
   Py_CLEAR(clear_module_state->__pyx_n_s_itemsize);
   Py_CLEAR(clear_module_state->__pyx_kp_s_itemsize_0_for_cython_array);
-  Py_CLEAR(clear_module_state->__pyx_n_s_kind);
-  Py_CLEAR(clear_module_state->__pyx_n_s_kwargs);
-  Py_CLEAR(clear_module_state->__pyx_n_s_listOfPoints);
+  Py_CLEAR(clear_module_state->__pyx_n_s_j);
   Py_CLEAR(clear_module_state->__pyx_n_s_main);
   Py_CLEAR(clear_module_state->__pyx_n_s_mask);
+  Py_CLEAR(clear_module_state->__pyx_n_s_max_num_voxels);
   Py_CLEAR(clear_module_state->__pyx_n_s_memview);
   Py_CLEAR(clear_module_state->__pyx_n_s_mode);
   Py_CLEAR(clear_module_state->__pyx_n_s_name);
@@ -3914,16 +3726,17 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_n_s_ndim);
   Py_CLEAR(clear_module_state->__pyx_n_s_new);
   Py_CLEAR(clear_module_state->__pyx_kp_s_no_default___reduce___due_to_non);
-  Py_CLEAR(clear_module_state->__pyx_n_s_numpy);
-  Py_CLEAR(clear_module_state->__pyx_n_s_nx);
-  Py_CLEAR(clear_module_state->__pyx_n_s_ny);
-  Py_CLEAR(clear_module_state->__pyx_n_s_nz);
   Py_CLEAR(clear_module_state->__pyx_n_s_obj);
+  Py_CLEAR(clear_module_state->__pyx_n_s_object_1_surface_voxel_coordinat);
+  Py_CLEAR(clear_module_state->__pyx_n_s_object_2_surface_voxel_coordinat);
   Py_CLEAR(clear_module_state->__pyx_n_s_output_list);
+  Py_CLEAR(clear_module_state->__pyx_n_s_output_set);
   Py_CLEAR(clear_module_state->__pyx_n_s_p1);
   Py_CLEAR(clear_module_state->__pyx_n_s_p2);
   Py_CLEAR(clear_module_state->__pyx_n_s_pack);
   Py_CLEAR(clear_module_state->__pyx_n_s_pickle);
+  Py_CLEAR(clear_module_state->__pyx_n_s_point);
+  Py_CLEAR(clear_module_state->__pyx_n_s_points);
   Py_CLEAR(clear_module_state->__pyx_n_s_pyx_PickleError);
   Py_CLEAR(clear_module_state->__pyx_n_s_pyx_checksum);
   Py_CLEAR(clear_module_state->__pyx_n_s_pyx_result);
@@ -3936,15 +3749,12 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_n_s_reduce_cython);
   Py_CLEAR(clear_module_state->__pyx_n_s_reduce_ex);
   Py_CLEAR(clear_module_state->__pyx_n_s_register);
-  Py_CLEAR(clear_module_state->__pyx_n_s_return);
-  Py_CLEAR(clear_module_state->__pyx_n_s_s);
+  Py_CLEAR(clear_module_state->__pyx_n_s_rows);
   Py_CLEAR(clear_module_state->__pyx_n_s_setstate);
   Py_CLEAR(clear_module_state->__pyx_n_s_setstate_cython);
   Py_CLEAR(clear_module_state->__pyx_n_s_shape);
-  Py_CLEAR(clear_module_state->__pyx_n_s_signatures);
   Py_CLEAR(clear_module_state->__pyx_n_s_size);
   Py_CLEAR(clear_module_state->__pyx_n_s_spec);
-  Py_CLEAR(clear_module_state->__pyx_n_s_split);
   Py_CLEAR(clear_module_state->__pyx_n_s_start);
   Py_CLEAR(clear_module_state->__pyx_n_s_starts_array);
   Py_CLEAR(clear_module_state->__pyx_n_s_step);
@@ -3953,24 +3763,16 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_kp_s_strided_and_direct_or_indirect);
   Py_CLEAR(clear_module_state->__pyx_kp_s_strided_and_indirect);
   Py_CLEAR(clear_module_state->__pyx_kp_s_stringsource);
-  Py_CLEAR(clear_module_state->__pyx_n_s_strip);
   Py_CLEAR(clear_module_state->__pyx_n_s_struct);
-  Py_CLEAR(clear_module_state->__pyx_n_s_surface_voxels);
+  Py_CLEAR(clear_module_state->__pyx_n_s_sublist);
   Py_CLEAR(clear_module_state->__pyx_n_s_sys);
   Py_CLEAR(clear_module_state->__pyx_n_s_test);
   Py_CLEAR(clear_module_state->__pyx_n_s_typing);
   Py_CLEAR(clear_module_state->__pyx_kp_s_unable_to_allocate_array_data);
   Py_CLEAR(clear_module_state->__pyx_kp_s_unable_to_allocate_shape_and_str);
   Py_CLEAR(clear_module_state->__pyx_n_s_unpack);
-  Py_CLEAR(clear_module_state->__pyx_kp_s_unsigned_char);
-  Py_CLEAR(clear_module_state->__pyx_kp_s_unsigned_int);
-  Py_CLEAR(clear_module_state->__pyx_kp_s_unsigned_long_long);
-  Py_CLEAR(clear_module_state->__pyx_kp_s_unsigned_short);
   Py_CLEAR(clear_module_state->__pyx_n_s_update);
-  Py_CLEAR(clear_module_state->__pyx_n_s_values);
   Py_CLEAR(clear_module_state->__pyx_n_s_version_info);
-  Py_CLEAR(clear_module_state->__pyx_n_s_volume);
-  Py_CLEAR(clear_module_state->__pyx_n_s_voxel_value);
   Py_CLEAR(clear_module_state->__pyx_n_s_x);
   Py_CLEAR(clear_module_state->__pyx_n_s_x1);
   Py_CLEAR(clear_module_state->__pyx_n_s_x2);
@@ -3982,20 +3784,20 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_n_s_z);
   Py_CLEAR(clear_module_state->__pyx_n_s_z1);
   Py_CLEAR(clear_module_state->__pyx_n_s_z2);
-  Py_CLEAR(clear_module_state->__pyx_n_s_zip);
   Py_CLEAR(clear_module_state->__pyx_n_s_zs);
   Py_CLEAR(clear_module_state->__pyx_int_0);
   Py_CLEAR(clear_module_state->__pyx_int_1);
-  Py_CLEAR(clear_module_state->__pyx_int_2);
   Py_CLEAR(clear_module_state->__pyx_int_3);
   Py_CLEAR(clear_module_state->__pyx_int_112105877);
   Py_CLEAR(clear_module_state->__pyx_int_136983863);
   Py_CLEAR(clear_module_state->__pyx_int_184977713);
   Py_CLEAR(clear_module_state->__pyx_int_neg_1);
   Py_CLEAR(clear_module_state->__pyx_k__9);
+  Py_CLEAR(clear_module_state->__pyx_k__10);
   Py_CLEAR(clear_module_state->__pyx_slice__5);
   Py_CLEAR(clear_module_state->__pyx_tuple__4);
   Py_CLEAR(clear_module_state->__pyx_tuple__8);
+  Py_CLEAR(clear_module_state->__pyx_tuple__11);
   Py_CLEAR(clear_module_state->__pyx_tuple__12);
   Py_CLEAR(clear_module_state->__pyx_tuple__13);
   Py_CLEAR(clear_module_state->__pyx_tuple__14);
@@ -4005,16 +3807,13 @@ static int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_tuple__18);
   Py_CLEAR(clear_module_state->__pyx_tuple__19);
   Py_CLEAR(clear_module_state->__pyx_tuple__20);
-  Py_CLEAR(clear_module_state->__pyx_tuple__21);
   Py_CLEAR(clear_module_state->__pyx_tuple__22);
-  Py_CLEAR(clear_module_state->__pyx_tuple__23);
-  Py_CLEAR(clear_module_state->__pyx_tuple__25);
+  Py_CLEAR(clear_module_state->__pyx_tuple__24);
   Py_CLEAR(clear_module_state->__pyx_tuple__27);
-  Py_CLEAR(clear_module_state->__pyx_tuple__29);
-  Py_CLEAR(clear_module_state->__pyx_codeobj__24);
-  Py_CLEAR(clear_module_state->__pyx_codeobj__26);
+  Py_CLEAR(clear_module_state->__pyx_codeobj__21);
+  Py_CLEAR(clear_module_state->__pyx_codeobj__23);
+  Py_CLEAR(clear_module_state->__pyx_codeobj__25);
   Py_CLEAR(clear_module_state->__pyx_codeobj__28);
-  Py_CLEAR(clear_module_state->__pyx_codeobj__30);
   return 0;
 }
 #endif
@@ -4059,8 +3858,6 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_kp_s_Dimension_d_is_not_direct);
   Py_VISIT(traverse_module_state->__pyx_n_s_Ellipsis);
   Py_VISIT(traverse_module_state->__pyx_kp_s_Empty_shape_tuple_for_cython_arr);
-  Py_VISIT(traverse_module_state->__pyx_kp_s_Expected_at_least_d_argument_s_g);
-  Py_VISIT(traverse_module_state->__pyx_kp_s_Function_call_with_ambiguous_arg);
   Py_VISIT(traverse_module_state->__pyx_kp_s_Incompatible_checksums_0x_x_vs_0);
   Py_VISIT(traverse_module_state->__pyx_n_s_IndexError);
   Py_VISIT(traverse_module_state->__pyx_kp_s_Index_out_of_bounds_axis_d);
@@ -4068,11 +3865,9 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_kp_u_Invalid_mode_expected_c_or_fortr);
   Py_VISIT(traverse_module_state->__pyx_kp_u_Invalid_shape_in_axis);
   Py_VISIT(traverse_module_state->__pyx_n_s_List);
-  Py_VISIT(traverse_module_state->__pyx_kp_s_List_Tuple_int_int_int);
   Py_VISIT(traverse_module_state->__pyx_n_s_MemoryError);
   Py_VISIT(traverse_module_state->__pyx_kp_s_MemoryView_of_r_at_0x_x);
   Py_VISIT(traverse_module_state->__pyx_kp_s_MemoryView_of_r_object);
-  Py_VISIT(traverse_module_state->__pyx_kp_s_No_matching_signature_found);
   Py_VISIT(traverse_module_state->__pyx_n_b_O);
   Py_VISIT(traverse_module_state->__pyx_kp_u_Out_of_bounds_on_buffer_access_a);
   Py_VISIT(traverse_module_state->__pyx_n_s_PickleError);
@@ -4083,24 +3878,23 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_kp_s_Unable_to_convert_item_to_object);
   Py_VISIT(traverse_module_state->__pyx_n_s_ValueError);
   Py_VISIT(traverse_module_state->__pyx_n_s_View_MemoryView);
-  Py_VISIT(traverse_module_state->__pyx_kp_s__10);
-  Py_VISIT(traverse_module_state->__pyx_kp_s__11);
-  Py_VISIT(traverse_module_state->__pyx_kp_u__11);
   Py_VISIT(traverse_module_state->__pyx_kp_u__2);
+  Py_VISIT(traverse_module_state->__pyx_n_s__26);
+  Py_VISIT(traverse_module_state->__pyx_n_s__29);
   Py_VISIT(traverse_module_state->__pyx_n_s__3);
-  Py_VISIT(traverse_module_state->__pyx_n_s__31);
   Py_VISIT(traverse_module_state->__pyx_kp_u__6);
   Py_VISIT(traverse_module_state->__pyx_kp_u__7);
   Py_VISIT(traverse_module_state->__pyx_n_s_abc);
+  Py_VISIT(traverse_module_state->__pyx_n_s_all_valid_voxels);
   Py_VISIT(traverse_module_state->__pyx_n_s_allocate_buffer);
   Py_VISIT(traverse_module_state->__pyx_kp_u_and);
-  Py_VISIT(traverse_module_state->__pyx_n_s_args);
   Py_VISIT(traverse_module_state->__pyx_n_s_asyncio_coroutines);
   Py_VISIT(traverse_module_state->__pyx_n_s_base);
   Py_VISIT(traverse_module_state->__pyx_n_s_bresenham3D);
   Py_VISIT(traverse_module_state->__pyx_n_s_bresenham3DWithMask);
   Py_VISIT(traverse_module_state->__pyx_n_s_bresenham3DWithMaskSingle);
   Py_VISIT(traverse_module_state->__pyx_kp_s_bresenham3D_pyx);
+  Py_VISIT(traverse_module_state->__pyx_n_s_bresenham_3D_lines);
   Py_VISIT(traverse_module_state->__pyx_n_s_c);
   Py_VISIT(traverse_module_state->__pyx_n_u_c);
   Py_VISIT(traverse_module_state->__pyx_n_s_class);
@@ -4108,15 +3902,15 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_n_s_cline_in_traceback);
   Py_VISIT(traverse_module_state->__pyx_n_s_collections);
   Py_VISIT(traverse_module_state->__pyx_kp_s_collections_abc);
+  Py_VISIT(traverse_module_state->__pyx_n_s_contact_voxel_1);
+  Py_VISIT(traverse_module_state->__pyx_n_s_contact_voxel_2);
+  Py_VISIT(traverse_module_state->__pyx_n_s_contact_voxels_list_of_lists);
   Py_VISIT(traverse_module_state->__pyx_kp_s_contiguous_and_direct);
   Py_VISIT(traverse_module_state->__pyx_kp_s_contiguous_and_indirect);
   Py_VISIT(traverse_module_state->__pyx_n_s_count);
-  Py_VISIT(traverse_module_state->__pyx_n_s_current_end);
-  Py_VISIT(traverse_module_state->__pyx_n_s_current_start);
-  Py_VISIT(traverse_module_state->__pyx_n_s_defaults);
+  Py_VISIT(traverse_module_state->__pyx_n_s_current_pair_contact_sites);
   Py_VISIT(traverse_module_state->__pyx_n_s_dict);
   Py_VISIT(traverse_module_state->__pyx_kp_u_disable);
-  Py_VISIT(traverse_module_state->__pyx_n_s_dtype);
   Py_VISIT(traverse_module_state->__pyx_n_s_dtype_is_object);
   Py_VISIT(traverse_module_state->__pyx_n_s_dx);
   Py_VISIT(traverse_module_state->__pyx_n_s_dy);
@@ -4126,18 +3920,18 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_n_s_ends_array);
   Py_VISIT(traverse_module_state->__pyx_n_s_enumerate);
   Py_VISIT(traverse_module_state->__pyx_n_s_error);
-  Py_VISIT(traverse_module_state->__pyx_n_s_find_boundary);
   Py_VISIT(traverse_module_state->__pyx_n_s_flags);
   Py_VISIT(traverse_module_state->__pyx_n_s_format);
   Py_VISIT(traverse_module_state->__pyx_n_s_fortran);
   Py_VISIT(traverse_module_state->__pyx_n_u_fortran);
-  Py_VISIT(traverse_module_state->__pyx_n_s_fused_sigindex);
+  Py_VISIT(traverse_module_state->__pyx_n_s_found_contact_voxels);
   Py_VISIT(traverse_module_state->__pyx_kp_u_gc);
-  Py_VISIT(traverse_module_state->__pyx_n_s_get);
   Py_VISIT(traverse_module_state->__pyx_n_s_getstate);
   Py_VISIT(traverse_module_state->__pyx_kp_u_got);
   Py_VISIT(traverse_module_state->__pyx_kp_u_got_differing_extents_in_dimensi);
+  Py_VISIT(traverse_module_state->__pyx_n_s_i);
   Py_VISIT(traverse_module_state->__pyx_n_s_id);
+  Py_VISIT(traverse_module_state->__pyx_n_s_idx);
   Py_VISIT(traverse_module_state->__pyx_n_s_import);
   Py_VISIT(traverse_module_state->__pyx_n_s_index);
   Py_VISIT(traverse_module_state->__pyx_n_s_initializing);
@@ -4145,11 +3939,10 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_kp_u_isenabled);
   Py_VISIT(traverse_module_state->__pyx_n_s_itemsize);
   Py_VISIT(traverse_module_state->__pyx_kp_s_itemsize_0_for_cython_array);
-  Py_VISIT(traverse_module_state->__pyx_n_s_kind);
-  Py_VISIT(traverse_module_state->__pyx_n_s_kwargs);
-  Py_VISIT(traverse_module_state->__pyx_n_s_listOfPoints);
+  Py_VISIT(traverse_module_state->__pyx_n_s_j);
   Py_VISIT(traverse_module_state->__pyx_n_s_main);
   Py_VISIT(traverse_module_state->__pyx_n_s_mask);
+  Py_VISIT(traverse_module_state->__pyx_n_s_max_num_voxels);
   Py_VISIT(traverse_module_state->__pyx_n_s_memview);
   Py_VISIT(traverse_module_state->__pyx_n_s_mode);
   Py_VISIT(traverse_module_state->__pyx_n_s_name);
@@ -4157,16 +3950,17 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_n_s_ndim);
   Py_VISIT(traverse_module_state->__pyx_n_s_new);
   Py_VISIT(traverse_module_state->__pyx_kp_s_no_default___reduce___due_to_non);
-  Py_VISIT(traverse_module_state->__pyx_n_s_numpy);
-  Py_VISIT(traverse_module_state->__pyx_n_s_nx);
-  Py_VISIT(traverse_module_state->__pyx_n_s_ny);
-  Py_VISIT(traverse_module_state->__pyx_n_s_nz);
   Py_VISIT(traverse_module_state->__pyx_n_s_obj);
+  Py_VISIT(traverse_module_state->__pyx_n_s_object_1_surface_voxel_coordinat);
+  Py_VISIT(traverse_module_state->__pyx_n_s_object_2_surface_voxel_coordinat);
   Py_VISIT(traverse_module_state->__pyx_n_s_output_list);
+  Py_VISIT(traverse_module_state->__pyx_n_s_output_set);
   Py_VISIT(traverse_module_state->__pyx_n_s_p1);
   Py_VISIT(traverse_module_state->__pyx_n_s_p2);
   Py_VISIT(traverse_module_state->__pyx_n_s_pack);
   Py_VISIT(traverse_module_state->__pyx_n_s_pickle);
+  Py_VISIT(traverse_module_state->__pyx_n_s_point);
+  Py_VISIT(traverse_module_state->__pyx_n_s_points);
   Py_VISIT(traverse_module_state->__pyx_n_s_pyx_PickleError);
   Py_VISIT(traverse_module_state->__pyx_n_s_pyx_checksum);
   Py_VISIT(traverse_module_state->__pyx_n_s_pyx_result);
@@ -4179,15 +3973,12 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_n_s_reduce_cython);
   Py_VISIT(traverse_module_state->__pyx_n_s_reduce_ex);
   Py_VISIT(traverse_module_state->__pyx_n_s_register);
-  Py_VISIT(traverse_module_state->__pyx_n_s_return);
-  Py_VISIT(traverse_module_state->__pyx_n_s_s);
+  Py_VISIT(traverse_module_state->__pyx_n_s_rows);
   Py_VISIT(traverse_module_state->__pyx_n_s_setstate);
   Py_VISIT(traverse_module_state->__pyx_n_s_setstate_cython);
   Py_VISIT(traverse_module_state->__pyx_n_s_shape);
-  Py_VISIT(traverse_module_state->__pyx_n_s_signatures);
   Py_VISIT(traverse_module_state->__pyx_n_s_size);
   Py_VISIT(traverse_module_state->__pyx_n_s_spec);
-  Py_VISIT(traverse_module_state->__pyx_n_s_split);
   Py_VISIT(traverse_module_state->__pyx_n_s_start);
   Py_VISIT(traverse_module_state->__pyx_n_s_starts_array);
   Py_VISIT(traverse_module_state->__pyx_n_s_step);
@@ -4196,24 +3987,16 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_kp_s_strided_and_direct_or_indirect);
   Py_VISIT(traverse_module_state->__pyx_kp_s_strided_and_indirect);
   Py_VISIT(traverse_module_state->__pyx_kp_s_stringsource);
-  Py_VISIT(traverse_module_state->__pyx_n_s_strip);
   Py_VISIT(traverse_module_state->__pyx_n_s_struct);
-  Py_VISIT(traverse_module_state->__pyx_n_s_surface_voxels);
+  Py_VISIT(traverse_module_state->__pyx_n_s_sublist);
   Py_VISIT(traverse_module_state->__pyx_n_s_sys);
   Py_VISIT(traverse_module_state->__pyx_n_s_test);
   Py_VISIT(traverse_module_state->__pyx_n_s_typing);
   Py_VISIT(traverse_module_state->__pyx_kp_s_unable_to_allocate_array_data);
   Py_VISIT(traverse_module_state->__pyx_kp_s_unable_to_allocate_shape_and_str);
   Py_VISIT(traverse_module_state->__pyx_n_s_unpack);
-  Py_VISIT(traverse_module_state->__pyx_kp_s_unsigned_char);
-  Py_VISIT(traverse_module_state->__pyx_kp_s_unsigned_int);
-  Py_VISIT(traverse_module_state->__pyx_kp_s_unsigned_long_long);
-  Py_VISIT(traverse_module_state->__pyx_kp_s_unsigned_short);
   Py_VISIT(traverse_module_state->__pyx_n_s_update);
-  Py_VISIT(traverse_module_state->__pyx_n_s_values);
   Py_VISIT(traverse_module_state->__pyx_n_s_version_info);
-  Py_VISIT(traverse_module_state->__pyx_n_s_volume);
-  Py_VISIT(traverse_module_state->__pyx_n_s_voxel_value);
   Py_VISIT(traverse_module_state->__pyx_n_s_x);
   Py_VISIT(traverse_module_state->__pyx_n_s_x1);
   Py_VISIT(traverse_module_state->__pyx_n_s_x2);
@@ -4225,20 +4008,20 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_n_s_z);
   Py_VISIT(traverse_module_state->__pyx_n_s_z1);
   Py_VISIT(traverse_module_state->__pyx_n_s_z2);
-  Py_VISIT(traverse_module_state->__pyx_n_s_zip);
   Py_VISIT(traverse_module_state->__pyx_n_s_zs);
   Py_VISIT(traverse_module_state->__pyx_int_0);
   Py_VISIT(traverse_module_state->__pyx_int_1);
-  Py_VISIT(traverse_module_state->__pyx_int_2);
   Py_VISIT(traverse_module_state->__pyx_int_3);
   Py_VISIT(traverse_module_state->__pyx_int_112105877);
   Py_VISIT(traverse_module_state->__pyx_int_136983863);
   Py_VISIT(traverse_module_state->__pyx_int_184977713);
   Py_VISIT(traverse_module_state->__pyx_int_neg_1);
   Py_VISIT(traverse_module_state->__pyx_k__9);
+  Py_VISIT(traverse_module_state->__pyx_k__10);
   Py_VISIT(traverse_module_state->__pyx_slice__5);
   Py_VISIT(traverse_module_state->__pyx_tuple__4);
   Py_VISIT(traverse_module_state->__pyx_tuple__8);
+  Py_VISIT(traverse_module_state->__pyx_tuple__11);
   Py_VISIT(traverse_module_state->__pyx_tuple__12);
   Py_VISIT(traverse_module_state->__pyx_tuple__13);
   Py_VISIT(traverse_module_state->__pyx_tuple__14);
@@ -4248,16 +4031,13 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
   Py_VISIT(traverse_module_state->__pyx_tuple__18);
   Py_VISIT(traverse_module_state->__pyx_tuple__19);
   Py_VISIT(traverse_module_state->__pyx_tuple__20);
-  Py_VISIT(traverse_module_state->__pyx_tuple__21);
   Py_VISIT(traverse_module_state->__pyx_tuple__22);
-  Py_VISIT(traverse_module_state->__pyx_tuple__23);
-  Py_VISIT(traverse_module_state->__pyx_tuple__25);
+  Py_VISIT(traverse_module_state->__pyx_tuple__24);
   Py_VISIT(traverse_module_state->__pyx_tuple__27);
-  Py_VISIT(traverse_module_state->__pyx_tuple__29);
-  Py_VISIT(traverse_module_state->__pyx_codeobj__24);
-  Py_VISIT(traverse_module_state->__pyx_codeobj__26);
+  Py_VISIT(traverse_module_state->__pyx_codeobj__21);
+  Py_VISIT(traverse_module_state->__pyx_codeobj__23);
+  Py_VISIT(traverse_module_state->__pyx_codeobj__25);
   Py_VISIT(traverse_module_state->__pyx_codeobj__28);
-  Py_VISIT(traverse_module_state->__pyx_codeobj__30);
   return 0;
 }
 #endif
@@ -4400,8 +4180,6 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_kp_s_Dimension_d_is_not_direct __pyx_mstate_global->__pyx_kp_s_Dimension_d_is_not_direct
 #define __pyx_n_s_Ellipsis __pyx_mstate_global->__pyx_n_s_Ellipsis
 #define __pyx_kp_s_Empty_shape_tuple_for_cython_arr __pyx_mstate_global->__pyx_kp_s_Empty_shape_tuple_for_cython_arr
-#define __pyx_kp_s_Expected_at_least_d_argument_s_g __pyx_mstate_global->__pyx_kp_s_Expected_at_least_d_argument_s_g
-#define __pyx_kp_s_Function_call_with_ambiguous_arg __pyx_mstate_global->__pyx_kp_s_Function_call_with_ambiguous_arg
 #define __pyx_kp_s_Incompatible_checksums_0x_x_vs_0 __pyx_mstate_global->__pyx_kp_s_Incompatible_checksums_0x_x_vs_0
 #define __pyx_n_s_IndexError __pyx_mstate_global->__pyx_n_s_IndexError
 #define __pyx_kp_s_Index_out_of_bounds_axis_d __pyx_mstate_global->__pyx_kp_s_Index_out_of_bounds_axis_d
@@ -4409,11 +4187,9 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_kp_u_Invalid_mode_expected_c_or_fortr __pyx_mstate_global->__pyx_kp_u_Invalid_mode_expected_c_or_fortr
 #define __pyx_kp_u_Invalid_shape_in_axis __pyx_mstate_global->__pyx_kp_u_Invalid_shape_in_axis
 #define __pyx_n_s_List __pyx_mstate_global->__pyx_n_s_List
-#define __pyx_kp_s_List_Tuple_int_int_int __pyx_mstate_global->__pyx_kp_s_List_Tuple_int_int_int
 #define __pyx_n_s_MemoryError __pyx_mstate_global->__pyx_n_s_MemoryError
 #define __pyx_kp_s_MemoryView_of_r_at_0x_x __pyx_mstate_global->__pyx_kp_s_MemoryView_of_r_at_0x_x
 #define __pyx_kp_s_MemoryView_of_r_object __pyx_mstate_global->__pyx_kp_s_MemoryView_of_r_object
-#define __pyx_kp_s_No_matching_signature_found __pyx_mstate_global->__pyx_kp_s_No_matching_signature_found
 #define __pyx_n_b_O __pyx_mstate_global->__pyx_n_b_O
 #define __pyx_kp_u_Out_of_bounds_on_buffer_access_a __pyx_mstate_global->__pyx_kp_u_Out_of_bounds_on_buffer_access_a
 #define __pyx_n_s_PickleError __pyx_mstate_global->__pyx_n_s_PickleError
@@ -4424,24 +4200,23 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_kp_s_Unable_to_convert_item_to_object __pyx_mstate_global->__pyx_kp_s_Unable_to_convert_item_to_object
 #define __pyx_n_s_ValueError __pyx_mstate_global->__pyx_n_s_ValueError
 #define __pyx_n_s_View_MemoryView __pyx_mstate_global->__pyx_n_s_View_MemoryView
-#define __pyx_kp_s__10 __pyx_mstate_global->__pyx_kp_s__10
-#define __pyx_kp_s__11 __pyx_mstate_global->__pyx_kp_s__11
-#define __pyx_kp_u__11 __pyx_mstate_global->__pyx_kp_u__11
 #define __pyx_kp_u__2 __pyx_mstate_global->__pyx_kp_u__2
+#define __pyx_n_s__26 __pyx_mstate_global->__pyx_n_s__26
+#define __pyx_n_s__29 __pyx_mstate_global->__pyx_n_s__29
 #define __pyx_n_s__3 __pyx_mstate_global->__pyx_n_s__3
-#define __pyx_n_s__31 __pyx_mstate_global->__pyx_n_s__31
 #define __pyx_kp_u__6 __pyx_mstate_global->__pyx_kp_u__6
 #define __pyx_kp_u__7 __pyx_mstate_global->__pyx_kp_u__7
 #define __pyx_n_s_abc __pyx_mstate_global->__pyx_n_s_abc
+#define __pyx_n_s_all_valid_voxels __pyx_mstate_global->__pyx_n_s_all_valid_voxels
 #define __pyx_n_s_allocate_buffer __pyx_mstate_global->__pyx_n_s_allocate_buffer
 #define __pyx_kp_u_and __pyx_mstate_global->__pyx_kp_u_and
-#define __pyx_n_s_args __pyx_mstate_global->__pyx_n_s_args
 #define __pyx_n_s_asyncio_coroutines __pyx_mstate_global->__pyx_n_s_asyncio_coroutines
 #define __pyx_n_s_base __pyx_mstate_global->__pyx_n_s_base
 #define __pyx_n_s_bresenham3D __pyx_mstate_global->__pyx_n_s_bresenham3D
 #define __pyx_n_s_bresenham3DWithMask __pyx_mstate_global->__pyx_n_s_bresenham3DWithMask
 #define __pyx_n_s_bresenham3DWithMaskSingle __pyx_mstate_global->__pyx_n_s_bresenham3DWithMaskSingle
 #define __pyx_kp_s_bresenham3D_pyx __pyx_mstate_global->__pyx_kp_s_bresenham3D_pyx
+#define __pyx_n_s_bresenham_3D_lines __pyx_mstate_global->__pyx_n_s_bresenham_3D_lines
 #define __pyx_n_s_c __pyx_mstate_global->__pyx_n_s_c
 #define __pyx_n_u_c __pyx_mstate_global->__pyx_n_u_c
 #define __pyx_n_s_class __pyx_mstate_global->__pyx_n_s_class
@@ -4449,15 +4224,15 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_n_s_cline_in_traceback __pyx_mstate_global->__pyx_n_s_cline_in_traceback
 #define __pyx_n_s_collections __pyx_mstate_global->__pyx_n_s_collections
 #define __pyx_kp_s_collections_abc __pyx_mstate_global->__pyx_kp_s_collections_abc
+#define __pyx_n_s_contact_voxel_1 __pyx_mstate_global->__pyx_n_s_contact_voxel_1
+#define __pyx_n_s_contact_voxel_2 __pyx_mstate_global->__pyx_n_s_contact_voxel_2
+#define __pyx_n_s_contact_voxels_list_of_lists __pyx_mstate_global->__pyx_n_s_contact_voxels_list_of_lists
 #define __pyx_kp_s_contiguous_and_direct __pyx_mstate_global->__pyx_kp_s_contiguous_and_direct
 #define __pyx_kp_s_contiguous_and_indirect __pyx_mstate_global->__pyx_kp_s_contiguous_and_indirect
 #define __pyx_n_s_count __pyx_mstate_global->__pyx_n_s_count
-#define __pyx_n_s_current_end __pyx_mstate_global->__pyx_n_s_current_end
-#define __pyx_n_s_current_start __pyx_mstate_global->__pyx_n_s_current_start
-#define __pyx_n_s_defaults __pyx_mstate_global->__pyx_n_s_defaults
+#define __pyx_n_s_current_pair_contact_sites __pyx_mstate_global->__pyx_n_s_current_pair_contact_sites
 #define __pyx_n_s_dict __pyx_mstate_global->__pyx_n_s_dict
 #define __pyx_kp_u_disable __pyx_mstate_global->__pyx_kp_u_disable
-#define __pyx_n_s_dtype __pyx_mstate_global->__pyx_n_s_dtype
 #define __pyx_n_s_dtype_is_object __pyx_mstate_global->__pyx_n_s_dtype_is_object
 #define __pyx_n_s_dx __pyx_mstate_global->__pyx_n_s_dx
 #define __pyx_n_s_dy __pyx_mstate_global->__pyx_n_s_dy
@@ -4467,18 +4242,18 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_n_s_ends_array __pyx_mstate_global->__pyx_n_s_ends_array
 #define __pyx_n_s_enumerate __pyx_mstate_global->__pyx_n_s_enumerate
 #define __pyx_n_s_error __pyx_mstate_global->__pyx_n_s_error
-#define __pyx_n_s_find_boundary __pyx_mstate_global->__pyx_n_s_find_boundary
 #define __pyx_n_s_flags __pyx_mstate_global->__pyx_n_s_flags
 #define __pyx_n_s_format __pyx_mstate_global->__pyx_n_s_format
 #define __pyx_n_s_fortran __pyx_mstate_global->__pyx_n_s_fortran
 #define __pyx_n_u_fortran __pyx_mstate_global->__pyx_n_u_fortran
-#define __pyx_n_s_fused_sigindex __pyx_mstate_global->__pyx_n_s_fused_sigindex
+#define __pyx_n_s_found_contact_voxels __pyx_mstate_global->__pyx_n_s_found_contact_voxels
 #define __pyx_kp_u_gc __pyx_mstate_global->__pyx_kp_u_gc
-#define __pyx_n_s_get __pyx_mstate_global->__pyx_n_s_get
 #define __pyx_n_s_getstate __pyx_mstate_global->__pyx_n_s_getstate
 #define __pyx_kp_u_got __pyx_mstate_global->__pyx_kp_u_got
 #define __pyx_kp_u_got_differing_extents_in_dimensi __pyx_mstate_global->__pyx_kp_u_got_differing_extents_in_dimensi
+#define __pyx_n_s_i __pyx_mstate_global->__pyx_n_s_i
 #define __pyx_n_s_id __pyx_mstate_global->__pyx_n_s_id
+#define __pyx_n_s_idx __pyx_mstate_global->__pyx_n_s_idx
 #define __pyx_n_s_import __pyx_mstate_global->__pyx_n_s_import
 #define __pyx_n_s_index __pyx_mstate_global->__pyx_n_s_index
 #define __pyx_n_s_initializing __pyx_mstate_global->__pyx_n_s_initializing
@@ -4486,11 +4261,10 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_kp_u_isenabled __pyx_mstate_global->__pyx_kp_u_isenabled
 #define __pyx_n_s_itemsize __pyx_mstate_global->__pyx_n_s_itemsize
 #define __pyx_kp_s_itemsize_0_for_cython_array __pyx_mstate_global->__pyx_kp_s_itemsize_0_for_cython_array
-#define __pyx_n_s_kind __pyx_mstate_global->__pyx_n_s_kind
-#define __pyx_n_s_kwargs __pyx_mstate_global->__pyx_n_s_kwargs
-#define __pyx_n_s_listOfPoints __pyx_mstate_global->__pyx_n_s_listOfPoints
+#define __pyx_n_s_j __pyx_mstate_global->__pyx_n_s_j
 #define __pyx_n_s_main __pyx_mstate_global->__pyx_n_s_main
 #define __pyx_n_s_mask __pyx_mstate_global->__pyx_n_s_mask
+#define __pyx_n_s_max_num_voxels __pyx_mstate_global->__pyx_n_s_max_num_voxels
 #define __pyx_n_s_memview __pyx_mstate_global->__pyx_n_s_memview
 #define __pyx_n_s_mode __pyx_mstate_global->__pyx_n_s_mode
 #define __pyx_n_s_name __pyx_mstate_global->__pyx_n_s_name
@@ -4498,16 +4272,17 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_n_s_ndim __pyx_mstate_global->__pyx_n_s_ndim
 #define __pyx_n_s_new __pyx_mstate_global->__pyx_n_s_new
 #define __pyx_kp_s_no_default___reduce___due_to_non __pyx_mstate_global->__pyx_kp_s_no_default___reduce___due_to_non
-#define __pyx_n_s_numpy __pyx_mstate_global->__pyx_n_s_numpy
-#define __pyx_n_s_nx __pyx_mstate_global->__pyx_n_s_nx
-#define __pyx_n_s_ny __pyx_mstate_global->__pyx_n_s_ny
-#define __pyx_n_s_nz __pyx_mstate_global->__pyx_n_s_nz
 #define __pyx_n_s_obj __pyx_mstate_global->__pyx_n_s_obj
+#define __pyx_n_s_object_1_surface_voxel_coordinat __pyx_mstate_global->__pyx_n_s_object_1_surface_voxel_coordinat
+#define __pyx_n_s_object_2_surface_voxel_coordinat __pyx_mstate_global->__pyx_n_s_object_2_surface_voxel_coordinat
 #define __pyx_n_s_output_list __pyx_mstate_global->__pyx_n_s_output_list
+#define __pyx_n_s_output_set __pyx_mstate_global->__pyx_n_s_output_set
 #define __pyx_n_s_p1 __pyx_mstate_global->__pyx_n_s_p1
 #define __pyx_n_s_p2 __pyx_mstate_global->__pyx_n_s_p2
 #define __pyx_n_s_pack __pyx_mstate_global->__pyx_n_s_pack
 #define __pyx_n_s_pickle __pyx_mstate_global->__pyx_n_s_pickle
+#define __pyx_n_s_point __pyx_mstate_global->__pyx_n_s_point
+#define __pyx_n_s_points __pyx_mstate_global->__pyx_n_s_points
 #define __pyx_n_s_pyx_PickleError __pyx_mstate_global->__pyx_n_s_pyx_PickleError
 #define __pyx_n_s_pyx_checksum __pyx_mstate_global->__pyx_n_s_pyx_checksum
 #define __pyx_n_s_pyx_result __pyx_mstate_global->__pyx_n_s_pyx_result
@@ -4520,15 +4295,12 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_n_s_reduce_cython __pyx_mstate_global->__pyx_n_s_reduce_cython
 #define __pyx_n_s_reduce_ex __pyx_mstate_global->__pyx_n_s_reduce_ex
 #define __pyx_n_s_register __pyx_mstate_global->__pyx_n_s_register
-#define __pyx_n_s_return __pyx_mstate_global->__pyx_n_s_return
-#define __pyx_n_s_s __pyx_mstate_global->__pyx_n_s_s
+#define __pyx_n_s_rows __pyx_mstate_global->__pyx_n_s_rows
 #define __pyx_n_s_setstate __pyx_mstate_global->__pyx_n_s_setstate
 #define __pyx_n_s_setstate_cython __pyx_mstate_global->__pyx_n_s_setstate_cython
 #define __pyx_n_s_shape __pyx_mstate_global->__pyx_n_s_shape
-#define __pyx_n_s_signatures __pyx_mstate_global->__pyx_n_s_signatures
 #define __pyx_n_s_size __pyx_mstate_global->__pyx_n_s_size
 #define __pyx_n_s_spec __pyx_mstate_global->__pyx_n_s_spec
-#define __pyx_n_s_split __pyx_mstate_global->__pyx_n_s_split
 #define __pyx_n_s_start __pyx_mstate_global->__pyx_n_s_start
 #define __pyx_n_s_starts_array __pyx_mstate_global->__pyx_n_s_starts_array
 #define __pyx_n_s_step __pyx_mstate_global->__pyx_n_s_step
@@ -4537,24 +4309,16 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_kp_s_strided_and_direct_or_indirect __pyx_mstate_global->__pyx_kp_s_strided_and_direct_or_indirect
 #define __pyx_kp_s_strided_and_indirect __pyx_mstate_global->__pyx_kp_s_strided_and_indirect
 #define __pyx_kp_s_stringsource __pyx_mstate_global->__pyx_kp_s_stringsource
-#define __pyx_n_s_strip __pyx_mstate_global->__pyx_n_s_strip
 #define __pyx_n_s_struct __pyx_mstate_global->__pyx_n_s_struct
-#define __pyx_n_s_surface_voxels __pyx_mstate_global->__pyx_n_s_surface_voxels
+#define __pyx_n_s_sublist __pyx_mstate_global->__pyx_n_s_sublist
 #define __pyx_n_s_sys __pyx_mstate_global->__pyx_n_s_sys
 #define __pyx_n_s_test __pyx_mstate_global->__pyx_n_s_test
 #define __pyx_n_s_typing __pyx_mstate_global->__pyx_n_s_typing
 #define __pyx_kp_s_unable_to_allocate_array_data __pyx_mstate_global->__pyx_kp_s_unable_to_allocate_array_data
 #define __pyx_kp_s_unable_to_allocate_shape_and_str __pyx_mstate_global->__pyx_kp_s_unable_to_allocate_shape_and_str
 #define __pyx_n_s_unpack __pyx_mstate_global->__pyx_n_s_unpack
-#define __pyx_kp_s_unsigned_char __pyx_mstate_global->__pyx_kp_s_unsigned_char
-#define __pyx_kp_s_unsigned_int __pyx_mstate_global->__pyx_kp_s_unsigned_int
-#define __pyx_kp_s_unsigned_long_long __pyx_mstate_global->__pyx_kp_s_unsigned_long_long
-#define __pyx_kp_s_unsigned_short __pyx_mstate_global->__pyx_kp_s_unsigned_short
 #define __pyx_n_s_update __pyx_mstate_global->__pyx_n_s_update
-#define __pyx_n_s_values __pyx_mstate_global->__pyx_n_s_values
 #define __pyx_n_s_version_info __pyx_mstate_global->__pyx_n_s_version_info
-#define __pyx_n_s_volume __pyx_mstate_global->__pyx_n_s_volume
-#define __pyx_n_s_voxel_value __pyx_mstate_global->__pyx_n_s_voxel_value
 #define __pyx_n_s_x __pyx_mstate_global->__pyx_n_s_x
 #define __pyx_n_s_x1 __pyx_mstate_global->__pyx_n_s_x1
 #define __pyx_n_s_x2 __pyx_mstate_global->__pyx_n_s_x2
@@ -4566,20 +4330,20 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_n_s_z __pyx_mstate_global->__pyx_n_s_z
 #define __pyx_n_s_z1 __pyx_mstate_global->__pyx_n_s_z1
 #define __pyx_n_s_z2 __pyx_mstate_global->__pyx_n_s_z2
-#define __pyx_n_s_zip __pyx_mstate_global->__pyx_n_s_zip
 #define __pyx_n_s_zs __pyx_mstate_global->__pyx_n_s_zs
 #define __pyx_int_0 __pyx_mstate_global->__pyx_int_0
 #define __pyx_int_1 __pyx_mstate_global->__pyx_int_1
-#define __pyx_int_2 __pyx_mstate_global->__pyx_int_2
 #define __pyx_int_3 __pyx_mstate_global->__pyx_int_3
 #define __pyx_int_112105877 __pyx_mstate_global->__pyx_int_112105877
 #define __pyx_int_136983863 __pyx_mstate_global->__pyx_int_136983863
 #define __pyx_int_184977713 __pyx_mstate_global->__pyx_int_184977713
 #define __pyx_int_neg_1 __pyx_mstate_global->__pyx_int_neg_1
 #define __pyx_k__9 __pyx_mstate_global->__pyx_k__9
+#define __pyx_k__10 __pyx_mstate_global->__pyx_k__10
 #define __pyx_slice__5 __pyx_mstate_global->__pyx_slice__5
 #define __pyx_tuple__4 __pyx_mstate_global->__pyx_tuple__4
 #define __pyx_tuple__8 __pyx_mstate_global->__pyx_tuple__8
+#define __pyx_tuple__11 __pyx_mstate_global->__pyx_tuple__11
 #define __pyx_tuple__12 __pyx_mstate_global->__pyx_tuple__12
 #define __pyx_tuple__13 __pyx_mstate_global->__pyx_tuple__13
 #define __pyx_tuple__14 __pyx_mstate_global->__pyx_tuple__14
@@ -4589,16 +4353,13 @@ static int __pyx_m_traverse(PyObject *m, visitproc visit, void *arg) {
 #define __pyx_tuple__18 __pyx_mstate_global->__pyx_tuple__18
 #define __pyx_tuple__19 __pyx_mstate_global->__pyx_tuple__19
 #define __pyx_tuple__20 __pyx_mstate_global->__pyx_tuple__20
-#define __pyx_tuple__21 __pyx_mstate_global->__pyx_tuple__21
 #define __pyx_tuple__22 __pyx_mstate_global->__pyx_tuple__22
-#define __pyx_tuple__23 __pyx_mstate_global->__pyx_tuple__23
-#define __pyx_tuple__25 __pyx_mstate_global->__pyx_tuple__25
+#define __pyx_tuple__24 __pyx_mstate_global->__pyx_tuple__24
 #define __pyx_tuple__27 __pyx_mstate_global->__pyx_tuple__27
-#define __pyx_tuple__29 __pyx_mstate_global->__pyx_tuple__29
-#define __pyx_codeobj__24 __pyx_mstate_global->__pyx_codeobj__24
-#define __pyx_codeobj__26 __pyx_mstate_global->__pyx_codeobj__26
+#define __pyx_codeobj__21 __pyx_mstate_global->__pyx_codeobj__21
+#define __pyx_codeobj__23 __pyx_mstate_global->__pyx_codeobj__23
+#define __pyx_codeobj__25 __pyx_mstate_global->__pyx_codeobj__25
 #define __pyx_codeobj__28 __pyx_mstate_global->__pyx_codeobj__28
-#define __pyx_codeobj__30 __pyx_mstate_global->__pyx_codeobj__30
 /* #### Code section: module_code ### */
 
 /* "View.MemoryView":131
@@ -18523,12 +18284,12 @@ static CYTHON_INLINE PyObject *__pyx_f_7cpython_11contextvars_get_value_no_defau
 /* "bresenham3D.pyx":7
  * from typing import List, Tuple
  * 
- * cdef inline bint append_if_not_masked(int x, int y, int z, list points, unsigned char[:,:,:] mask=None):             # <<<<<<<<<<<<<<
+ * cdef inline bint append_if_not_masked(int x, int y, int z, int idx, list points, unsigned char[:,:,:] mask=None):             # <<<<<<<<<<<<<<
  *     if mask is not None and mask[x,y,z]:
  *         return False
  */
 
-static CYTHON_INLINE int __pyx_f_11bresenham3D_append_if_not_masked(int __pyx_v_x, int __pyx_v_y, int __pyx_v_z, PyObject *__pyx_v_points, struct __pyx_opt_args_11bresenham3D_append_if_not_masked *__pyx_optional_args) {
+static CYTHON_INLINE int __pyx_f_11bresenham3D_append_if_not_masked(int __pyx_v_x, int __pyx_v_y, int __pyx_v_z, int __pyx_v_idx, PyObject *__pyx_v_points, struct __pyx_opt_args_11bresenham3D_append_if_not_masked *__pyx_optional_args) {
   __Pyx_memviewslice __pyx_v_mask = __pyx_k__9;
   int __pyx_r;
   __Pyx_RefNannyDeclarations
@@ -18542,7 +18303,6 @@ static CYTHON_INLINE int __pyx_f_11bresenham3D_append_if_not_masked(int __pyx_v_
   PyObject *__pyx_t_8 = NULL;
   PyObject *__pyx_t_9 = NULL;
   PyObject *__pyx_t_10 = NULL;
-  int __pyx_t_11;
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
@@ -18555,7 +18315,7 @@ static CYTHON_INLINE int __pyx_f_11bresenham3D_append_if_not_masked(int __pyx_v_
 
   /* "bresenham3D.pyx":8
  * 
- * cdef inline bint append_if_not_masked(int x, int y, int z, list points, unsigned char[:,:,:] mask=None):
+ * cdef inline bint append_if_not_masked(int x, int y, int z, int idx, list points, unsigned char[:,:,:] mask=None):
  *     if mask is not None and mask[x,y,z]:             # <<<<<<<<<<<<<<
  *         return False
  *     else:
@@ -18592,18 +18352,18 @@ static CYTHON_INLINE int __pyx_f_11bresenham3D_append_if_not_masked(int __pyx_v_
   if (__pyx_t_1) {
 
     /* "bresenham3D.pyx":9
- * cdef inline bint append_if_not_masked(int x, int y, int z, list points, unsigned char[:,:,:] mask=None):
+ * cdef inline bint append_if_not_masked(int x, int y, int z, int idx, list points, unsigned char[:,:,:] mask=None):
  *     if mask is not None and mask[x,y,z]:
  *         return False             # <<<<<<<<<<<<<<
  *     else:
- *         points.append((x, y, z))
+ *         points[idx] = (x,y,z)
  */
     __pyx_r = 0;
     goto __pyx_L0;
 
     /* "bresenham3D.pyx":8
  * 
- * cdef inline bint append_if_not_masked(int x, int y, int z, list points, unsigned char[:,:,:] mask=None):
+ * cdef inline bint append_if_not_masked(int x, int y, int z, int idx, list points, unsigned char[:,:,:] mask=None):
  *     if mask is not None and mask[x,y,z]:             # <<<<<<<<<<<<<<
  *         return False
  *     else:
@@ -18613,15 +18373,11 @@ static CYTHON_INLINE int __pyx_f_11bresenham3D_append_if_not_masked(int __pyx_v_
   /* "bresenham3D.pyx":11
  *         return False
  *     else:
- *         points.append((x, y, z))             # <<<<<<<<<<<<<<
+ *         points[idx] = (x,y,z)             # <<<<<<<<<<<<<<
  *         return True
  * 
  */
   /*else*/ {
-    if (unlikely(__pyx_v_points == Py_None)) {
-      PyErr_Format(PyExc_AttributeError, "'NoneType' object has no attribute '%.30s'", "append");
-      __PYX_ERR(0, 11, __pyx_L1_error)
-    }
     __pyx_t_7 = __Pyx_PyInt_From_int(__pyx_v_x); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 11, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_7);
     __pyx_t_8 = __Pyx_PyInt_From_int(__pyx_v_y); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 11, __pyx_L1_error)
@@ -18639,12 +18395,16 @@ static CYTHON_INLINE int __pyx_f_11bresenham3D_append_if_not_masked(int __pyx_v_
     __pyx_t_7 = 0;
     __pyx_t_8 = 0;
     __pyx_t_9 = 0;
-    __pyx_t_11 = __Pyx_PyList_Append(__pyx_v_points, __pyx_t_10); if (unlikely(__pyx_t_11 == ((int)-1))) __PYX_ERR(0, 11, __pyx_L1_error)
+    if (unlikely(__pyx_v_points == Py_None)) {
+      PyErr_SetString(PyExc_TypeError, "'NoneType' object is not subscriptable");
+      __PYX_ERR(0, 11, __pyx_L1_error)
+    }
+    if (unlikely((__Pyx_SetItemInt(__pyx_v_points, __pyx_v_idx, __pyx_t_10, int, 1, __Pyx_PyInt_From_int, 1, 1, 1) < 0))) __PYX_ERR(0, 11, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_10); __pyx_t_10 = 0;
 
     /* "bresenham3D.pyx":12
  *     else:
- *         points.append((x, y, z))
+ *         points[idx] = (x,y,z)
  *         return True             # <<<<<<<<<<<<<<
  * 
  * def bresenham3DWithMaskSingle(
@@ -18656,7 +18416,7 @@ static CYTHON_INLINE int __pyx_f_11bresenham3D_append_if_not_masked(int __pyx_v_
   /* "bresenham3D.pyx":7
  * from typing import List, Tuple
  * 
- * cdef inline bint append_if_not_masked(int x, int y, int z, list points, unsigned char[:,:,:] mask=None):             # <<<<<<<<<<<<<<
+ * cdef inline bint append_if_not_masked(int x, int y, int z, int idx, list points, unsigned char[:,:,:] mask=None):             # <<<<<<<<<<<<<<
  *     if mask is not None and mask[x,y,z]:
  *         return False
  */
@@ -18678,11 +18438,11 @@ static CYTHON_INLINE int __pyx_f_11bresenham3D_append_if_not_masked(int __pyx_v_
  *         return True
  * 
  * def bresenham3DWithMaskSingle(             # <<<<<<<<<<<<<<
- *     int x1, int y1, int z1, int x2, int y2, int z2, unsigned char[:,:,:] mask=None
- * ) -> List[Tuple[int, int, int]]:
+ *     int x1, int y1, int z1, int x2, int y2, int z2,
+ *     list points,
  */
 
-static PyObject *__pyx_pf_11bresenham3D_16__defaults__(CYTHON_UNUSED PyObject *__pyx_self) {
+static PyObject *__pyx_pf_11bresenham3D_6__defaults__(CYTHON_UNUSED PyObject *__pyx_self) {
   PyObject *__pyx_r = NULL;
   __Pyx_RefNannyDeclarations
   PyObject *__pyx_t_1 = NULL;
@@ -18745,12 +18505,13 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   int __pyx_v_x2;
   int __pyx_v_y2;
   int __pyx_v_z2;
+  PyObject *__pyx_v_points = 0;
   __Pyx_memviewslice __pyx_v_mask = { 0, 0, { 0 }, { 0 }, { 0 } };
   #if !CYTHON_METH_FASTCALL
   CYTHON_UNUSED Py_ssize_t __pyx_nargs;
   #endif
   CYTHON_UNUSED PyObject *const *__pyx_kwvalues;
-  PyObject* values[7] = {0,0,0,0,0,0,0};
+  PyObject* values[8] = {0,0,0,0,0,0,0,0};
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
@@ -18766,11 +18527,13 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   #endif
   __pyx_kwvalues = __Pyx_KwValues_FASTCALL(__pyx_args, __pyx_nargs);
   {
-    PyObject **__pyx_pyargnames[] = {&__pyx_n_s_x1,&__pyx_n_s_y1,&__pyx_n_s_z1,&__pyx_n_s_x2,&__pyx_n_s_y2,&__pyx_n_s_z2,&__pyx_n_s_mask,0};
+    PyObject **__pyx_pyargnames[] = {&__pyx_n_s_x1,&__pyx_n_s_y1,&__pyx_n_s_z1,&__pyx_n_s_x2,&__pyx_n_s_y2,&__pyx_n_s_z2,&__pyx_n_s_points,&__pyx_n_s_mask,0};
     __pyx_defaults *__pyx_dynamic_args = __Pyx_CyFunction_Defaults(__pyx_defaults, __pyx_self);
     if (__pyx_kwds) {
       Py_ssize_t kw_args;
       switch (__pyx_nargs) {
+        case  8: values[7] = __Pyx_Arg_FASTCALL(__pyx_args, 7);
+        CYTHON_FALLTHROUGH;
         case  7: values[6] = __Pyx_Arg_FASTCALL(__pyx_args, 6);
         CYTHON_FALLTHROUGH;
         case  6: values[5] = __Pyx_Arg_FASTCALL(__pyx_args, 5);
@@ -18805,7 +18568,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
         }
         else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 14, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("bresenham3DWithMaskSingle", 0, 6, 7, 1); __PYX_ERR(0, 14, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("bresenham3DWithMaskSingle", 0, 7, 8, 1); __PYX_ERR(0, 14, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  2:
@@ -18815,7 +18578,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
         }
         else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 14, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("bresenham3DWithMaskSingle", 0, 6, 7, 2); __PYX_ERR(0, 14, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("bresenham3DWithMaskSingle", 0, 7, 8, 2); __PYX_ERR(0, 14, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  3:
@@ -18825,7 +18588,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
         }
         else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 14, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("bresenham3DWithMaskSingle", 0, 6, 7, 3); __PYX_ERR(0, 14, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("bresenham3DWithMaskSingle", 0, 7, 8, 3); __PYX_ERR(0, 14, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  4:
@@ -18835,7 +18598,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
         }
         else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 14, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("bresenham3DWithMaskSingle", 0, 6, 7, 4); __PYX_ERR(0, 14, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("bresenham3DWithMaskSingle", 0, 7, 8, 4); __PYX_ERR(0, 14, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  5:
@@ -18845,13 +18608,23 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
         }
         else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 14, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("bresenham3DWithMaskSingle", 0, 6, 7, 5); __PYX_ERR(0, 14, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("bresenham3DWithMaskSingle", 0, 7, 8, 5); __PYX_ERR(0, 14, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  6:
+        if (likely((values[6] = __Pyx_GetKwValue_FASTCALL(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_points)) != 0)) {
+          (void)__Pyx_Arg_NewRef_FASTCALL(values[6]);
+          kw_args--;
+        }
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 14, __pyx_L3_error)
+        else {
+          __Pyx_RaiseArgtupleInvalid("bresenham3DWithMaskSingle", 0, 7, 8, 6); __PYX_ERR(0, 14, __pyx_L3_error)
+        }
+        CYTHON_FALLTHROUGH;
+        case  7:
         if (kw_args > 0) {
           PyObject* value = __Pyx_GetKwValue_FASTCALL(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_mask);
-          if (value) { values[6] = __Pyx_Arg_NewRef_FASTCALL(value); kw_args--; }
+          if (value) { values[7] = __Pyx_Arg_NewRef_FASTCALL(value); kw_args--; }
           else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 14, __pyx_L3_error)
         }
       }
@@ -18861,9 +18634,10 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
       }
     } else {
       switch (__pyx_nargs) {
-        case  7: values[6] = __Pyx_Arg_FASTCALL(__pyx_args, 6);
+        case  8: values[7] = __Pyx_Arg_FASTCALL(__pyx_args, 7);
         CYTHON_FALLTHROUGH;
-        case  6: values[5] = __Pyx_Arg_FASTCALL(__pyx_args, 5);
+        case  7: values[6] = __Pyx_Arg_FASTCALL(__pyx_args, 6);
+        values[5] = __Pyx_Arg_FASTCALL(__pyx_args, 5);
         values[4] = __Pyx_Arg_FASTCALL(__pyx_args, 4);
         values[3] = __Pyx_Arg_FASTCALL(__pyx_args, 3);
         values[2] = __Pyx_Arg_FASTCALL(__pyx_args, 2);
@@ -18879,8 +18653,9 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
     __pyx_v_x2 = __Pyx_PyInt_As_int(values[3]); if (unlikely((__pyx_v_x2 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 15, __pyx_L3_error)
     __pyx_v_y2 = __Pyx_PyInt_As_int(values[4]); if (unlikely((__pyx_v_y2 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 15, __pyx_L3_error)
     __pyx_v_z2 = __Pyx_PyInt_As_int(values[5]); if (unlikely((__pyx_v_z2 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 15, __pyx_L3_error)
-    if (values[6]) {
-      __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[6], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 15, __pyx_L3_error)
+    __pyx_v_points = ((PyObject*)values[6]);
+    if (values[7]) {
+      __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[7], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 17, __pyx_L3_error)
     } else {
       __pyx_v_mask = __pyx_dynamic_args->__pyx_arg_mask;
       __PYX_INC_MEMVIEW(&__pyx_v_mask, 1);
@@ -18888,7 +18663,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   }
   goto __pyx_L6_skip;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("bresenham3DWithMaskSingle", 0, 6, 7, __pyx_nargs); __PYX_ERR(0, 14, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("bresenham3DWithMaskSingle", 0, 7, 8, __pyx_nargs); __PYX_ERR(0, 14, __pyx_L3_error)
   __pyx_L6_skip:;
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L3_error:;
@@ -18903,9 +18678,14 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
-  __pyx_r = __pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(__pyx_self, __pyx_v_x1, __pyx_v_y1, __pyx_v_z1, __pyx_v_x2, __pyx_v_y2, __pyx_v_z2, __pyx_v_mask);
+  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_points), (&PyList_Type), 1, "points", 1))) __PYX_ERR(0, 16, __pyx_L1_error)
+  __pyx_r = __pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(__pyx_self, __pyx_v_x1, __pyx_v_y1, __pyx_v_z1, __pyx_v_x2, __pyx_v_y2, __pyx_v_z2, __pyx_v_points, __pyx_v_mask);
 
   /* function exit code */
+  goto __pyx_L0;
+  __pyx_L1_error:;
+  __pyx_r = NULL;
+  __pyx_L0:;
   __PYX_XCLEAR_MEMVIEW(&__pyx_v_mask, 1);
   {
     Py_ssize_t __pyx_temp;
@@ -18917,8 +18697,8 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   return __pyx_r;
 }
 
-static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED PyObject *__pyx_self, int __pyx_v_x1, int __pyx_v_y1, int __pyx_v_z1, int __pyx_v_x2, int __pyx_v_y2, int __pyx_v_z2, __Pyx_memviewslice __pyx_v_mask) {
-  PyObject *__pyx_v_listOfPoints = 0;
+static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED PyObject *__pyx_self, int __pyx_v_x1, int __pyx_v_y1, int __pyx_v_z1, int __pyx_v_x2, int __pyx_v_y2, int __pyx_v_z2, PyObject *__pyx_v_points, __Pyx_memviewslice __pyx_v_mask) {
+  int __pyx_v_idx;
   int __pyx_v_dx;
   int __pyx_v_dy;
   int __pyx_v_dz;
@@ -18929,75 +18709,79 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
   int __pyx_v_p2;
   PyObject *__pyx_r = NULL;
   __Pyx_RefNannyDeclarations
-  PyObject *__pyx_t_1 = NULL;
-  int __pyx_t_2;
-  struct __pyx_opt_args_11bresenham3D_append_if_not_masked __pyx_t_3;
+  int __pyx_t_1;
+  struct __pyx_opt_args_11bresenham3D_append_if_not_masked __pyx_t_2;
+  int __pyx_t_3;
   int __pyx_t_4;
-  int __pyx_t_5;
+  PyObject *__pyx_t_5 = NULL;
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("bresenham3DWithMaskSingle", 1);
 
-  /* "bresenham3D.pyx":18
- * ) -> List[Tuple[int, int, int]]:
+  /* "bresenham3D.pyx":20
+ * ):
  * 
- *     cdef list listOfPoints = []             # <<<<<<<<<<<<<<
- *     if not append_if_not_masked(x1, y1, z1, listOfPoints, mask=mask):
- *         return []
+ *     cdef int idx = 0             # <<<<<<<<<<<<<<
+ *     if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):
+ *         return -1
  */
-  __pyx_t_1 = PyList_New(0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 18, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_v_listOfPoints = ((PyObject*)__pyx_t_1);
-  __pyx_t_1 = 0;
+  __pyx_v_idx = 0;
 
-  /* "bresenham3D.pyx":19
+  /* "bresenham3D.pyx":21
  * 
- *     cdef list listOfPoints = []
- *     if not append_if_not_masked(x1, y1, z1, listOfPoints, mask=mask):             # <<<<<<<<<<<<<<
- *         return []
- *     cdef int dx = abs(x2 - x1)
+ *     cdef int idx = 0
+ *     if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):             # <<<<<<<<<<<<<<
+ *         return -1
+ *     idx+=1
  */
-  __pyx_t_3.__pyx_n = 1;
-  __pyx_t_3.mask = __pyx_v_mask;
-  __pyx_t_2 = __pyx_f_11bresenham3D_append_if_not_masked(__pyx_v_x1, __pyx_v_y1, __pyx_v_z1, __pyx_v_listOfPoints, &__pyx_t_3); if (unlikely(__pyx_t_2 == ((int)-1) && PyErr_Occurred())) __PYX_ERR(0, 19, __pyx_L1_error)
-  __pyx_t_4 = (!__pyx_t_2);
-  if (__pyx_t_4) {
+  __pyx_t_2.__pyx_n = 1;
+  __pyx_t_2.mask = __pyx_v_mask;
+  __pyx_t_1 = __pyx_f_11bresenham3D_append_if_not_masked(__pyx_v_x1, __pyx_v_y1, __pyx_v_z1, __pyx_v_idx, __pyx_v_points, &__pyx_t_2); if (unlikely(__pyx_t_1 == ((int)-1) && PyErr_Occurred())) __PYX_ERR(0, 21, __pyx_L1_error)
+  __pyx_t_3 = (!__pyx_t_1);
+  if (__pyx_t_3) {
 
-    /* "bresenham3D.pyx":20
- *     cdef list listOfPoints = []
- *     if not append_if_not_masked(x1, y1, z1, listOfPoints, mask=mask):
- *         return []             # <<<<<<<<<<<<<<
- *     cdef int dx = abs(x2 - x1)
- *     cdef int dy = abs(y2 - y1)
+    /* "bresenham3D.pyx":22
+ *     cdef int idx = 0
+ *     if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):
+ *         return -1             # <<<<<<<<<<<<<<
+ *     idx+=1
+ * 
  */
     __Pyx_XDECREF(__pyx_r);
-    __pyx_t_1 = PyList_New(0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 20, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_1);
-    __pyx_r = ((PyObject*)__pyx_t_1);
-    __pyx_t_1 = 0;
+    __Pyx_INCREF(__pyx_int_neg_1);
+    __pyx_r = __pyx_int_neg_1;
     goto __pyx_L0;
 
-    /* "bresenham3D.pyx":19
+    /* "bresenham3D.pyx":21
  * 
- *     cdef list listOfPoints = []
- *     if not append_if_not_masked(x1, y1, z1, listOfPoints, mask=mask):             # <<<<<<<<<<<<<<
- *         return []
- *     cdef int dx = abs(x2 - x1)
+ *     cdef int idx = 0
+ *     if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):             # <<<<<<<<<<<<<<
+ *         return -1
+ *     idx+=1
  */
   }
 
-  /* "bresenham3D.pyx":21
- *     if not append_if_not_masked(x1, y1, z1, listOfPoints, mask=mask):
- *         return []
+  /* "bresenham3D.pyx":23
+ *     if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):
+ *         return -1
+ *     idx+=1             # <<<<<<<<<<<<<<
+ * 
+ *     cdef int dx = abs(x2 - x1)
+ */
+  __pyx_v_idx = (__pyx_v_idx + 1);
+
+  /* "bresenham3D.pyx":25
+ *     idx+=1
+ * 
  *     cdef int dx = abs(x2 - x1)             # <<<<<<<<<<<<<<
  *     cdef int dy = abs(y2 - y1)
  *     cdef int dz = abs(z2 - z1)
  */
   __pyx_v_dx = abs((__pyx_v_x2 - __pyx_v_x1));
 
-  /* "bresenham3D.pyx":22
- *         return []
+  /* "bresenham3D.pyx":26
+ * 
  *     cdef int dx = abs(x2 - x1)
  *     cdef int dy = abs(y2 - y1)             # <<<<<<<<<<<<<<
  *     cdef int dz = abs(z2 - z1)
@@ -19005,7 +18789,7 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
   __pyx_v_dy = abs((__pyx_v_y2 - __pyx_v_y1));
 
-  /* "bresenham3D.pyx":23
+  /* "bresenham3D.pyx":27
  *     cdef int dx = abs(x2 - x1)
  *     cdef int dy = abs(y2 - y1)
  *     cdef int dz = abs(z2 - z1)             # <<<<<<<<<<<<<<
@@ -19014,70 +18798,70 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
   __pyx_v_dz = abs((__pyx_v_z2 - __pyx_v_z1));
 
-  /* "bresenham3D.pyx":24
+  /* "bresenham3D.pyx":28
  *     cdef int dy = abs(y2 - y1)
  *     cdef int dz = abs(z2 - z1)
  *     cdef int xs = 1 if x2 > x1 else -1             # <<<<<<<<<<<<<<
  *     cdef int ys = 1 if y2 > y1 else -1
  *     cdef int zs = 1 if z2 > z1 else -1
  */
-  __pyx_t_4 = (__pyx_v_x2 > __pyx_v_x1);
-  if (__pyx_t_4) {
-    __pyx_t_5 = 1;
+  __pyx_t_3 = (__pyx_v_x2 > __pyx_v_x1);
+  if (__pyx_t_3) {
+    __pyx_t_4 = 1;
   } else {
-    __pyx_t_5 = -1;
+    __pyx_t_4 = -1;
   }
-  __pyx_v_xs = __pyx_t_5;
+  __pyx_v_xs = __pyx_t_4;
 
-  /* "bresenham3D.pyx":25
+  /* "bresenham3D.pyx":29
  *     cdef int dz = abs(z2 - z1)
  *     cdef int xs = 1 if x2 > x1 else -1
  *     cdef int ys = 1 if y2 > y1 else -1             # <<<<<<<<<<<<<<
  *     cdef int zs = 1 if z2 > z1 else -1
  * 
  */
-  __pyx_t_4 = (__pyx_v_y2 > __pyx_v_y1);
-  if (__pyx_t_4) {
-    __pyx_t_5 = 1;
+  __pyx_t_3 = (__pyx_v_y2 > __pyx_v_y1);
+  if (__pyx_t_3) {
+    __pyx_t_4 = 1;
   } else {
-    __pyx_t_5 = -1;
+    __pyx_t_4 = -1;
   }
-  __pyx_v_ys = __pyx_t_5;
+  __pyx_v_ys = __pyx_t_4;
 
-  /* "bresenham3D.pyx":26
+  /* "bresenham3D.pyx":30
  *     cdef int xs = 1 if x2 > x1 else -1
  *     cdef int ys = 1 if y2 > y1 else -1
  *     cdef int zs = 1 if z2 > z1 else -1             # <<<<<<<<<<<<<<
  * 
  *     cdef int p1, p2
  */
-  __pyx_t_4 = (__pyx_v_z2 > __pyx_v_z1);
-  if (__pyx_t_4) {
-    __pyx_t_5 = 1;
+  __pyx_t_3 = (__pyx_v_z2 > __pyx_v_z1);
+  if (__pyx_t_3) {
+    __pyx_t_4 = 1;
   } else {
-    __pyx_t_5 = -1;
+    __pyx_t_4 = -1;
   }
-  __pyx_v_zs = __pyx_t_5;
+  __pyx_v_zs = __pyx_t_4;
 
-  /* "bresenham3D.pyx":31
+  /* "bresenham3D.pyx":35
  * 
  *     # Driving axis is X-axis
  *     if dx >= dy and dx >= dz:             # <<<<<<<<<<<<<<
  *         p1 = 2 * dy - dx
  *         p2 = 2 * dz - dx
  */
-  __pyx_t_2 = (__pyx_v_dx >= __pyx_v_dy);
-  if (__pyx_t_2) {
+  __pyx_t_1 = (__pyx_v_dx >= __pyx_v_dy);
+  if (__pyx_t_1) {
   } else {
-    __pyx_t_4 = __pyx_t_2;
+    __pyx_t_3 = __pyx_t_1;
     goto __pyx_L5_bool_binop_done;
   }
-  __pyx_t_2 = (__pyx_v_dx >= __pyx_v_dz);
-  __pyx_t_4 = __pyx_t_2;
+  __pyx_t_1 = (__pyx_v_dx >= __pyx_v_dz);
+  __pyx_t_3 = __pyx_t_1;
   __pyx_L5_bool_binop_done:;
-  if (__pyx_t_4) {
+  if (__pyx_t_3) {
 
-    /* "bresenham3D.pyx":32
+    /* "bresenham3D.pyx":36
  *     # Driving axis is X-axis
  *     if dx >= dy and dx >= dz:
  *         p1 = 2 * dy - dx             # <<<<<<<<<<<<<<
@@ -19086,7 +18870,7 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
     __pyx_v_p1 = ((2 * __pyx_v_dy) - __pyx_v_dx);
 
-    /* "bresenham3D.pyx":33
+    /* "bresenham3D.pyx":37
  *     if dx >= dy and dx >= dz:
  *         p1 = 2 * dy - dx
  *         p2 = 2 * dz - dx             # <<<<<<<<<<<<<<
@@ -19095,7 +18879,7 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
     __pyx_v_p2 = ((2 * __pyx_v_dz) - __pyx_v_dx);
 
-    /* "bresenham3D.pyx":34
+    /* "bresenham3D.pyx":38
  *         p1 = 2 * dy - dx
  *         p2 = 2 * dz - dx
  *         while x1 != x2:             # <<<<<<<<<<<<<<
@@ -19103,10 +18887,10 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  *             if p1 >= 0:
  */
     while (1) {
-      __pyx_t_4 = (__pyx_v_x1 != __pyx_v_x2);
-      if (!__pyx_t_4) break;
+      __pyx_t_3 = (__pyx_v_x1 != __pyx_v_x2);
+      if (!__pyx_t_3) break;
 
-      /* "bresenham3D.pyx":35
+      /* "bresenham3D.pyx":39
  *         p2 = 2 * dz - dx
  *         while x1 != x2:
  *             x1 += xs             # <<<<<<<<<<<<<<
@@ -19115,17 +18899,17 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
       __pyx_v_x1 = (__pyx_v_x1 + __pyx_v_xs);
 
-      /* "bresenham3D.pyx":36
+      /* "bresenham3D.pyx":40
  *         while x1 != x2:
  *             x1 += xs
  *             if p1 >= 0:             # <<<<<<<<<<<<<<
  *                 y1 += ys
  *                 p1 -= 2 * dx
  */
-      __pyx_t_4 = (__pyx_v_p1 >= 0);
-      if (__pyx_t_4) {
+      __pyx_t_3 = (__pyx_v_p1 >= 0);
+      if (__pyx_t_3) {
 
-        /* "bresenham3D.pyx":37
+        /* "bresenham3D.pyx":41
  *             x1 += xs
  *             if p1 >= 0:
  *                 y1 += ys             # <<<<<<<<<<<<<<
@@ -19134,7 +18918,7 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
         __pyx_v_y1 = (__pyx_v_y1 + __pyx_v_ys);
 
-        /* "bresenham3D.pyx":38
+        /* "bresenham3D.pyx":42
  *             if p1 >= 0:
  *                 y1 += ys
  *                 p1 -= 2 * dx             # <<<<<<<<<<<<<<
@@ -19143,7 +18927,7 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
         __pyx_v_p1 = (__pyx_v_p1 - (2 * __pyx_v_dx));
 
-        /* "bresenham3D.pyx":36
+        /* "bresenham3D.pyx":40
  *         while x1 != x2:
  *             x1 += xs
  *             if p1 >= 0:             # <<<<<<<<<<<<<<
@@ -19152,17 +18936,17 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
       }
 
-      /* "bresenham3D.pyx":39
+      /* "bresenham3D.pyx":43
  *                 y1 += ys
  *                 p1 -= 2 * dx
  *             if p2 >= 0:             # <<<<<<<<<<<<<<
  *                 z1 += zs
  *                 p2 -= 2 * dx
  */
-      __pyx_t_4 = (__pyx_v_p2 >= 0);
-      if (__pyx_t_4) {
+      __pyx_t_3 = (__pyx_v_p2 >= 0);
+      if (__pyx_t_3) {
 
-        /* "bresenham3D.pyx":40
+        /* "bresenham3D.pyx":44
  *                 p1 -= 2 * dx
  *             if p2 >= 0:
  *                 z1 += zs             # <<<<<<<<<<<<<<
@@ -19171,7 +18955,7 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
         __pyx_v_z1 = (__pyx_v_z1 + __pyx_v_zs);
 
-        /* "bresenham3D.pyx":41
+        /* "bresenham3D.pyx":45
  *             if p2 >= 0:
  *                 z1 += zs
  *                 p2 -= 2 * dx             # <<<<<<<<<<<<<<
@@ -19180,7 +18964,7 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
         __pyx_v_p2 = (__pyx_v_p2 - (2 * __pyx_v_dx));
 
-        /* "bresenham3D.pyx":39
+        /* "bresenham3D.pyx":43
  *                 y1 += ys
  *                 p1 -= 2 * dx
  *             if p2 >= 0:             # <<<<<<<<<<<<<<
@@ -19189,7 +18973,7 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
       }
 
-      /* "bresenham3D.pyx":42
+      /* "bresenham3D.pyx":46
  *                 z1 += zs
  *                 p2 -= 2 * dx
  *             p1 += 2 * dy             # <<<<<<<<<<<<<<
@@ -19198,53 +18982,60 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
       __pyx_v_p1 = (__pyx_v_p1 + (2 * __pyx_v_dy));
 
-      /* "bresenham3D.pyx":43
+      /* "bresenham3D.pyx":47
  *                 p2 -= 2 * dx
  *             p1 += 2 * dy
  *             p2 += 2 * dz             # <<<<<<<<<<<<<<
  * 
- *             if not append_if_not_masked(x1, y1, z1, listOfPoints, mask=mask):
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):
  */
       __pyx_v_p2 = (__pyx_v_p2 + (2 * __pyx_v_dz));
 
-      /* "bresenham3D.pyx":45
+      /* "bresenham3D.pyx":49
  *             p2 += 2 * dz
  * 
- *             if not append_if_not_masked(x1, y1, z1, listOfPoints, mask=mask):             # <<<<<<<<<<<<<<
- *                 return []
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):             # <<<<<<<<<<<<<<
+ *                 return -1
+ *             idx+=1
+ */
+      __pyx_t_2.__pyx_n = 1;
+      __pyx_t_2.mask = __pyx_v_mask;
+      __pyx_t_3 = __pyx_f_11bresenham3D_append_if_not_masked(__pyx_v_x1, __pyx_v_y1, __pyx_v_z1, __pyx_v_idx, __pyx_v_points, &__pyx_t_2); if (unlikely(__pyx_t_3 == ((int)-1) && PyErr_Occurred())) __PYX_ERR(0, 49, __pyx_L1_error)
+      __pyx_t_1 = (!__pyx_t_3);
+      if (__pyx_t_1) {
+
+        /* "bresenham3D.pyx":50
+ * 
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):
+ *                 return -1             # <<<<<<<<<<<<<<
+ *             idx+=1
  * 
  */
-      __pyx_t_3.__pyx_n = 1;
-      __pyx_t_3.mask = __pyx_v_mask;
-      __pyx_t_4 = __pyx_f_11bresenham3D_append_if_not_masked(__pyx_v_x1, __pyx_v_y1, __pyx_v_z1, __pyx_v_listOfPoints, &__pyx_t_3); if (unlikely(__pyx_t_4 == ((int)-1) && PyErr_Occurred())) __PYX_ERR(0, 45, __pyx_L1_error)
-      __pyx_t_2 = (!__pyx_t_4);
-      if (__pyx_t_2) {
+        __Pyx_XDECREF(__pyx_r);
+        __Pyx_INCREF(__pyx_int_neg_1);
+        __pyx_r = __pyx_int_neg_1;
+        goto __pyx_L0;
 
-        /* "bresenham3D.pyx":46
+        /* "bresenham3D.pyx":49
+ *             p2 += 2 * dz
  * 
- *             if not append_if_not_masked(x1, y1, z1, listOfPoints, mask=mask):
- *                 return []             # <<<<<<<<<<<<<<
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):             # <<<<<<<<<<<<<<
+ *                 return -1
+ *             idx+=1
+ */
+      }
+
+      /* "bresenham3D.pyx":51
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):
+ *                 return -1
+ *             idx+=1             # <<<<<<<<<<<<<<
  * 
  *     # Driving axis is Y-axis
  */
-        __Pyx_XDECREF(__pyx_r);
-        __pyx_t_1 = PyList_New(0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 46, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_1);
-        __pyx_r = ((PyObject*)__pyx_t_1);
-        __pyx_t_1 = 0;
-        goto __pyx_L0;
-
-        /* "bresenham3D.pyx":45
- *             p2 += 2 * dz
- * 
- *             if not append_if_not_masked(x1, y1, z1, listOfPoints, mask=mask):             # <<<<<<<<<<<<<<
- *                 return []
- * 
- */
-      }
+      __pyx_v_idx = (__pyx_v_idx + 1);
     }
 
-    /* "bresenham3D.pyx":31
+    /* "bresenham3D.pyx":35
  * 
  *     # Driving axis is X-axis
  *     if dx >= dy and dx >= dz:             # <<<<<<<<<<<<<<
@@ -19254,25 +19045,25 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
     goto __pyx_L4;
   }
 
-  /* "bresenham3D.pyx":49
+  /* "bresenham3D.pyx":54
  * 
  *     # Driving axis is Y-axis
  *     elif dy >= dx and dy >= dz:             # <<<<<<<<<<<<<<
  *         p1 = 2 * dx - dy
  *         p2 = 2 * dz - dy
  */
-  __pyx_t_4 = (__pyx_v_dy >= __pyx_v_dx);
-  if (__pyx_t_4) {
+  __pyx_t_3 = (__pyx_v_dy >= __pyx_v_dx);
+  if (__pyx_t_3) {
   } else {
-    __pyx_t_2 = __pyx_t_4;
+    __pyx_t_1 = __pyx_t_3;
     goto __pyx_L12_bool_binop_done;
   }
-  __pyx_t_4 = (__pyx_v_dy >= __pyx_v_dz);
-  __pyx_t_2 = __pyx_t_4;
+  __pyx_t_3 = (__pyx_v_dy >= __pyx_v_dz);
+  __pyx_t_1 = __pyx_t_3;
   __pyx_L12_bool_binop_done:;
-  if (__pyx_t_2) {
+  if (__pyx_t_1) {
 
-    /* "bresenham3D.pyx":50
+    /* "bresenham3D.pyx":55
  *     # Driving axis is Y-axis
  *     elif dy >= dx and dy >= dz:
  *         p1 = 2 * dx - dy             # <<<<<<<<<<<<<<
@@ -19281,7 +19072,7 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
     __pyx_v_p1 = ((2 * __pyx_v_dx) - __pyx_v_dy);
 
-    /* "bresenham3D.pyx":51
+    /* "bresenham3D.pyx":56
  *     elif dy >= dx and dy >= dz:
  *         p1 = 2 * dx - dy
  *         p2 = 2 * dz - dy             # <<<<<<<<<<<<<<
@@ -19290,7 +19081,7 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
     __pyx_v_p2 = ((2 * __pyx_v_dz) - __pyx_v_dy);
 
-    /* "bresenham3D.pyx":52
+    /* "bresenham3D.pyx":57
  *         p1 = 2 * dx - dy
  *         p2 = 2 * dz - dy
  *         while y1 != y2:             # <<<<<<<<<<<<<<
@@ -19298,10 +19089,10 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  *             if p1 >= 0:
  */
     while (1) {
-      __pyx_t_2 = (__pyx_v_y1 != __pyx_v_y2);
-      if (!__pyx_t_2) break;
+      __pyx_t_1 = (__pyx_v_y1 != __pyx_v_y2);
+      if (!__pyx_t_1) break;
 
-      /* "bresenham3D.pyx":53
+      /* "bresenham3D.pyx":58
  *         p2 = 2 * dz - dy
  *         while y1 != y2:
  *             y1 += ys             # <<<<<<<<<<<<<<
@@ -19310,17 +19101,17 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
       __pyx_v_y1 = (__pyx_v_y1 + __pyx_v_ys);
 
-      /* "bresenham3D.pyx":54
+      /* "bresenham3D.pyx":59
  *         while y1 != y2:
  *             y1 += ys
  *             if p1 >= 0:             # <<<<<<<<<<<<<<
  *                 x1 += xs
  *                 p1 -= 2 * dy
  */
-      __pyx_t_2 = (__pyx_v_p1 >= 0);
-      if (__pyx_t_2) {
+      __pyx_t_1 = (__pyx_v_p1 >= 0);
+      if (__pyx_t_1) {
 
-        /* "bresenham3D.pyx":55
+        /* "bresenham3D.pyx":60
  *             y1 += ys
  *             if p1 >= 0:
  *                 x1 += xs             # <<<<<<<<<<<<<<
@@ -19329,7 +19120,7 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
         __pyx_v_x1 = (__pyx_v_x1 + __pyx_v_xs);
 
-        /* "bresenham3D.pyx":56
+        /* "bresenham3D.pyx":61
  *             if p1 >= 0:
  *                 x1 += xs
  *                 p1 -= 2 * dy             # <<<<<<<<<<<<<<
@@ -19338,7 +19129,7 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
         __pyx_v_p1 = (__pyx_v_p1 - (2 * __pyx_v_dy));
 
-        /* "bresenham3D.pyx":54
+        /* "bresenham3D.pyx":59
  *         while y1 != y2:
  *             y1 += ys
  *             if p1 >= 0:             # <<<<<<<<<<<<<<
@@ -19347,17 +19138,17 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
       }
 
-      /* "bresenham3D.pyx":57
+      /* "bresenham3D.pyx":62
  *                 x1 += xs
  *                 p1 -= 2 * dy
  *             if p2 >= 0:             # <<<<<<<<<<<<<<
  *                 z1 += zs
  *                 p2 -= 2 * dy
  */
-      __pyx_t_2 = (__pyx_v_p2 >= 0);
-      if (__pyx_t_2) {
+      __pyx_t_1 = (__pyx_v_p2 >= 0);
+      if (__pyx_t_1) {
 
-        /* "bresenham3D.pyx":58
+        /* "bresenham3D.pyx":63
  *                 p1 -= 2 * dy
  *             if p2 >= 0:
  *                 z1 += zs             # <<<<<<<<<<<<<<
@@ -19366,7 +19157,7 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
         __pyx_v_z1 = (__pyx_v_z1 + __pyx_v_zs);
 
-        /* "bresenham3D.pyx":59
+        /* "bresenham3D.pyx":64
  *             if p2 >= 0:
  *                 z1 += zs
  *                 p2 -= 2 * dy             # <<<<<<<<<<<<<<
@@ -19375,7 +19166,7 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
         __pyx_v_p2 = (__pyx_v_p2 - (2 * __pyx_v_dy));
 
-        /* "bresenham3D.pyx":57
+        /* "bresenham3D.pyx":62
  *                 x1 += xs
  *                 p1 -= 2 * dy
  *             if p2 >= 0:             # <<<<<<<<<<<<<<
@@ -19384,7 +19175,7 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
       }
 
-      /* "bresenham3D.pyx":60
+      /* "bresenham3D.pyx":65
  *                 z1 += zs
  *                 p2 -= 2 * dy
  *             p1 += 2 * dx             # <<<<<<<<<<<<<<
@@ -19393,53 +19184,60 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
       __pyx_v_p1 = (__pyx_v_p1 + (2 * __pyx_v_dx));
 
-      /* "bresenham3D.pyx":61
+      /* "bresenham3D.pyx":66
  *                 p2 -= 2 * dy
  *             p1 += 2 * dx
  *             p2 += 2 * dz             # <<<<<<<<<<<<<<
  * 
- *             if not append_if_not_masked(x1, y1, z1, listOfPoints, mask=mask):
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):
  */
       __pyx_v_p2 = (__pyx_v_p2 + (2 * __pyx_v_dz));
 
-      /* "bresenham3D.pyx":63
+      /* "bresenham3D.pyx":68
  *             p2 += 2 * dz
  * 
- *             if not append_if_not_masked(x1, y1, z1, listOfPoints, mask=mask):             # <<<<<<<<<<<<<<
- *                 return []
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):             # <<<<<<<<<<<<<<
+ *                 return -1
+ *             idx+=1
+ */
+      __pyx_t_2.__pyx_n = 1;
+      __pyx_t_2.mask = __pyx_v_mask;
+      __pyx_t_1 = __pyx_f_11bresenham3D_append_if_not_masked(__pyx_v_x1, __pyx_v_y1, __pyx_v_z1, __pyx_v_idx, __pyx_v_points, &__pyx_t_2); if (unlikely(__pyx_t_1 == ((int)-1) && PyErr_Occurred())) __PYX_ERR(0, 68, __pyx_L1_error)
+      __pyx_t_3 = (!__pyx_t_1);
+      if (__pyx_t_3) {
+
+        /* "bresenham3D.pyx":69
+ * 
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):
+ *                 return -1             # <<<<<<<<<<<<<<
+ *             idx+=1
  * 
  */
-      __pyx_t_3.__pyx_n = 1;
-      __pyx_t_3.mask = __pyx_v_mask;
-      __pyx_t_2 = __pyx_f_11bresenham3D_append_if_not_masked(__pyx_v_x1, __pyx_v_y1, __pyx_v_z1, __pyx_v_listOfPoints, &__pyx_t_3); if (unlikely(__pyx_t_2 == ((int)-1) && PyErr_Occurred())) __PYX_ERR(0, 63, __pyx_L1_error)
-      __pyx_t_4 = (!__pyx_t_2);
-      if (__pyx_t_4) {
+        __Pyx_XDECREF(__pyx_r);
+        __Pyx_INCREF(__pyx_int_neg_1);
+        __pyx_r = __pyx_int_neg_1;
+        goto __pyx_L0;
 
-        /* "bresenham3D.pyx":64
+        /* "bresenham3D.pyx":68
+ *             p2 += 2 * dz
  * 
- *             if not append_if_not_masked(x1, y1, z1, listOfPoints, mask=mask):
- *                 return []             # <<<<<<<<<<<<<<
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):             # <<<<<<<<<<<<<<
+ *                 return -1
+ *             idx+=1
+ */
+      }
+
+      /* "bresenham3D.pyx":70
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):
+ *                 return -1
+ *             idx+=1             # <<<<<<<<<<<<<<
  * 
  *     # Driving axis is Z-axis
  */
-        __Pyx_XDECREF(__pyx_r);
-        __pyx_t_1 = PyList_New(0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 64, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_1);
-        __pyx_r = ((PyObject*)__pyx_t_1);
-        __pyx_t_1 = 0;
-        goto __pyx_L0;
-
-        /* "bresenham3D.pyx":63
- *             p2 += 2 * dz
- * 
- *             if not append_if_not_masked(x1, y1, z1, listOfPoints, mask=mask):             # <<<<<<<<<<<<<<
- *                 return []
- * 
- */
-      }
+      __pyx_v_idx = (__pyx_v_idx + 1);
     }
 
-    /* "bresenham3D.pyx":49
+    /* "bresenham3D.pyx":54
  * 
  *     # Driving axis is Y-axis
  *     elif dy >= dx and dy >= dz:             # <<<<<<<<<<<<<<
@@ -19449,7 +19247,7 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
     goto __pyx_L4;
   }
 
-  /* "bresenham3D.pyx":68
+  /* "bresenham3D.pyx":74
  *     # Driving axis is Z-axis
  *     else:
  *         p1 = 2 * dy - dz             # <<<<<<<<<<<<<<
@@ -19459,7 +19257,7 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
   /*else*/ {
     __pyx_v_p1 = ((2 * __pyx_v_dy) - __pyx_v_dz);
 
-    /* "bresenham3D.pyx":69
+    /* "bresenham3D.pyx":75
  *     else:
  *         p1 = 2 * dy - dz
  *         p2 = 2 * dx - dz             # <<<<<<<<<<<<<<
@@ -19468,7 +19266,7 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
     __pyx_v_p2 = ((2 * __pyx_v_dx) - __pyx_v_dz);
 
-    /* "bresenham3D.pyx":70
+    /* "bresenham3D.pyx":76
  *         p1 = 2 * dy - dz
  *         p2 = 2 * dx - dz
  *         while z1 != z2:             # <<<<<<<<<<<<<<
@@ -19476,10 +19274,10 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  *             if p1 >= 0:
  */
     while (1) {
-      __pyx_t_4 = (__pyx_v_z1 != __pyx_v_z2);
-      if (!__pyx_t_4) break;
+      __pyx_t_3 = (__pyx_v_z1 != __pyx_v_z2);
+      if (!__pyx_t_3) break;
 
-      /* "bresenham3D.pyx":71
+      /* "bresenham3D.pyx":77
  *         p2 = 2 * dx - dz
  *         while z1 != z2:
  *             z1 += zs             # <<<<<<<<<<<<<<
@@ -19488,17 +19286,17 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
       __pyx_v_z1 = (__pyx_v_z1 + __pyx_v_zs);
 
-      /* "bresenham3D.pyx":72
+      /* "bresenham3D.pyx":78
  *         while z1 != z2:
  *             z1 += zs
  *             if p1 >= 0:             # <<<<<<<<<<<<<<
  *                 y1 += ys
  *                 p1 -= 2 * dz
  */
-      __pyx_t_4 = (__pyx_v_p1 >= 0);
-      if (__pyx_t_4) {
+      __pyx_t_3 = (__pyx_v_p1 >= 0);
+      if (__pyx_t_3) {
 
-        /* "bresenham3D.pyx":73
+        /* "bresenham3D.pyx":79
  *             z1 += zs
  *             if p1 >= 0:
  *                 y1 += ys             # <<<<<<<<<<<<<<
@@ -19507,7 +19305,7 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
         __pyx_v_y1 = (__pyx_v_y1 + __pyx_v_ys);
 
-        /* "bresenham3D.pyx":74
+        /* "bresenham3D.pyx":80
  *             if p1 >= 0:
  *                 y1 += ys
  *                 p1 -= 2 * dz             # <<<<<<<<<<<<<<
@@ -19516,7 +19314,7 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
         __pyx_v_p1 = (__pyx_v_p1 - (2 * __pyx_v_dz));
 
-        /* "bresenham3D.pyx":72
+        /* "bresenham3D.pyx":78
  *         while z1 != z2:
  *             z1 += zs
  *             if p1 >= 0:             # <<<<<<<<<<<<<<
@@ -19525,17 +19323,17 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
       }
 
-      /* "bresenham3D.pyx":75
+      /* "bresenham3D.pyx":81
  *                 y1 += ys
  *                 p1 -= 2 * dz
  *             if p2 >= 0:             # <<<<<<<<<<<<<<
  *                 x1 += xs
  *                 p2 -= 2 * dz
  */
-      __pyx_t_4 = (__pyx_v_p2 >= 0);
-      if (__pyx_t_4) {
+      __pyx_t_3 = (__pyx_v_p2 >= 0);
+      if (__pyx_t_3) {
 
-        /* "bresenham3D.pyx":76
+        /* "bresenham3D.pyx":82
  *                 p1 -= 2 * dz
  *             if p2 >= 0:
  *                 x1 += xs             # <<<<<<<<<<<<<<
@@ -19544,7 +19342,7 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
         __pyx_v_x1 = (__pyx_v_x1 + __pyx_v_xs);
 
-        /* "bresenham3D.pyx":77
+        /* "bresenham3D.pyx":83
  *             if p2 >= 0:
  *                 x1 += xs
  *                 p2 -= 2 * dz             # <<<<<<<<<<<<<<
@@ -19553,7 +19351,7 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
         __pyx_v_p2 = (__pyx_v_p2 - (2 * __pyx_v_dz));
 
-        /* "bresenham3D.pyx":75
+        /* "bresenham3D.pyx":81
  *                 y1 += ys
  *                 p1 -= 2 * dz
  *             if p2 >= 0:             # <<<<<<<<<<<<<<
@@ -19562,7 +19360,7 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
       }
 
-      /* "bresenham3D.pyx":78
+      /* "bresenham3D.pyx":84
  *                 x1 += xs
  *                 p2 -= 2 * dz
  *             p1 += 2 * dy             # <<<<<<<<<<<<<<
@@ -19571,95 +19369,859 @@ static PyObject *__pyx_pf_11bresenham3D_bresenham3DWithMaskSingle(CYTHON_UNUSED 
  */
       __pyx_v_p1 = (__pyx_v_p1 + (2 * __pyx_v_dy));
 
-      /* "bresenham3D.pyx":79
+      /* "bresenham3D.pyx":85
  *                 p2 -= 2 * dz
  *             p1 += 2 * dy
  *             p2 += 2 * dx             # <<<<<<<<<<<<<<
  * 
- *             if not append_if_not_masked(x1, y1, z1, listOfPoints, mask=mask):
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):
  */
       __pyx_v_p2 = (__pyx_v_p2 + (2 * __pyx_v_dx));
 
-      /* "bresenham3D.pyx":81
+      /* "bresenham3D.pyx":87
  *             p2 += 2 * dx
  * 
- *             if not append_if_not_masked(x1, y1, z1, listOfPoints, mask=mask):             # <<<<<<<<<<<<<<
- *                 return []
- *     return listOfPoints
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):             # <<<<<<<<<<<<<<
+ *                 return -1
+ *             idx+=1
  */
-      __pyx_t_3.__pyx_n = 1;
-      __pyx_t_3.mask = __pyx_v_mask;
-      __pyx_t_4 = __pyx_f_11bresenham3D_append_if_not_masked(__pyx_v_x1, __pyx_v_y1, __pyx_v_z1, __pyx_v_listOfPoints, &__pyx_t_3); if (unlikely(__pyx_t_4 == ((int)-1) && PyErr_Occurred())) __PYX_ERR(0, 81, __pyx_L1_error)
-      __pyx_t_2 = (!__pyx_t_4);
-      if (__pyx_t_2) {
+      __pyx_t_2.__pyx_n = 1;
+      __pyx_t_2.mask = __pyx_v_mask;
+      __pyx_t_3 = __pyx_f_11bresenham3D_append_if_not_masked(__pyx_v_x1, __pyx_v_y1, __pyx_v_z1, __pyx_v_idx, __pyx_v_points, &__pyx_t_2); if (unlikely(__pyx_t_3 == ((int)-1) && PyErr_Occurred())) __PYX_ERR(0, 87, __pyx_L1_error)
+      __pyx_t_1 = (!__pyx_t_3);
+      if (__pyx_t_1) {
 
-        /* "bresenham3D.pyx":82
+        /* "bresenham3D.pyx":88
  * 
- *             if not append_if_not_masked(x1, y1, z1, listOfPoints, mask=mask):
- *                 return []             # <<<<<<<<<<<<<<
- *     return listOfPoints
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):
+ *                 return -1             # <<<<<<<<<<<<<<
+ *             idx+=1
  * 
  */
         __Pyx_XDECREF(__pyx_r);
-        __pyx_t_1 = PyList_New(0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 82, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_1);
-        __pyx_r = ((PyObject*)__pyx_t_1);
-        __pyx_t_1 = 0;
+        __Pyx_INCREF(__pyx_int_neg_1);
+        __pyx_r = __pyx_int_neg_1;
         goto __pyx_L0;
 
-        /* "bresenham3D.pyx":81
+        /* "bresenham3D.pyx":87
  *             p2 += 2 * dx
  * 
- *             if not append_if_not_masked(x1, y1, z1, listOfPoints, mask=mask):             # <<<<<<<<<<<<<<
- *                 return []
- *     return listOfPoints
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):             # <<<<<<<<<<<<<<
+ *                 return -1
+ *             idx+=1
  */
       }
+
+      /* "bresenham3D.pyx":89
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):
+ *                 return -1
+ *             idx+=1             # <<<<<<<<<<<<<<
+ * 
+ *     return idx
+ */
+      __pyx_v_idx = (__pyx_v_idx + 1);
     }
   }
   __pyx_L4:;
 
-  /* "bresenham3D.pyx":83
- *             if not append_if_not_masked(x1, y1, z1, listOfPoints, mask=mask):
- *                 return []
- *     return listOfPoints             # <<<<<<<<<<<<<<
+  /* "bresenham3D.pyx":91
+ *             idx+=1
  * 
- * def bresenham3DWithMask(
+ *     return idx             # <<<<<<<<<<<<<<
+ * 
+ * cdef inline int bresenham3DWithMaskSingleInline(
  */
   __Pyx_XDECREF(__pyx_r);
-  __Pyx_INCREF(__pyx_v_listOfPoints);
-  __pyx_r = __pyx_v_listOfPoints;
+  __pyx_t_5 = __Pyx_PyInt_From_int(__pyx_v_idx); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 91, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_5);
+  __pyx_r = __pyx_t_5;
+  __pyx_t_5 = 0;
   goto __pyx_L0;
 
   /* "bresenham3D.pyx":14
  *         return True
  * 
  * def bresenham3DWithMaskSingle(             # <<<<<<<<<<<<<<
- *     int x1, int y1, int z1, int x2, int y2, int z2, unsigned char[:,:,:] mask=None
- * ) -> List[Tuple[int, int, int]]:
+ *     int x1, int y1, int z1, int x2, int y2, int z2,
+ *     list points,
  */
 
   /* function exit code */
   __pyx_L1_error:;
-  __Pyx_XDECREF(__pyx_t_1);
+  __Pyx_XDECREF(__pyx_t_5);
   __Pyx_AddTraceback("bresenham3D.bresenham3DWithMaskSingle", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_r = NULL;
   __pyx_L0:;
-  __Pyx_XDECREF(__pyx_v_listOfPoints);
   __Pyx_XGIVEREF(__pyx_r);
   __Pyx_RefNannyFinishContext();
   return __pyx_r;
 }
 
-/* "bresenham3D.pyx":85
- *     return listOfPoints
+/* "bresenham3D.pyx":93
+ *     return idx
+ * 
+ * cdef inline int bresenham3DWithMaskSingleInline(             # <<<<<<<<<<<<<<
+ *     int x1, int y1, int z1, int x2, int y2, int z2,
+ *     list points,
+ */
+
+static CYTHON_INLINE int __pyx_f_11bresenham3D_bresenham3DWithMaskSingleInline(int __pyx_v_x1, int __pyx_v_y1, int __pyx_v_z1, int __pyx_v_x2, int __pyx_v_y2, int __pyx_v_z2, PyObject *__pyx_v_points, struct __pyx_opt_args_11bresenham3D_bresenham3DWithMaskSingleInline *__pyx_optional_args) {
+  __Pyx_memviewslice __pyx_v_mask = __pyx_k__10;
+  int __pyx_v_idx;
+  int __pyx_v_dx;
+  int __pyx_v_dy;
+  int __pyx_v_dz;
+  int __pyx_v_xs;
+  int __pyx_v_ys;
+  int __pyx_v_zs;
+  int __pyx_v_p1;
+  int __pyx_v_p2;
+  int __pyx_r;
+  int __pyx_t_1;
+  struct __pyx_opt_args_11bresenham3D_append_if_not_masked __pyx_t_2;
+  int __pyx_t_3;
+  int __pyx_t_4;
+  int __pyx_lineno = 0;
+  const char *__pyx_filename = NULL;
+  int __pyx_clineno = 0;
+  if (__pyx_optional_args) {
+    if (__pyx_optional_args->__pyx_n > 0) {
+      __pyx_v_mask = __pyx_optional_args->mask;
+    }
+  }
+
+  /* "bresenham3D.pyx":99
+ * ):
+ * 
+ *     cdef int idx = 0             # <<<<<<<<<<<<<<
+ *     if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):
+ *         return -1
+ */
+  __pyx_v_idx = 0;
+
+  /* "bresenham3D.pyx":100
+ * 
+ *     cdef int idx = 0
+ *     if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):             # <<<<<<<<<<<<<<
+ *         return -1
+ *     idx+=1
+ */
+  __pyx_t_2.__pyx_n = 1;
+  __pyx_t_2.mask = __pyx_v_mask;
+  __pyx_t_1 = __pyx_f_11bresenham3D_append_if_not_masked(__pyx_v_x1, __pyx_v_y1, __pyx_v_z1, __pyx_v_idx, __pyx_v_points, &__pyx_t_2); if (unlikely(__pyx_t_1 == ((int)-1) && PyErr_Occurred())) __PYX_ERR(0, 100, __pyx_L1_error)
+  __pyx_t_3 = (!__pyx_t_1);
+  if (__pyx_t_3) {
+
+    /* "bresenham3D.pyx":101
+ *     cdef int idx = 0
+ *     if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):
+ *         return -1             # <<<<<<<<<<<<<<
+ *     idx+=1
+ * 
+ */
+    __pyx_r = -1;
+    goto __pyx_L0;
+
+    /* "bresenham3D.pyx":100
+ * 
+ *     cdef int idx = 0
+ *     if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):             # <<<<<<<<<<<<<<
+ *         return -1
+ *     idx+=1
+ */
+  }
+
+  /* "bresenham3D.pyx":102
+ *     if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):
+ *         return -1
+ *     idx+=1             # <<<<<<<<<<<<<<
+ * 
+ *     cdef int dx = abs(x2 - x1)
+ */
+  __pyx_v_idx = (__pyx_v_idx + 1);
+
+  /* "bresenham3D.pyx":104
+ *     idx+=1
+ * 
+ *     cdef int dx = abs(x2 - x1)             # <<<<<<<<<<<<<<
+ *     cdef int dy = abs(y2 - y1)
+ *     cdef int dz = abs(z2 - z1)
+ */
+  __pyx_v_dx = abs((__pyx_v_x2 - __pyx_v_x1));
+
+  /* "bresenham3D.pyx":105
+ * 
+ *     cdef int dx = abs(x2 - x1)
+ *     cdef int dy = abs(y2 - y1)             # <<<<<<<<<<<<<<
+ *     cdef int dz = abs(z2 - z1)
+ *     cdef int xs = 1 if x2 > x1 else -1
+ */
+  __pyx_v_dy = abs((__pyx_v_y2 - __pyx_v_y1));
+
+  /* "bresenham3D.pyx":106
+ *     cdef int dx = abs(x2 - x1)
+ *     cdef int dy = abs(y2 - y1)
+ *     cdef int dz = abs(z2 - z1)             # <<<<<<<<<<<<<<
+ *     cdef int xs = 1 if x2 > x1 else -1
+ *     cdef int ys = 1 if y2 > y1 else -1
+ */
+  __pyx_v_dz = abs((__pyx_v_z2 - __pyx_v_z1));
+
+  /* "bresenham3D.pyx":107
+ *     cdef int dy = abs(y2 - y1)
+ *     cdef int dz = abs(z2 - z1)
+ *     cdef int xs = 1 if x2 > x1 else -1             # <<<<<<<<<<<<<<
+ *     cdef int ys = 1 if y2 > y1 else -1
+ *     cdef int zs = 1 if z2 > z1 else -1
+ */
+  __pyx_t_3 = (__pyx_v_x2 > __pyx_v_x1);
+  if (__pyx_t_3) {
+    __pyx_t_4 = 1;
+  } else {
+    __pyx_t_4 = -1;
+  }
+  __pyx_v_xs = __pyx_t_4;
+
+  /* "bresenham3D.pyx":108
+ *     cdef int dz = abs(z2 - z1)
+ *     cdef int xs = 1 if x2 > x1 else -1
+ *     cdef int ys = 1 if y2 > y1 else -1             # <<<<<<<<<<<<<<
+ *     cdef int zs = 1 if z2 > z1 else -1
+ * 
+ */
+  __pyx_t_3 = (__pyx_v_y2 > __pyx_v_y1);
+  if (__pyx_t_3) {
+    __pyx_t_4 = 1;
+  } else {
+    __pyx_t_4 = -1;
+  }
+  __pyx_v_ys = __pyx_t_4;
+
+  /* "bresenham3D.pyx":109
+ *     cdef int xs = 1 if x2 > x1 else -1
+ *     cdef int ys = 1 if y2 > y1 else -1
+ *     cdef int zs = 1 if z2 > z1 else -1             # <<<<<<<<<<<<<<
+ * 
+ *     cdef int p1, p2
+ */
+  __pyx_t_3 = (__pyx_v_z2 > __pyx_v_z1);
+  if (__pyx_t_3) {
+    __pyx_t_4 = 1;
+  } else {
+    __pyx_t_4 = -1;
+  }
+  __pyx_v_zs = __pyx_t_4;
+
+  /* "bresenham3D.pyx":114
+ * 
+ *     # Driving axis is X-axis
+ *     if dx >= dy and dx >= dz:             # <<<<<<<<<<<<<<
+ *         p1 = 2 * dy - dx
+ *         p2 = 2 * dz - dx
+ */
+  __pyx_t_1 = (__pyx_v_dx >= __pyx_v_dy);
+  if (__pyx_t_1) {
+  } else {
+    __pyx_t_3 = __pyx_t_1;
+    goto __pyx_L5_bool_binop_done;
+  }
+  __pyx_t_1 = (__pyx_v_dx >= __pyx_v_dz);
+  __pyx_t_3 = __pyx_t_1;
+  __pyx_L5_bool_binop_done:;
+  if (__pyx_t_3) {
+
+    /* "bresenham3D.pyx":115
+ *     # Driving axis is X-axis
+ *     if dx >= dy and dx >= dz:
+ *         p1 = 2 * dy - dx             # <<<<<<<<<<<<<<
+ *         p2 = 2 * dz - dx
+ *         while x1 != x2:
+ */
+    __pyx_v_p1 = ((2 * __pyx_v_dy) - __pyx_v_dx);
+
+    /* "bresenham3D.pyx":116
+ *     if dx >= dy and dx >= dz:
+ *         p1 = 2 * dy - dx
+ *         p2 = 2 * dz - dx             # <<<<<<<<<<<<<<
+ *         while x1 != x2:
+ *             x1 += xs
+ */
+    __pyx_v_p2 = ((2 * __pyx_v_dz) - __pyx_v_dx);
+
+    /* "bresenham3D.pyx":117
+ *         p1 = 2 * dy - dx
+ *         p2 = 2 * dz - dx
+ *         while x1 != x2:             # <<<<<<<<<<<<<<
+ *             x1 += xs
+ *             if p1 >= 0:
+ */
+    while (1) {
+      __pyx_t_3 = (__pyx_v_x1 != __pyx_v_x2);
+      if (!__pyx_t_3) break;
+
+      /* "bresenham3D.pyx":118
+ *         p2 = 2 * dz - dx
+ *         while x1 != x2:
+ *             x1 += xs             # <<<<<<<<<<<<<<
+ *             if p1 >= 0:
+ *                 y1 += ys
+ */
+      __pyx_v_x1 = (__pyx_v_x1 + __pyx_v_xs);
+
+      /* "bresenham3D.pyx":119
+ *         while x1 != x2:
+ *             x1 += xs
+ *             if p1 >= 0:             # <<<<<<<<<<<<<<
+ *                 y1 += ys
+ *                 p1 -= 2 * dx
+ */
+      __pyx_t_3 = (__pyx_v_p1 >= 0);
+      if (__pyx_t_3) {
+
+        /* "bresenham3D.pyx":120
+ *             x1 += xs
+ *             if p1 >= 0:
+ *                 y1 += ys             # <<<<<<<<<<<<<<
+ *                 p1 -= 2 * dx
+ *             if p2 >= 0:
+ */
+        __pyx_v_y1 = (__pyx_v_y1 + __pyx_v_ys);
+
+        /* "bresenham3D.pyx":121
+ *             if p1 >= 0:
+ *                 y1 += ys
+ *                 p1 -= 2 * dx             # <<<<<<<<<<<<<<
+ *             if p2 >= 0:
+ *                 z1 += zs
+ */
+        __pyx_v_p1 = (__pyx_v_p1 - (2 * __pyx_v_dx));
+
+        /* "bresenham3D.pyx":119
+ *         while x1 != x2:
+ *             x1 += xs
+ *             if p1 >= 0:             # <<<<<<<<<<<<<<
+ *                 y1 += ys
+ *                 p1 -= 2 * dx
+ */
+      }
+
+      /* "bresenham3D.pyx":122
+ *                 y1 += ys
+ *                 p1 -= 2 * dx
+ *             if p2 >= 0:             # <<<<<<<<<<<<<<
+ *                 z1 += zs
+ *                 p2 -= 2 * dx
+ */
+      __pyx_t_3 = (__pyx_v_p2 >= 0);
+      if (__pyx_t_3) {
+
+        /* "bresenham3D.pyx":123
+ *                 p1 -= 2 * dx
+ *             if p2 >= 0:
+ *                 z1 += zs             # <<<<<<<<<<<<<<
+ *                 p2 -= 2 * dx
+ *             p1 += 2 * dy
+ */
+        __pyx_v_z1 = (__pyx_v_z1 + __pyx_v_zs);
+
+        /* "bresenham3D.pyx":124
+ *             if p2 >= 0:
+ *                 z1 += zs
+ *                 p2 -= 2 * dx             # <<<<<<<<<<<<<<
+ *             p1 += 2 * dy
+ *             p2 += 2 * dz
+ */
+        __pyx_v_p2 = (__pyx_v_p2 - (2 * __pyx_v_dx));
+
+        /* "bresenham3D.pyx":122
+ *                 y1 += ys
+ *                 p1 -= 2 * dx
+ *             if p2 >= 0:             # <<<<<<<<<<<<<<
+ *                 z1 += zs
+ *                 p2 -= 2 * dx
+ */
+      }
+
+      /* "bresenham3D.pyx":125
+ *                 z1 += zs
+ *                 p2 -= 2 * dx
+ *             p1 += 2 * dy             # <<<<<<<<<<<<<<
+ *             p2 += 2 * dz
+ * 
+ */
+      __pyx_v_p1 = (__pyx_v_p1 + (2 * __pyx_v_dy));
+
+      /* "bresenham3D.pyx":126
+ *                 p2 -= 2 * dx
+ *             p1 += 2 * dy
+ *             p2 += 2 * dz             # <<<<<<<<<<<<<<
+ * 
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):
+ */
+      __pyx_v_p2 = (__pyx_v_p2 + (2 * __pyx_v_dz));
+
+      /* "bresenham3D.pyx":128
+ *             p2 += 2 * dz
+ * 
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):             # <<<<<<<<<<<<<<
+ *                 return -1
+ *             idx+=1
+ */
+      __pyx_t_2.__pyx_n = 1;
+      __pyx_t_2.mask = __pyx_v_mask;
+      __pyx_t_3 = __pyx_f_11bresenham3D_append_if_not_masked(__pyx_v_x1, __pyx_v_y1, __pyx_v_z1, __pyx_v_idx, __pyx_v_points, &__pyx_t_2); if (unlikely(__pyx_t_3 == ((int)-1) && PyErr_Occurred())) __PYX_ERR(0, 128, __pyx_L1_error)
+      __pyx_t_1 = (!__pyx_t_3);
+      if (__pyx_t_1) {
+
+        /* "bresenham3D.pyx":129
+ * 
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):
+ *                 return -1             # <<<<<<<<<<<<<<
+ *             idx+=1
+ * 
+ */
+        __pyx_r = -1;
+        goto __pyx_L0;
+
+        /* "bresenham3D.pyx":128
+ *             p2 += 2 * dz
+ * 
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):             # <<<<<<<<<<<<<<
+ *                 return -1
+ *             idx+=1
+ */
+      }
+
+      /* "bresenham3D.pyx":130
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):
+ *                 return -1
+ *             idx+=1             # <<<<<<<<<<<<<<
+ * 
+ *     # Driving axis is Y-axis
+ */
+      __pyx_v_idx = (__pyx_v_idx + 1);
+    }
+
+    /* "bresenham3D.pyx":114
+ * 
+ *     # Driving axis is X-axis
+ *     if dx >= dy and dx >= dz:             # <<<<<<<<<<<<<<
+ *         p1 = 2 * dy - dx
+ *         p2 = 2 * dz - dx
+ */
+    goto __pyx_L4;
+  }
+
+  /* "bresenham3D.pyx":133
+ * 
+ *     # Driving axis is Y-axis
+ *     elif dy >= dx and dy >= dz:             # <<<<<<<<<<<<<<
+ *         p1 = 2 * dx - dy
+ *         p2 = 2 * dz - dy
+ */
+  __pyx_t_3 = (__pyx_v_dy >= __pyx_v_dx);
+  if (__pyx_t_3) {
+  } else {
+    __pyx_t_1 = __pyx_t_3;
+    goto __pyx_L12_bool_binop_done;
+  }
+  __pyx_t_3 = (__pyx_v_dy >= __pyx_v_dz);
+  __pyx_t_1 = __pyx_t_3;
+  __pyx_L12_bool_binop_done:;
+  if (__pyx_t_1) {
+
+    /* "bresenham3D.pyx":134
+ *     # Driving axis is Y-axis
+ *     elif dy >= dx and dy >= dz:
+ *         p1 = 2 * dx - dy             # <<<<<<<<<<<<<<
+ *         p2 = 2 * dz - dy
+ *         while y1 != y2:
+ */
+    __pyx_v_p1 = ((2 * __pyx_v_dx) - __pyx_v_dy);
+
+    /* "bresenham3D.pyx":135
+ *     elif dy >= dx and dy >= dz:
+ *         p1 = 2 * dx - dy
+ *         p2 = 2 * dz - dy             # <<<<<<<<<<<<<<
+ *         while y1 != y2:
+ *             y1 += ys
+ */
+    __pyx_v_p2 = ((2 * __pyx_v_dz) - __pyx_v_dy);
+
+    /* "bresenham3D.pyx":136
+ *         p1 = 2 * dx - dy
+ *         p2 = 2 * dz - dy
+ *         while y1 != y2:             # <<<<<<<<<<<<<<
+ *             y1 += ys
+ *             if p1 >= 0:
+ */
+    while (1) {
+      __pyx_t_1 = (__pyx_v_y1 != __pyx_v_y2);
+      if (!__pyx_t_1) break;
+
+      /* "bresenham3D.pyx":137
+ *         p2 = 2 * dz - dy
+ *         while y1 != y2:
+ *             y1 += ys             # <<<<<<<<<<<<<<
+ *             if p1 >= 0:
+ *                 x1 += xs
+ */
+      __pyx_v_y1 = (__pyx_v_y1 + __pyx_v_ys);
+
+      /* "bresenham3D.pyx":138
+ *         while y1 != y2:
+ *             y1 += ys
+ *             if p1 >= 0:             # <<<<<<<<<<<<<<
+ *                 x1 += xs
+ *                 p1 -= 2 * dy
+ */
+      __pyx_t_1 = (__pyx_v_p1 >= 0);
+      if (__pyx_t_1) {
+
+        /* "bresenham3D.pyx":139
+ *             y1 += ys
+ *             if p1 >= 0:
+ *                 x1 += xs             # <<<<<<<<<<<<<<
+ *                 p1 -= 2 * dy
+ *             if p2 >= 0:
+ */
+        __pyx_v_x1 = (__pyx_v_x1 + __pyx_v_xs);
+
+        /* "bresenham3D.pyx":140
+ *             if p1 >= 0:
+ *                 x1 += xs
+ *                 p1 -= 2 * dy             # <<<<<<<<<<<<<<
+ *             if p2 >= 0:
+ *                 z1 += zs
+ */
+        __pyx_v_p1 = (__pyx_v_p1 - (2 * __pyx_v_dy));
+
+        /* "bresenham3D.pyx":138
+ *         while y1 != y2:
+ *             y1 += ys
+ *             if p1 >= 0:             # <<<<<<<<<<<<<<
+ *                 x1 += xs
+ *                 p1 -= 2 * dy
+ */
+      }
+
+      /* "bresenham3D.pyx":141
+ *                 x1 += xs
+ *                 p1 -= 2 * dy
+ *             if p2 >= 0:             # <<<<<<<<<<<<<<
+ *                 z1 += zs
+ *                 p2 -= 2 * dy
+ */
+      __pyx_t_1 = (__pyx_v_p2 >= 0);
+      if (__pyx_t_1) {
+
+        /* "bresenham3D.pyx":142
+ *                 p1 -= 2 * dy
+ *             if p2 >= 0:
+ *                 z1 += zs             # <<<<<<<<<<<<<<
+ *                 p2 -= 2 * dy
+ *             p1 += 2 * dx
+ */
+        __pyx_v_z1 = (__pyx_v_z1 + __pyx_v_zs);
+
+        /* "bresenham3D.pyx":143
+ *             if p2 >= 0:
+ *                 z1 += zs
+ *                 p2 -= 2 * dy             # <<<<<<<<<<<<<<
+ *             p1 += 2 * dx
+ *             p2 += 2 * dz
+ */
+        __pyx_v_p2 = (__pyx_v_p2 - (2 * __pyx_v_dy));
+
+        /* "bresenham3D.pyx":141
+ *                 x1 += xs
+ *                 p1 -= 2 * dy
+ *             if p2 >= 0:             # <<<<<<<<<<<<<<
+ *                 z1 += zs
+ *                 p2 -= 2 * dy
+ */
+      }
+
+      /* "bresenham3D.pyx":144
+ *                 z1 += zs
+ *                 p2 -= 2 * dy
+ *             p1 += 2 * dx             # <<<<<<<<<<<<<<
+ *             p2 += 2 * dz
+ * 
+ */
+      __pyx_v_p1 = (__pyx_v_p1 + (2 * __pyx_v_dx));
+
+      /* "bresenham3D.pyx":145
+ *                 p2 -= 2 * dy
+ *             p1 += 2 * dx
+ *             p2 += 2 * dz             # <<<<<<<<<<<<<<
+ * 
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):
+ */
+      __pyx_v_p2 = (__pyx_v_p2 + (2 * __pyx_v_dz));
+
+      /* "bresenham3D.pyx":147
+ *             p2 += 2 * dz
+ * 
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):             # <<<<<<<<<<<<<<
+ *                 return -1
+ *             idx+=1
+ */
+      __pyx_t_2.__pyx_n = 1;
+      __pyx_t_2.mask = __pyx_v_mask;
+      __pyx_t_1 = __pyx_f_11bresenham3D_append_if_not_masked(__pyx_v_x1, __pyx_v_y1, __pyx_v_z1, __pyx_v_idx, __pyx_v_points, &__pyx_t_2); if (unlikely(__pyx_t_1 == ((int)-1) && PyErr_Occurred())) __PYX_ERR(0, 147, __pyx_L1_error)
+      __pyx_t_3 = (!__pyx_t_1);
+      if (__pyx_t_3) {
+
+        /* "bresenham3D.pyx":148
+ * 
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):
+ *                 return -1             # <<<<<<<<<<<<<<
+ *             idx+=1
+ * 
+ */
+        __pyx_r = -1;
+        goto __pyx_L0;
+
+        /* "bresenham3D.pyx":147
+ *             p2 += 2 * dz
+ * 
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):             # <<<<<<<<<<<<<<
+ *                 return -1
+ *             idx+=1
+ */
+      }
+
+      /* "bresenham3D.pyx":149
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):
+ *                 return -1
+ *             idx+=1             # <<<<<<<<<<<<<<
+ * 
+ *     # Driving axis is Z-axis
+ */
+      __pyx_v_idx = (__pyx_v_idx + 1);
+    }
+
+    /* "bresenham3D.pyx":133
+ * 
+ *     # Driving axis is Y-axis
+ *     elif dy >= dx and dy >= dz:             # <<<<<<<<<<<<<<
+ *         p1 = 2 * dx - dy
+ *         p2 = 2 * dz - dy
+ */
+    goto __pyx_L4;
+  }
+
+  /* "bresenham3D.pyx":153
+ *     # Driving axis is Z-axis
+ *     else:
+ *         p1 = 2 * dy - dz             # <<<<<<<<<<<<<<
+ *         p2 = 2 * dx - dz
+ *         while z1 != z2:
+ */
+  /*else*/ {
+    __pyx_v_p1 = ((2 * __pyx_v_dy) - __pyx_v_dz);
+
+    /* "bresenham3D.pyx":154
+ *     else:
+ *         p1 = 2 * dy - dz
+ *         p2 = 2 * dx - dz             # <<<<<<<<<<<<<<
+ *         while z1 != z2:
+ *             z1 += zs
+ */
+    __pyx_v_p2 = ((2 * __pyx_v_dx) - __pyx_v_dz);
+
+    /* "bresenham3D.pyx":155
+ *         p1 = 2 * dy - dz
+ *         p2 = 2 * dx - dz
+ *         while z1 != z2:             # <<<<<<<<<<<<<<
+ *             z1 += zs
+ *             if p1 >= 0:
+ */
+    while (1) {
+      __pyx_t_3 = (__pyx_v_z1 != __pyx_v_z2);
+      if (!__pyx_t_3) break;
+
+      /* "bresenham3D.pyx":156
+ *         p2 = 2 * dx - dz
+ *         while z1 != z2:
+ *             z1 += zs             # <<<<<<<<<<<<<<
+ *             if p1 >= 0:
+ *                 y1 += ys
+ */
+      __pyx_v_z1 = (__pyx_v_z1 + __pyx_v_zs);
+
+      /* "bresenham3D.pyx":157
+ *         while z1 != z2:
+ *             z1 += zs
+ *             if p1 >= 0:             # <<<<<<<<<<<<<<
+ *                 y1 += ys
+ *                 p1 -= 2 * dz
+ */
+      __pyx_t_3 = (__pyx_v_p1 >= 0);
+      if (__pyx_t_3) {
+
+        /* "bresenham3D.pyx":158
+ *             z1 += zs
+ *             if p1 >= 0:
+ *                 y1 += ys             # <<<<<<<<<<<<<<
+ *                 p1 -= 2 * dz
+ *             if p2 >= 0:
+ */
+        __pyx_v_y1 = (__pyx_v_y1 + __pyx_v_ys);
+
+        /* "bresenham3D.pyx":159
+ *             if p1 >= 0:
+ *                 y1 += ys
+ *                 p1 -= 2 * dz             # <<<<<<<<<<<<<<
+ *             if p2 >= 0:
+ *                 x1 += xs
+ */
+        __pyx_v_p1 = (__pyx_v_p1 - (2 * __pyx_v_dz));
+
+        /* "bresenham3D.pyx":157
+ *         while z1 != z2:
+ *             z1 += zs
+ *             if p1 >= 0:             # <<<<<<<<<<<<<<
+ *                 y1 += ys
+ *                 p1 -= 2 * dz
+ */
+      }
+
+      /* "bresenham3D.pyx":160
+ *                 y1 += ys
+ *                 p1 -= 2 * dz
+ *             if p2 >= 0:             # <<<<<<<<<<<<<<
+ *                 x1 += xs
+ *                 p2 -= 2 * dz
+ */
+      __pyx_t_3 = (__pyx_v_p2 >= 0);
+      if (__pyx_t_3) {
+
+        /* "bresenham3D.pyx":161
+ *                 p1 -= 2 * dz
+ *             if p2 >= 0:
+ *                 x1 += xs             # <<<<<<<<<<<<<<
+ *                 p2 -= 2 * dz
+ *             p1 += 2 * dy
+ */
+        __pyx_v_x1 = (__pyx_v_x1 + __pyx_v_xs);
+
+        /* "bresenham3D.pyx":162
+ *             if p2 >= 0:
+ *                 x1 += xs
+ *                 p2 -= 2 * dz             # <<<<<<<<<<<<<<
+ *             p1 += 2 * dy
+ *             p2 += 2 * dx
+ */
+        __pyx_v_p2 = (__pyx_v_p2 - (2 * __pyx_v_dz));
+
+        /* "bresenham3D.pyx":160
+ *                 y1 += ys
+ *                 p1 -= 2 * dz
+ *             if p2 >= 0:             # <<<<<<<<<<<<<<
+ *                 x1 += xs
+ *                 p2 -= 2 * dz
+ */
+      }
+
+      /* "bresenham3D.pyx":163
+ *                 x1 += xs
+ *                 p2 -= 2 * dz
+ *             p1 += 2 * dy             # <<<<<<<<<<<<<<
+ *             p2 += 2 * dx
+ * 
+ */
+      __pyx_v_p1 = (__pyx_v_p1 + (2 * __pyx_v_dy));
+
+      /* "bresenham3D.pyx":164
+ *                 p2 -= 2 * dz
+ *             p1 += 2 * dy
+ *             p2 += 2 * dx             # <<<<<<<<<<<<<<
+ * 
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):
+ */
+      __pyx_v_p2 = (__pyx_v_p2 + (2 * __pyx_v_dx));
+
+      /* "bresenham3D.pyx":166
+ *             p2 += 2 * dx
+ * 
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):             # <<<<<<<<<<<<<<
+ *                 return -1
+ *             idx+=1
+ */
+      __pyx_t_2.__pyx_n = 1;
+      __pyx_t_2.mask = __pyx_v_mask;
+      __pyx_t_3 = __pyx_f_11bresenham3D_append_if_not_masked(__pyx_v_x1, __pyx_v_y1, __pyx_v_z1, __pyx_v_idx, __pyx_v_points, &__pyx_t_2); if (unlikely(__pyx_t_3 == ((int)-1) && PyErr_Occurred())) __PYX_ERR(0, 166, __pyx_L1_error)
+      __pyx_t_1 = (!__pyx_t_3);
+      if (__pyx_t_1) {
+
+        /* "bresenham3D.pyx":167
+ * 
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):
+ *                 return -1             # <<<<<<<<<<<<<<
+ *             idx+=1
+ * 
+ */
+        __pyx_r = -1;
+        goto __pyx_L0;
+
+        /* "bresenham3D.pyx":166
+ *             p2 += 2 * dx
+ * 
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):             # <<<<<<<<<<<<<<
+ *                 return -1
+ *             idx+=1
+ */
+      }
+
+      /* "bresenham3D.pyx":168
+ *             if not append_if_not_masked(x1, y1, z1, idx, points, mask=mask):
+ *                 return -1
+ *             idx+=1             # <<<<<<<<<<<<<<
+ * 
+ *     return idx
+ */
+      __pyx_v_idx = (__pyx_v_idx + 1);
+    }
+  }
+  __pyx_L4:;
+
+  /* "bresenham3D.pyx":170
+ *             idx+=1
+ * 
+ *     return idx             # <<<<<<<<<<<<<<
+ * 
+ * def bresenham3DWithMask(
+ */
+  __pyx_r = __pyx_v_idx;
+  goto __pyx_L0;
+
+  /* "bresenham3D.pyx":93
+ *     return idx
+ * 
+ * cdef inline int bresenham3DWithMaskSingleInline(             # <<<<<<<<<<<<<<
+ *     int x1, int y1, int z1, int x2, int y2, int z2,
+ *     list points,
+ */
+
+  /* function exit code */
+  __pyx_L1_error:;
+  __Pyx_AddTraceback("bresenham3D.bresenham3DWithMaskSingleInline", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __pyx_r = -1;
+  __pyx_L0:;
+  return __pyx_r;
+}
+
+/* "bresenham3D.pyx":172
+ *     return idx
  * 
  * def bresenham3DWithMask(             # <<<<<<<<<<<<<<
  *     int[:, :] starts_array, int[:, :] ends_array, unsigned char[:,:,:] mask = None
- * ) -> List[Tuple[int, int, int]]:
+ * ):
  */
 
-static PyObject *__pyx_pf_11bresenham3D_18__defaults__(CYTHON_UNUSED PyObject *__pyx_self) {
+static PyObject *__pyx_pf_11bresenham3D_8__defaults__(CYTHON_UNUSED PyObject *__pyx_self) {
   PyObject *__pyx_r = NULL;
   __Pyx_RefNannyDeclarations
   PyObject *__pyx_t_1 = NULL;
@@ -19669,20 +20231,20 @@ static PyObject *__pyx_pf_11bresenham3D_18__defaults__(CYTHON_UNUSED PyObject *_
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("__defaults__", 1);
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_1 = __pyx_memoryview_fromslice(__Pyx_CyFunction_Defaults(__pyx_defaults1, __pyx_self)->__pyx_arg_mask, 3, (PyObject *(*)(char *)) __pyx_memview_get_unsigned_char, (int (*)(char *, PyObject *)) __pyx_memview_set_unsigned_char, 0);; if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 85, __pyx_L1_error)
+  __pyx_t_1 = __pyx_memoryview_fromslice(__Pyx_CyFunction_Defaults(__pyx_defaults1, __pyx_self)->__pyx_arg_mask, 3, (PyObject *(*)(char *)) __pyx_memview_get_unsigned_char, (int (*)(char *, PyObject *)) __pyx_memview_set_unsigned_char, 0);; if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 172, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_2 = PyTuple_New(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 85, __pyx_L1_error)
+  __pyx_t_2 = PyTuple_New(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 172, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_GIVEREF(__pyx_t_1);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 0, __pyx_t_1)) __PYX_ERR(0, 85, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 0, __pyx_t_1)) __PYX_ERR(0, 172, __pyx_L1_error);
   __pyx_t_1 = 0;
-  __pyx_t_1 = PyTuple_New(2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 85, __pyx_L1_error)
+  __pyx_t_1 = PyTuple_New(2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 172, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_GIVEREF(__pyx_t_2);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_1, 0, __pyx_t_2)) __PYX_ERR(0, 85, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_1, 0, __pyx_t_2)) __PYX_ERR(0, 172, __pyx_L1_error);
   __Pyx_INCREF(Py_None);
   __Pyx_GIVEREF(Py_None);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_1, 1, Py_None)) __PYX_ERR(0, 85, __pyx_L1_error);
+  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_1, 1, Py_None)) __PYX_ERR(0, 172, __pyx_L1_error);
   __pyx_t_2 = 0;
   __pyx_r = __pyx_t_1;
   __pyx_t_1 = 0;
@@ -19760,7 +20322,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[0]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 85, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 172, __pyx_L3_error)
         else goto __pyx_L5_argtuple_error;
         CYTHON_FALLTHROUGH;
         case  1:
@@ -19768,21 +20330,21 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
           (void)__Pyx_Arg_NewRef_FASTCALL(values[1]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 85, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 172, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("bresenham3DWithMask", 0, 2, 3, 1); __PYX_ERR(0, 85, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("bresenham3DWithMask", 0, 2, 3, 1); __PYX_ERR(0, 172, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  2:
         if (kw_args > 0) {
           PyObject* value = __Pyx_GetKwValue_FASTCALL(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_mask);
           if (value) { values[2] = __Pyx_Arg_NewRef_FASTCALL(value); kw_args--; }
-          else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 85, __pyx_L3_error)
+          else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 172, __pyx_L3_error)
         }
       }
       if (unlikely(kw_args > 0)) {
         const Py_ssize_t kwd_pos_args = __pyx_nargs;
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "bresenham3DWithMask") < 0)) __PYX_ERR(0, 85, __pyx_L3_error)
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "bresenham3DWithMask") < 0)) __PYX_ERR(0, 172, __pyx_L3_error)
       }
     } else {
       switch (__pyx_nargs) {
@@ -19794,10 +20356,10 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
         default: goto __pyx_L5_argtuple_error;
       }
     }
-    __pyx_v_starts_array = __Pyx_PyObject_to_MemoryviewSlice_dsds_int(values[0], PyBUF_WRITABLE); if (unlikely(!__pyx_v_starts_array.memview)) __PYX_ERR(0, 86, __pyx_L3_error)
-    __pyx_v_ends_array = __Pyx_PyObject_to_MemoryviewSlice_dsds_int(values[1], PyBUF_WRITABLE); if (unlikely(!__pyx_v_ends_array.memview)) __PYX_ERR(0, 86, __pyx_L3_error)
+    __pyx_v_starts_array = __Pyx_PyObject_to_MemoryviewSlice_dsds_int(values[0], PyBUF_WRITABLE); if (unlikely(!__pyx_v_starts_array.memview)) __PYX_ERR(0, 173, __pyx_L3_error)
+    __pyx_v_ends_array = __Pyx_PyObject_to_MemoryviewSlice_dsds_int(values[1], PyBUF_WRITABLE); if (unlikely(!__pyx_v_ends_array.memview)) __PYX_ERR(0, 173, __pyx_L3_error)
     if (values[2]) {
-      __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 86, __pyx_L3_error)
+      __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 173, __pyx_L3_error)
     } else {
       __pyx_v_mask = __pyx_dynamic_args->__pyx_arg_mask;
       __PYX_INC_MEMVIEW(&__pyx_v_mask, 1);
@@ -19805,7 +20367,7 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   }
   goto __pyx_L6_skip;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("bresenham3DWithMask", 0, 2, 3, __pyx_nargs); __PYX_ERR(0, 85, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("bresenham3DWithMask", 0, 2, 3, __pyx_nargs); __PYX_ERR(0, 172, __pyx_L3_error)
   __pyx_L6_skip:;
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L3_error:;
@@ -19840,495 +20402,538 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
 
 static PyObject *__pyx_pf_11bresenham3D_2bresenham3DWithMask(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_starts_array, __Pyx_memviewslice __pyx_v_ends_array, __Pyx_memviewslice __pyx_v_mask) {
   PyObject *__pyx_v_output_list = 0;
-  PyObject *__pyx_v_current_start = NULL;
-  PyObject *__pyx_v_current_end = NULL;
+  int __pyx_v_rows;
+  CYTHON_UNUSED PyObject *__pyx_v_output_set = 0;
+  PyObject *__pyx_v_points = 0;
+  int __pyx_v_i;
+  CYTHON_UNUSED PyObject *__pyx_v_idx = NULL;
   PyObject *__pyx_r = NULL;
   __Pyx_RefNannyDeclarations
   PyObject *__pyx_t_1 = NULL;
-  PyObject *__pyx_t_2 = NULL;
-  PyObject *__pyx_t_3 = NULL;
-  Py_ssize_t __pyx_t_4;
-  PyObject *(*__pyx_t_5)(PyObject *);
-  PyObject *__pyx_t_6 = NULL;
-  PyObject *__pyx_t_7 = NULL;
-  PyObject *(*__pyx_t_8)(PyObject *);
+  int __pyx_t_2;
+  int __pyx_t_3;
+  int __pyx_t_4;
+  Py_ssize_t __pyx_t_5;
+  Py_ssize_t __pyx_t_6;
+  int __pyx_t_7;
+  PyObject *__pyx_t_8 = NULL;
   PyObject *__pyx_t_9 = NULL;
   PyObject *__pyx_t_10 = NULL;
   PyObject *__pyx_t_11 = NULL;
   PyObject *__pyx_t_12 = NULL;
+  PyObject *__pyx_t_13 = NULL;
+  PyObject *__pyx_t_14 = NULL;
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("bresenham3DWithMask", 1);
 
-  /* "bresenham3D.pyx":88
+  /* "bresenham3D.pyx":175
  *     int[:, :] starts_array, int[:, :] ends_array, unsigned char[:,:,:] mask = None
- * ) -> List[Tuple[int, int, int]]:
+ * ):
  *     cdef list output_list = []             # <<<<<<<<<<<<<<
- *     for current_start, current_end in zip(starts_array, ends_array):
- *         output_list += bresenham3DWithMaskSingle(
+ *     cdef int rows = starts_array.shape[0]
+ *     cdef set output_set = set()
  */
-  __pyx_t_1 = PyList_New(0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 88, __pyx_L1_error)
+  __pyx_t_1 = PyList_New(0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 175, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __pyx_v_output_list = ((PyObject*)__pyx_t_1);
   __pyx_t_1 = 0;
 
-  /* "bresenham3D.pyx":89
- * ) -> List[Tuple[int, int, int]]:
+  /* "bresenham3D.pyx":176
+ * ):
  *     cdef list output_list = []
- *     for current_start, current_end in zip(starts_array, ends_array):             # <<<<<<<<<<<<<<
- *         output_list += bresenham3DWithMaskSingle(
- *             current_start[0], current_start[1], current_start[2],
+ *     cdef int rows = starts_array.shape[0]             # <<<<<<<<<<<<<<
+ *     cdef set output_set = set()
+ *     cdef list points = []
  */
-  __pyx_t_1 = __pyx_memoryview_fromslice(__pyx_v_starts_array, 2, (PyObject *(*)(char *)) __pyx_memview_get_int, (int (*)(char *, PyObject *)) __pyx_memview_set_int, 0);; if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 89, __pyx_L1_error)
+  __pyx_v_rows = (__pyx_v_starts_array.shape[0]);
+
+  /* "bresenham3D.pyx":177
+ *     cdef list output_list = []
+ *     cdef int rows = starts_array.shape[0]
+ *     cdef set output_set = set()             # <<<<<<<<<<<<<<
+ *     cdef list points = []
+ * 
+ */
+  __pyx_t_1 = PySet_New(0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 177, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_2 = __pyx_memoryview_fromslice(__pyx_v_ends_array, 2, (PyObject *(*)(char *)) __pyx_memview_get_int, (int (*)(char *, PyObject *)) __pyx_memview_set_int, 0);; if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 89, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_3 = PyTuple_New(2); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 89, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_3);
-  __Pyx_GIVEREF(__pyx_t_1);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 0, __pyx_t_1)) __PYX_ERR(0, 89, __pyx_L1_error);
-  __Pyx_GIVEREF(__pyx_t_2);
-  if (__Pyx_PyTuple_SET_ITEM(__pyx_t_3, 1, __pyx_t_2)) __PYX_ERR(0, 89, __pyx_L1_error);
+  __pyx_v_output_set = ((PyObject*)__pyx_t_1);
   __pyx_t_1 = 0;
-  __pyx_t_2 = 0;
-  __pyx_t_2 = __Pyx_PyObject_Call(__pyx_builtin_zip, __pyx_t_3, NULL); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 89, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_2);
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-  if (likely(PyList_CheckExact(__pyx_t_2)) || PyTuple_CheckExact(__pyx_t_2)) {
-    __pyx_t_3 = __pyx_t_2; __Pyx_INCREF(__pyx_t_3);
-    __pyx_t_4 = 0;
-    __pyx_t_5 = NULL;
-  } else {
-    __pyx_t_4 = -1; __pyx_t_3 = PyObject_GetIter(__pyx_t_2); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 89, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_3);
-    __pyx_t_5 = __Pyx_PyObject_GetIterNextFunc(__pyx_t_3); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 89, __pyx_L1_error)
-  }
-  __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  for (;;) {
-    if (likely(!__pyx_t_5)) {
-      if (likely(PyList_CheckExact(__pyx_t_3))) {
-        {
-          Py_ssize_t __pyx_temp = __Pyx_PyList_GET_SIZE(__pyx_t_3);
-          #if !CYTHON_ASSUME_SAFE_MACROS
-          if (unlikely((__pyx_temp < 0))) __PYX_ERR(0, 89, __pyx_L1_error)
-          #endif
-          if (__pyx_t_4 >= __pyx_temp) break;
-        }
-        #if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
-        __pyx_t_2 = PyList_GET_ITEM(__pyx_t_3, __pyx_t_4); __Pyx_INCREF(__pyx_t_2); __pyx_t_4++; if (unlikely((0 < 0))) __PYX_ERR(0, 89, __pyx_L1_error)
-        #else
-        __pyx_t_2 = __Pyx_PySequence_ITEM(__pyx_t_3, __pyx_t_4); __pyx_t_4++; if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 89, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_2);
-        #endif
-      } else {
-        {
-          Py_ssize_t __pyx_temp = __Pyx_PyTuple_GET_SIZE(__pyx_t_3);
-          #if !CYTHON_ASSUME_SAFE_MACROS
-          if (unlikely((__pyx_temp < 0))) __PYX_ERR(0, 89, __pyx_L1_error)
-          #endif
-          if (__pyx_t_4 >= __pyx_temp) break;
-        }
-        #if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
-        __pyx_t_2 = PyTuple_GET_ITEM(__pyx_t_3, __pyx_t_4); __Pyx_INCREF(__pyx_t_2); __pyx_t_4++; if (unlikely((0 < 0))) __PYX_ERR(0, 89, __pyx_L1_error)
-        #else
-        __pyx_t_2 = __Pyx_PySequence_ITEM(__pyx_t_3, __pyx_t_4); __pyx_t_4++; if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 89, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_2);
-        #endif
-      }
-    } else {
-      __pyx_t_2 = __pyx_t_5(__pyx_t_3);
-      if (unlikely(!__pyx_t_2)) {
-        PyObject* exc_type = PyErr_Occurred();
-        if (exc_type) {
-          if (likely(__Pyx_PyErr_GivenExceptionMatches(exc_type, PyExc_StopIteration))) PyErr_Clear();
-          else __PYX_ERR(0, 89, __pyx_L1_error)
-        }
-        break;
-      }
-      __Pyx_GOTREF(__pyx_t_2);
-    }
-    if ((likely(PyTuple_CheckExact(__pyx_t_2))) || (PyList_CheckExact(__pyx_t_2))) {
-      PyObject* sequence = __pyx_t_2;
-      Py_ssize_t size = __Pyx_PySequence_SIZE(sequence);
-      if (unlikely(size != 2)) {
-        if (size > 2) __Pyx_RaiseTooManyValuesError(2);
-        else if (size >= 0) __Pyx_RaiseNeedMoreValuesError(size);
-        __PYX_ERR(0, 89, __pyx_L1_error)
-      }
-      #if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
-      if (likely(PyTuple_CheckExact(sequence))) {
-        __pyx_t_1 = PyTuple_GET_ITEM(sequence, 0); 
-        __pyx_t_6 = PyTuple_GET_ITEM(sequence, 1); 
-      } else {
-        __pyx_t_1 = PyList_GET_ITEM(sequence, 0); 
-        __pyx_t_6 = PyList_GET_ITEM(sequence, 1); 
-      }
-      __Pyx_INCREF(__pyx_t_1);
-      __Pyx_INCREF(__pyx_t_6);
-      #else
-      __pyx_t_1 = PySequence_ITEM(sequence, 0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 89, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_1);
-      __pyx_t_6 = PySequence_ITEM(sequence, 1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 89, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_6);
-      #endif
-      __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-    } else {
-      Py_ssize_t index = -1;
-      __pyx_t_7 = PyObject_GetIter(__pyx_t_2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 89, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_7);
-      __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-      __pyx_t_8 = __Pyx_PyObject_GetIterNextFunc(__pyx_t_7);
-      index = 0; __pyx_t_1 = __pyx_t_8(__pyx_t_7); if (unlikely(!__pyx_t_1)) goto __pyx_L5_unpacking_failed;
-      __Pyx_GOTREF(__pyx_t_1);
-      index = 1; __pyx_t_6 = __pyx_t_8(__pyx_t_7); if (unlikely(!__pyx_t_6)) goto __pyx_L5_unpacking_failed;
-      __Pyx_GOTREF(__pyx_t_6);
-      if (__Pyx_IternextUnpackEndCheck(__pyx_t_8(__pyx_t_7), 2) < 0) __PYX_ERR(0, 89, __pyx_L1_error)
-      __pyx_t_8 = NULL;
-      __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-      goto __pyx_L6_unpacking_done;
-      __pyx_L5_unpacking_failed:;
-      __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-      __pyx_t_8 = NULL;
-      if (__Pyx_IterFinish() == 0) __Pyx_RaiseNeedMoreValuesError(index);
-      __PYX_ERR(0, 89, __pyx_L1_error)
-      __pyx_L6_unpacking_done:;
-    }
-    __Pyx_XDECREF_SET(__pyx_v_current_start, __pyx_t_1);
-    __pyx_t_1 = 0;
-    __Pyx_XDECREF_SET(__pyx_v_current_end, __pyx_t_6);
-    __pyx_t_6 = 0;
 
-    /* "bresenham3D.pyx":90
- *     cdef list output_list = []
- *     for current_start, current_end in zip(starts_array, ends_array):
- *         output_list += bresenham3DWithMaskSingle(             # <<<<<<<<<<<<<<
- *             current_start[0], current_start[1], current_start[2],
- *             current_end[0], current_end[1], current_end[2],
+  /* "bresenham3D.pyx":178
+ *     cdef int rows = starts_array.shape[0]
+ *     cdef set output_set = set()
+ *     cdef list points = []             # <<<<<<<<<<<<<<
+ * 
+ *     for i in range(rows):
  */
-    __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_bresenham3DWithMaskSingle); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 90, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_2);
+  __pyx_t_1 = PyList_New(0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 178, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_1);
+  __pyx_v_points = ((PyObject*)__pyx_t_1);
+  __pyx_t_1 = 0;
 
-    /* "bresenham3D.pyx":91
- *     for current_start, current_end in zip(starts_array, ends_array):
- *         output_list += bresenham3DWithMaskSingle(
- *             current_start[0], current_start[1], current_start[2],             # <<<<<<<<<<<<<<
- *             current_end[0], current_end[1], current_end[2],
- *             mask=mask
+  /* "bresenham3D.pyx":180
+ *     cdef list points = []
+ * 
+ *     for i in range(rows):             # <<<<<<<<<<<<<<
+ * 
+ *         idx = bresenham3DWithMaskSingle(
  */
-    __pyx_t_6 = __Pyx_GetItemInt(__pyx_v_current_start, 0, long, 1, __Pyx_PyInt_From_long, 0, 0, 1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 91, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_6);
-    __pyx_t_1 = __Pyx_GetItemInt(__pyx_v_current_start, 1, long, 1, __Pyx_PyInt_From_long, 0, 0, 1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 91, __pyx_L1_error)
+  __pyx_t_2 = __pyx_v_rows;
+  __pyx_t_3 = __pyx_t_2;
+  for (__pyx_t_4 = 0; __pyx_t_4 < __pyx_t_3; __pyx_t_4+=1) {
+    __pyx_v_i = __pyx_t_4;
+
+    /* "bresenham3D.pyx":182
+ *     for i in range(rows):
+ * 
+ *         idx = bresenham3DWithMaskSingle(             # <<<<<<<<<<<<<<
+ *         starts_array[i][0], starts_array[i][1], starts_array[i][2],
+ *         ends_array[i][0], ends_array[i][1], ends_array[i][2],
+ */
+    __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_bresenham3DWithMaskSingle); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 182, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_1);
-    __pyx_t_7 = __Pyx_GetItemInt(__pyx_v_current_start, 2, long, 1, __Pyx_PyInt_From_long, 0, 0, 1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 91, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_7);
 
-    /* "bresenham3D.pyx":92
- *         output_list += bresenham3DWithMaskSingle(
- *             current_start[0], current_start[1], current_start[2],
- *             current_end[0], current_end[1], current_end[2],             # <<<<<<<<<<<<<<
- *             mask=mask
- *         )
+    /* "bresenham3D.pyx":183
+ * 
+ *         idx = bresenham3DWithMaskSingle(
+ *         starts_array[i][0], starts_array[i][1], starts_array[i][2],             # <<<<<<<<<<<<<<
+ *         ends_array[i][0], ends_array[i][1], ends_array[i][2],
+ *         points,
  */
-    __pyx_t_9 = __Pyx_GetItemInt(__pyx_v_current_end, 0, long, 1, __Pyx_PyInt_From_long, 0, 0, 1); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 92, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_9);
-    __pyx_t_10 = __Pyx_GetItemInt(__pyx_v_current_end, 1, long, 1, __Pyx_PyInt_From_long, 0, 0, 1); if (unlikely(!__pyx_t_10)) __PYX_ERR(0, 92, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_10);
-    __pyx_t_11 = __Pyx_GetItemInt(__pyx_v_current_end, 2, long, 1, __Pyx_PyInt_From_long, 0, 0, 1); if (unlikely(!__pyx_t_11)) __PYX_ERR(0, 92, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_11);
-
-    /* "bresenham3D.pyx":90
- *     cdef list output_list = []
- *     for current_start, current_end in zip(starts_array, ends_array):
- *         output_list += bresenham3DWithMaskSingle(             # <<<<<<<<<<<<<<
- *             current_start[0], current_start[1], current_start[2],
- *             current_end[0], current_end[1], current_end[2],
- */
-    __pyx_t_12 = PyTuple_New(6); if (unlikely(!__pyx_t_12)) __PYX_ERR(0, 90, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_12);
-    __Pyx_GIVEREF(__pyx_t_6);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_12, 0, __pyx_t_6)) __PYX_ERR(0, 90, __pyx_L1_error);
-    __Pyx_GIVEREF(__pyx_t_1);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_12, 1, __pyx_t_1)) __PYX_ERR(0, 90, __pyx_L1_error);
-    __Pyx_GIVEREF(__pyx_t_7);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_12, 2, __pyx_t_7)) __PYX_ERR(0, 90, __pyx_L1_error);
-    __Pyx_GIVEREF(__pyx_t_9);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_12, 3, __pyx_t_9)) __PYX_ERR(0, 90, __pyx_L1_error);
-    __Pyx_GIVEREF(__pyx_t_10);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_12, 4, __pyx_t_10)) __PYX_ERR(0, 90, __pyx_L1_error);
-    __Pyx_GIVEREF(__pyx_t_11);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_12, 5, __pyx_t_11)) __PYX_ERR(0, 90, __pyx_L1_error);
+    __pyx_t_5 = __pyx_v_i;
     __pyx_t_6 = 0;
-    __pyx_t_1 = 0;
-    __pyx_t_7 = 0;
+    __pyx_t_7 = -1;
+    if (__pyx_t_5 < 0) {
+      __pyx_t_5 += __pyx_v_starts_array.shape[0];
+      if (unlikely(__pyx_t_5 < 0)) __pyx_t_7 = 0;
+    } else if (unlikely(__pyx_t_5 >= __pyx_v_starts_array.shape[0])) __pyx_t_7 = 0;
+    if (__pyx_t_6 < 0) {
+      __pyx_t_6 += __pyx_v_starts_array.shape[1];
+      if (unlikely(__pyx_t_6 < 0)) __pyx_t_7 = 1;
+    } else if (unlikely(__pyx_t_6 >= __pyx_v_starts_array.shape[1])) __pyx_t_7 = 1;
+    if (unlikely(__pyx_t_7 != -1)) {
+      __Pyx_RaiseBufferIndexError(__pyx_t_7);
+      __PYX_ERR(0, 183, __pyx_L1_error)
+    }
+    __pyx_t_8 = __Pyx_PyInt_From_int((*((int *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_starts_array.data + __pyx_t_5 * __pyx_v_starts_array.strides[0]) ) + __pyx_t_6 * __pyx_v_starts_array.strides[1]) )))); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 183, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_8);
+    __pyx_t_6 = __pyx_v_i;
+    __pyx_t_5 = 1;
+    __pyx_t_7 = -1;
+    if (__pyx_t_6 < 0) {
+      __pyx_t_6 += __pyx_v_starts_array.shape[0];
+      if (unlikely(__pyx_t_6 < 0)) __pyx_t_7 = 0;
+    } else if (unlikely(__pyx_t_6 >= __pyx_v_starts_array.shape[0])) __pyx_t_7 = 0;
+    if (__pyx_t_5 < 0) {
+      __pyx_t_5 += __pyx_v_starts_array.shape[1];
+      if (unlikely(__pyx_t_5 < 0)) __pyx_t_7 = 1;
+    } else if (unlikely(__pyx_t_5 >= __pyx_v_starts_array.shape[1])) __pyx_t_7 = 1;
+    if (unlikely(__pyx_t_7 != -1)) {
+      __Pyx_RaiseBufferIndexError(__pyx_t_7);
+      __PYX_ERR(0, 183, __pyx_L1_error)
+    }
+    __pyx_t_9 = __Pyx_PyInt_From_int((*((int *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_starts_array.data + __pyx_t_6 * __pyx_v_starts_array.strides[0]) ) + __pyx_t_5 * __pyx_v_starts_array.strides[1]) )))); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 183, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_9);
+    __pyx_t_5 = __pyx_v_i;
+    __pyx_t_6 = 2;
+    __pyx_t_7 = -1;
+    if (__pyx_t_5 < 0) {
+      __pyx_t_5 += __pyx_v_starts_array.shape[0];
+      if (unlikely(__pyx_t_5 < 0)) __pyx_t_7 = 0;
+    } else if (unlikely(__pyx_t_5 >= __pyx_v_starts_array.shape[0])) __pyx_t_7 = 0;
+    if (__pyx_t_6 < 0) {
+      __pyx_t_6 += __pyx_v_starts_array.shape[1];
+      if (unlikely(__pyx_t_6 < 0)) __pyx_t_7 = 1;
+    } else if (unlikely(__pyx_t_6 >= __pyx_v_starts_array.shape[1])) __pyx_t_7 = 1;
+    if (unlikely(__pyx_t_7 != -1)) {
+      __Pyx_RaiseBufferIndexError(__pyx_t_7);
+      __PYX_ERR(0, 183, __pyx_L1_error)
+    }
+    __pyx_t_10 = __Pyx_PyInt_From_int((*((int *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_starts_array.data + __pyx_t_5 * __pyx_v_starts_array.strides[0]) ) + __pyx_t_6 * __pyx_v_starts_array.strides[1]) )))); if (unlikely(!__pyx_t_10)) __PYX_ERR(0, 183, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_10);
+
+    /* "bresenham3D.pyx":184
+ *         idx = bresenham3DWithMaskSingle(
+ *         starts_array[i][0], starts_array[i][1], starts_array[i][2],
+ *         ends_array[i][0], ends_array[i][1], ends_array[i][2],             # <<<<<<<<<<<<<<
+ *         points,
+ *         mask=mask)
+ */
+    __pyx_t_6 = __pyx_v_i;
+    __pyx_t_5 = 0;
+    __pyx_t_7 = -1;
+    if (__pyx_t_6 < 0) {
+      __pyx_t_6 += __pyx_v_ends_array.shape[0];
+      if (unlikely(__pyx_t_6 < 0)) __pyx_t_7 = 0;
+    } else if (unlikely(__pyx_t_6 >= __pyx_v_ends_array.shape[0])) __pyx_t_7 = 0;
+    if (__pyx_t_5 < 0) {
+      __pyx_t_5 += __pyx_v_ends_array.shape[1];
+      if (unlikely(__pyx_t_5 < 0)) __pyx_t_7 = 1;
+    } else if (unlikely(__pyx_t_5 >= __pyx_v_ends_array.shape[1])) __pyx_t_7 = 1;
+    if (unlikely(__pyx_t_7 != -1)) {
+      __Pyx_RaiseBufferIndexError(__pyx_t_7);
+      __PYX_ERR(0, 184, __pyx_L1_error)
+    }
+    __pyx_t_11 = __Pyx_PyInt_From_int((*((int *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_ends_array.data + __pyx_t_6 * __pyx_v_ends_array.strides[0]) ) + __pyx_t_5 * __pyx_v_ends_array.strides[1]) )))); if (unlikely(!__pyx_t_11)) __PYX_ERR(0, 184, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_11);
+    __pyx_t_5 = __pyx_v_i;
+    __pyx_t_6 = 1;
+    __pyx_t_7 = -1;
+    if (__pyx_t_5 < 0) {
+      __pyx_t_5 += __pyx_v_ends_array.shape[0];
+      if (unlikely(__pyx_t_5 < 0)) __pyx_t_7 = 0;
+    } else if (unlikely(__pyx_t_5 >= __pyx_v_ends_array.shape[0])) __pyx_t_7 = 0;
+    if (__pyx_t_6 < 0) {
+      __pyx_t_6 += __pyx_v_ends_array.shape[1];
+      if (unlikely(__pyx_t_6 < 0)) __pyx_t_7 = 1;
+    } else if (unlikely(__pyx_t_6 >= __pyx_v_ends_array.shape[1])) __pyx_t_7 = 1;
+    if (unlikely(__pyx_t_7 != -1)) {
+      __Pyx_RaiseBufferIndexError(__pyx_t_7);
+      __PYX_ERR(0, 184, __pyx_L1_error)
+    }
+    __pyx_t_12 = __Pyx_PyInt_From_int((*((int *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_ends_array.data + __pyx_t_5 * __pyx_v_ends_array.strides[0]) ) + __pyx_t_6 * __pyx_v_ends_array.strides[1]) )))); if (unlikely(!__pyx_t_12)) __PYX_ERR(0, 184, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_12);
+    __pyx_t_6 = __pyx_v_i;
+    __pyx_t_5 = 2;
+    __pyx_t_7 = -1;
+    if (__pyx_t_6 < 0) {
+      __pyx_t_6 += __pyx_v_ends_array.shape[0];
+      if (unlikely(__pyx_t_6 < 0)) __pyx_t_7 = 0;
+    } else if (unlikely(__pyx_t_6 >= __pyx_v_ends_array.shape[0])) __pyx_t_7 = 0;
+    if (__pyx_t_5 < 0) {
+      __pyx_t_5 += __pyx_v_ends_array.shape[1];
+      if (unlikely(__pyx_t_5 < 0)) __pyx_t_7 = 1;
+    } else if (unlikely(__pyx_t_5 >= __pyx_v_ends_array.shape[1])) __pyx_t_7 = 1;
+    if (unlikely(__pyx_t_7 != -1)) {
+      __Pyx_RaiseBufferIndexError(__pyx_t_7);
+      __PYX_ERR(0, 184, __pyx_L1_error)
+    }
+    __pyx_t_13 = __Pyx_PyInt_From_int((*((int *) ( /* dim=1 */ (( /* dim=0 */ (__pyx_v_ends_array.data + __pyx_t_6 * __pyx_v_ends_array.strides[0]) ) + __pyx_t_5 * __pyx_v_ends_array.strides[1]) )))); if (unlikely(!__pyx_t_13)) __PYX_ERR(0, 184, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_13);
+
+    /* "bresenham3D.pyx":182
+ *     for i in range(rows):
+ * 
+ *         idx = bresenham3DWithMaskSingle(             # <<<<<<<<<<<<<<
+ *         starts_array[i][0], starts_array[i][1], starts_array[i][2],
+ *         ends_array[i][0], ends_array[i][1], ends_array[i][2],
+ */
+    __pyx_t_14 = PyTuple_New(7); if (unlikely(!__pyx_t_14)) __PYX_ERR(0, 182, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_14);
+    __Pyx_GIVEREF(__pyx_t_8);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_14, 0, __pyx_t_8)) __PYX_ERR(0, 182, __pyx_L1_error);
+    __Pyx_GIVEREF(__pyx_t_9);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_14, 1, __pyx_t_9)) __PYX_ERR(0, 182, __pyx_L1_error);
+    __Pyx_GIVEREF(__pyx_t_10);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_14, 2, __pyx_t_10)) __PYX_ERR(0, 182, __pyx_L1_error);
+    __Pyx_GIVEREF(__pyx_t_11);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_14, 3, __pyx_t_11)) __PYX_ERR(0, 182, __pyx_L1_error);
+    __Pyx_GIVEREF(__pyx_t_12);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_14, 4, __pyx_t_12)) __PYX_ERR(0, 182, __pyx_L1_error);
+    __Pyx_GIVEREF(__pyx_t_13);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_14, 5, __pyx_t_13)) __PYX_ERR(0, 182, __pyx_L1_error);
+    __Pyx_INCREF(__pyx_v_points);
+    __Pyx_GIVEREF(__pyx_v_points);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_14, 6, __pyx_v_points)) __PYX_ERR(0, 182, __pyx_L1_error);
+    __pyx_t_8 = 0;
     __pyx_t_9 = 0;
     __pyx_t_10 = 0;
     __pyx_t_11 = 0;
+    __pyx_t_12 = 0;
+    __pyx_t_13 = 0;
 
-    /* "bresenham3D.pyx":93
- *             current_start[0], current_start[1], current_start[2],
- *             current_end[0], current_end[1], current_end[2],
- *             mask=mask             # <<<<<<<<<<<<<<
- *         )
+    /* "bresenham3D.pyx":186
+ *         ends_array[i][0], ends_array[i][1], ends_array[i][2],
+ *         points,
+ *         mask=mask)             # <<<<<<<<<<<<<<
+ *         output_list+=points
+ * 
+ */
+    __pyx_t_13 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_13)) __PYX_ERR(0, 186, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_13);
+    __pyx_t_12 = __pyx_memoryview_fromslice(__pyx_v_mask, 3, (PyObject *(*)(char *)) __pyx_memview_get_unsigned_char, (int (*)(char *, PyObject *)) __pyx_memview_set_unsigned_char, 0);; if (unlikely(!__pyx_t_12)) __PYX_ERR(0, 186, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_12);
+    if (PyDict_SetItem(__pyx_t_13, __pyx_n_s_mask, __pyx_t_12) < 0) __PYX_ERR(0, 186, __pyx_L1_error)
+    __Pyx_DECREF(__pyx_t_12); __pyx_t_12 = 0;
+
+    /* "bresenham3D.pyx":182
+ *     for i in range(rows):
+ * 
+ *         idx = bresenham3DWithMaskSingle(             # <<<<<<<<<<<<<<
+ *         starts_array[i][0], starts_array[i][1], starts_array[i][2],
+ *         ends_array[i][0], ends_array[i][1], ends_array[i][2],
+ */
+    __pyx_t_12 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_14, __pyx_t_13); if (unlikely(!__pyx_t_12)) __PYX_ERR(0, 182, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_12);
+    __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
+    __Pyx_DECREF(__pyx_t_14); __pyx_t_14 = 0;
+    __Pyx_DECREF(__pyx_t_13); __pyx_t_13 = 0;
+    __Pyx_XDECREF_SET(__pyx_v_idx, __pyx_t_12);
+    __pyx_t_12 = 0;
+
+    /* "bresenham3D.pyx":187
+ *         points,
+ *         mask=mask)
+ *         output_list+=points             # <<<<<<<<<<<<<<
+ * 
  *     return output_list
  */
-    __pyx_t_11 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_11)) __PYX_ERR(0, 93, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_11);
-    __pyx_t_10 = __pyx_memoryview_fromslice(__pyx_v_mask, 3, (PyObject *(*)(char *)) __pyx_memview_get_unsigned_char, (int (*)(char *, PyObject *)) __pyx_memview_set_unsigned_char, 0);; if (unlikely(!__pyx_t_10)) __PYX_ERR(0, 93, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_10);
-    if (PyDict_SetItem(__pyx_t_11, __pyx_n_s_mask, __pyx_t_10) < 0) __PYX_ERR(0, 93, __pyx_L1_error)
-    __Pyx_DECREF(__pyx_t_10); __pyx_t_10 = 0;
-
-    /* "bresenham3D.pyx":90
- *     cdef list output_list = []
- *     for current_start, current_end in zip(starts_array, ends_array):
- *         output_list += bresenham3DWithMaskSingle(             # <<<<<<<<<<<<<<
- *             current_start[0], current_start[1], current_start[2],
- *             current_end[0], current_end[1], current_end[2],
- */
-    __pyx_t_10 = __Pyx_PyObject_Call(__pyx_t_2, __pyx_t_12, __pyx_t_11); if (unlikely(!__pyx_t_10)) __PYX_ERR(0, 90, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_10);
-    __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-    __Pyx_DECREF(__pyx_t_12); __pyx_t_12 = 0;
-    __Pyx_DECREF(__pyx_t_11); __pyx_t_11 = 0;
-    __pyx_t_11 = PyNumber_InPlaceAdd(__pyx_v_output_list, __pyx_t_10); if (unlikely(!__pyx_t_11)) __PYX_ERR(0, 90, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_11);
-    __Pyx_DECREF(__pyx_t_10); __pyx_t_10 = 0;
-    if (!(likely(PyList_CheckExact(__pyx_t_11))||((__pyx_t_11) == Py_None) || __Pyx_RaiseUnexpectedTypeError("list", __pyx_t_11))) __PYX_ERR(0, 90, __pyx_L1_error)
-    __Pyx_DECREF_SET(__pyx_v_output_list, ((PyObject*)__pyx_t_11));
-    __pyx_t_11 = 0;
-
-    /* "bresenham3D.pyx":89
- * ) -> List[Tuple[int, int, int]]:
- *     cdef list output_list = []
- *     for current_start, current_end in zip(starts_array, ends_array):             # <<<<<<<<<<<<<<
- *         output_list += bresenham3DWithMaskSingle(
- *             current_start[0], current_start[1], current_start[2],
- */
+    __pyx_t_12 = PyNumber_InPlaceAdd(__pyx_v_output_list, __pyx_v_points); if (unlikely(!__pyx_t_12)) __PYX_ERR(0, 187, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_12);
+    __Pyx_DECREF_SET(__pyx_v_output_list, ((PyObject*)__pyx_t_12));
+    __pyx_t_12 = 0;
   }
-  __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
 
-  /* "bresenham3D.pyx":95
- *             mask=mask
- *         )
+  /* "bresenham3D.pyx":189
+ *         output_list+=points
+ * 
  *     return output_list             # <<<<<<<<<<<<<<
  * 
- * cdef fused uint_t:
+ * def bresenham_3D_lines(list contact_voxels_list_of_lists,
  */
   __Pyx_XDECREF(__pyx_r);
   __Pyx_INCREF(__pyx_v_output_list);
   __pyx_r = __pyx_v_output_list;
   goto __pyx_L0;
 
-  /* "bresenham3D.pyx":85
- *     return listOfPoints
+  /* "bresenham3D.pyx":172
+ *     return idx
  * 
  * def bresenham3DWithMask(             # <<<<<<<<<<<<<<
  *     int[:, :] starts_array, int[:, :] ends_array, unsigned char[:,:,:] mask = None
- * ) -> List[Tuple[int, int, int]]:
+ * ):
  */
 
   /* function exit code */
   __pyx_L1_error:;
   __Pyx_XDECREF(__pyx_t_1);
-  __Pyx_XDECREF(__pyx_t_2);
-  __Pyx_XDECREF(__pyx_t_3);
-  __Pyx_XDECREF(__pyx_t_6);
-  __Pyx_XDECREF(__pyx_t_7);
+  __Pyx_XDECREF(__pyx_t_8);
   __Pyx_XDECREF(__pyx_t_9);
   __Pyx_XDECREF(__pyx_t_10);
   __Pyx_XDECREF(__pyx_t_11);
   __Pyx_XDECREF(__pyx_t_12);
+  __Pyx_XDECREF(__pyx_t_13);
+  __Pyx_XDECREF(__pyx_t_14);
   __Pyx_AddTraceback("bresenham3D.bresenham3DWithMask", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_r = NULL;
   __pyx_L0:;
   __Pyx_XDECREF(__pyx_v_output_list);
-  __Pyx_XDECREF(__pyx_v_current_start);
-  __Pyx_XDECREF(__pyx_v_current_end);
+  __Pyx_XDECREF(__pyx_v_output_set);
+  __Pyx_XDECREF(__pyx_v_points);
+  __Pyx_XDECREF(__pyx_v_idx);
   __Pyx_XGIVEREF(__pyx_r);
   __Pyx_RefNannyFinishContext();
   return __pyx_r;
 }
 
-/* "bresenham3D.pyx":103
- *     unsigned long long
+/* "bresenham3D.pyx":191
+ *     return output_list
  * 
- * def find_boundary(             # <<<<<<<<<<<<<<
- *     uint_t[:, :, :] volume, unsigned char[:,:,:] surface_voxels
- * ):
+ * def bresenham_3D_lines(list contact_voxels_list_of_lists,             # <<<<<<<<<<<<<<
+ *     long  [:,:] object_1_surface_voxel_coordinates,
+ *     long  [:,:] object_2_surface_voxel_coordinates,
  */
 
 /* Python wrapper */
-static PyObject *__pyx_pw_11bresenham3D_5find_boundary(PyObject *__pyx_self, PyObject *__pyx_args, PyObject *__pyx_kwds); /*proto*/
-static PyMethodDef __pyx_mdef_11bresenham3D_5find_boundary = {"find_boundary", (PyCFunction)(void*)(PyCFunctionWithKeywords)__pyx_pw_11bresenham3D_5find_boundary, METH_VARARGS|METH_KEYWORDS, 0};
-static PyObject *__pyx_pw_11bresenham3D_5find_boundary(PyObject *__pyx_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
-  PyObject *__pyx_v_signatures = 0;
-  PyObject *__pyx_v_args = 0;
-  PyObject *__pyx_v_kwargs = 0;
-  CYTHON_UNUSED PyObject *__pyx_v_defaults = 0;
-  PyObject *__pyx_v__fused_sigindex = 0;
+static PyObject *__pyx_pw_11bresenham3D_5bresenham_3D_lines(PyObject *__pyx_self, 
+#if CYTHON_METH_FASTCALL
+PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
+#else
+PyObject *__pyx_args, PyObject *__pyx_kwds
+#endif
+); /*proto*/
+static PyMethodDef __pyx_mdef_11bresenham3D_5bresenham_3D_lines = {"bresenham_3D_lines", (PyCFunction)(void*)(__Pyx_PyCFunction_FastCallWithKeywords)__pyx_pw_11bresenham3D_5bresenham_3D_lines, __Pyx_METH_FASTCALL|METH_KEYWORDS, 0};
+static PyObject *__pyx_pw_11bresenham3D_5bresenham_3D_lines(PyObject *__pyx_self, 
+#if CYTHON_METH_FASTCALL
+PyObject *const *__pyx_args, Py_ssize_t __pyx_nargs, PyObject *__pyx_kwds
+#else
+PyObject *__pyx_args, PyObject *__pyx_kwds
+#endif
+) {
+  PyObject *__pyx_v_contact_voxels_list_of_lists = 0;
+  __Pyx_memviewslice __pyx_v_object_1_surface_voxel_coordinates = { 0, 0, { 0 }, { 0 }, { 0 } };
+  __Pyx_memviewslice __pyx_v_object_2_surface_voxel_coordinates = { 0, 0, { 0 }, { 0 }, { 0 } };
+  __Pyx_memviewslice __pyx_v_current_pair_contact_sites = { 0, 0, { 0 }, { 0 }, { 0 } };
+  int __pyx_v_max_num_voxels;
+  __Pyx_memviewslice __pyx_v_mask = { 0, 0, { 0 }, { 0 }, { 0 } };
+  #if !CYTHON_METH_FASTCALL
   CYTHON_UNUSED Py_ssize_t __pyx_nargs;
+  #endif
   CYTHON_UNUSED PyObject *const *__pyx_kwvalues;
-  PyObject* values[5] = {0,0,0,0,0};
+  PyObject* values[6] = {0,0,0,0,0,0};
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
   PyObject *__pyx_r = 0;
   __Pyx_RefNannyDeclarations
-  __Pyx_RefNannySetupContext("__pyx_fused_cpdef (wrapper)", 0);
+  __Pyx_RefNannySetupContext("bresenham_3D_lines (wrapper)", 0);
+  #if !CYTHON_METH_FASTCALL
   #if CYTHON_ASSUME_SAFE_MACROS
   __pyx_nargs = PyTuple_GET_SIZE(__pyx_args);
   #else
   __pyx_nargs = PyTuple_Size(__pyx_args); if (unlikely(__pyx_nargs < 0)) return NULL;
   #endif
-  __pyx_kwvalues = __Pyx_KwValues_VARARGS(__pyx_args, __pyx_nargs);
+  #endif
+  __pyx_kwvalues = __Pyx_KwValues_FASTCALL(__pyx_args, __pyx_nargs);
   {
-    PyObject **__pyx_pyargnames[] = {&__pyx_n_s_signatures,&__pyx_n_s_args,&__pyx_n_s_kwargs,&__pyx_n_s_defaults,&__pyx_n_s_fused_sigindex,0};
-    __pyx_defaults2 *__pyx_dynamic_args = __Pyx_CyFunction_Defaults(__pyx_defaults2, __pyx_self);
-    values[4] = __Pyx_Arg_NewRef_VARARGS(__pyx_dynamic_args->__pyx_arg__fused_sigindex);
+    PyObject **__pyx_pyargnames[] = {&__pyx_n_s_contact_voxels_list_of_lists,&__pyx_n_s_object_1_surface_voxel_coordinat,&__pyx_n_s_object_2_surface_voxel_coordinat,&__pyx_n_s_current_pair_contact_sites,&__pyx_n_s_max_num_voxels,&__pyx_n_s_mask,0};
     if (__pyx_kwds) {
       Py_ssize_t kw_args;
       switch (__pyx_nargs) {
-        case  5: values[4] = __Pyx_Arg_VARARGS(__pyx_args, 4);
+        case  6: values[5] = __Pyx_Arg_FASTCALL(__pyx_args, 5);
         CYTHON_FALLTHROUGH;
-        case  4: values[3] = __Pyx_Arg_VARARGS(__pyx_args, 3);
+        case  5: values[4] = __Pyx_Arg_FASTCALL(__pyx_args, 4);
         CYTHON_FALLTHROUGH;
-        case  3: values[2] = __Pyx_Arg_VARARGS(__pyx_args, 2);
+        case  4: values[3] = __Pyx_Arg_FASTCALL(__pyx_args, 3);
         CYTHON_FALLTHROUGH;
-        case  2: values[1] = __Pyx_Arg_VARARGS(__pyx_args, 1);
+        case  3: values[2] = __Pyx_Arg_FASTCALL(__pyx_args, 2);
         CYTHON_FALLTHROUGH;
-        case  1: values[0] = __Pyx_Arg_VARARGS(__pyx_args, 0);
+        case  2: values[1] = __Pyx_Arg_FASTCALL(__pyx_args, 1);
+        CYTHON_FALLTHROUGH;
+        case  1: values[0] = __Pyx_Arg_FASTCALL(__pyx_args, 0);
         CYTHON_FALLTHROUGH;
         case  0: break;
         default: goto __pyx_L5_argtuple_error;
       }
-      kw_args = __Pyx_NumKwargs_VARARGS(__pyx_kwds);
+      kw_args = __Pyx_NumKwargs_FASTCALL(__pyx_kwds);
       switch (__pyx_nargs) {
         case  0:
-        if (likely((values[0] = __Pyx_GetKwValue_VARARGS(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_signatures)) != 0)) {
-          (void)__Pyx_Arg_NewRef_VARARGS(values[0]);
+        if (likely((values[0] = __Pyx_GetKwValue_FASTCALL(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_contact_voxels_list_of_lists)) != 0)) {
+          (void)__Pyx_Arg_NewRef_FASTCALL(values[0]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 191, __pyx_L3_error)
         else goto __pyx_L5_argtuple_error;
         CYTHON_FALLTHROUGH;
         case  1:
-        if (likely((values[1] = __Pyx_GetKwValue_VARARGS(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_args)) != 0)) {
-          (void)__Pyx_Arg_NewRef_VARARGS(values[1]);
+        if (likely((values[1] = __Pyx_GetKwValue_FASTCALL(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_object_1_surface_voxel_coordinat)) != 0)) {
+          (void)__Pyx_Arg_NewRef_FASTCALL(values[1]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 191, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("__pyx_fused_cpdef", 0, 4, 5, 1); __PYX_ERR(0, 103, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("bresenham_3D_lines", 1, 6, 6, 1); __PYX_ERR(0, 191, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  2:
-        if (likely((values[2] = __Pyx_GetKwValue_VARARGS(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_kwargs)) != 0)) {
-          (void)__Pyx_Arg_NewRef_VARARGS(values[2]);
+        if (likely((values[2] = __Pyx_GetKwValue_FASTCALL(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_object_2_surface_voxel_coordinat)) != 0)) {
+          (void)__Pyx_Arg_NewRef_FASTCALL(values[2]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 191, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("__pyx_fused_cpdef", 0, 4, 5, 2); __PYX_ERR(0, 103, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("bresenham_3D_lines", 1, 6, 6, 2); __PYX_ERR(0, 191, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  3:
-        if (likely((values[3] = __Pyx_GetKwValue_VARARGS(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_defaults)) != 0)) {
-          (void)__Pyx_Arg_NewRef_VARARGS(values[3]);
+        if (likely((values[3] = __Pyx_GetKwValue_FASTCALL(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_current_pair_contact_sites)) != 0)) {
+          (void)__Pyx_Arg_NewRef_FASTCALL(values[3]);
           kw_args--;
         }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L3_error)
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 191, __pyx_L3_error)
         else {
-          __Pyx_RaiseArgtupleInvalid("__pyx_fused_cpdef", 0, 4, 5, 3); __PYX_ERR(0, 103, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("bresenham_3D_lines", 1, 6, 6, 3); __PYX_ERR(0, 191, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  4:
-        if (kw_args > 0) {
-          PyObject* value = __Pyx_GetKwValue_VARARGS(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_fused_sigindex);
-          if (value) { values[4] = __Pyx_Arg_NewRef_VARARGS(value); kw_args--; }
-          else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L3_error)
+        if (likely((values[4] = __Pyx_GetKwValue_FASTCALL(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_max_num_voxels)) != 0)) {
+          (void)__Pyx_Arg_NewRef_FASTCALL(values[4]);
+          kw_args--;
+        }
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 191, __pyx_L3_error)
+        else {
+          __Pyx_RaiseArgtupleInvalid("bresenham_3D_lines", 1, 6, 6, 4); __PYX_ERR(0, 191, __pyx_L3_error)
+        }
+        CYTHON_FALLTHROUGH;
+        case  5:
+        if (likely((values[5] = __Pyx_GetKwValue_FASTCALL(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_mask)) != 0)) {
+          (void)__Pyx_Arg_NewRef_FASTCALL(values[5]);
+          kw_args--;
+        }
+        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 191, __pyx_L3_error)
+        else {
+          __Pyx_RaiseArgtupleInvalid("bresenham_3D_lines", 1, 6, 6, 5); __PYX_ERR(0, 191, __pyx_L3_error)
         }
       }
       if (unlikely(kw_args > 0)) {
         const Py_ssize_t kwd_pos_args = __pyx_nargs;
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "__pyx_fused_cpdef") < 0)) __PYX_ERR(0, 103, __pyx_L3_error)
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "bresenham_3D_lines") < 0)) __PYX_ERR(0, 191, __pyx_L3_error)
       }
+    } else if (unlikely(__pyx_nargs != 6)) {
+      goto __pyx_L5_argtuple_error;
     } else {
-      switch (__pyx_nargs) {
-        case  5: values[4] = __Pyx_Arg_VARARGS(__pyx_args, 4);
-        CYTHON_FALLTHROUGH;
-        case  4: values[3] = __Pyx_Arg_VARARGS(__pyx_args, 3);
-        values[2] = __Pyx_Arg_VARARGS(__pyx_args, 2);
-        values[1] = __Pyx_Arg_VARARGS(__pyx_args, 1);
-        values[0] = __Pyx_Arg_VARARGS(__pyx_args, 0);
-        break;
-        default: goto __pyx_L5_argtuple_error;
-      }
+      values[0] = __Pyx_Arg_FASTCALL(__pyx_args, 0);
+      values[1] = __Pyx_Arg_FASTCALL(__pyx_args, 1);
+      values[2] = __Pyx_Arg_FASTCALL(__pyx_args, 2);
+      values[3] = __Pyx_Arg_FASTCALL(__pyx_args, 3);
+      values[4] = __Pyx_Arg_FASTCALL(__pyx_args, 4);
+      values[5] = __Pyx_Arg_FASTCALL(__pyx_args, 5);
     }
-    __pyx_v_signatures = values[0];
-    __pyx_v_args = values[1];
-    __pyx_v_kwargs = values[2];
-    __pyx_v_defaults = values[3];
-    __pyx_v__fused_sigindex = values[4];
+    __pyx_v_contact_voxels_list_of_lists = ((PyObject*)values[0]);
+    __pyx_v_object_1_surface_voxel_coordinates = __Pyx_PyObject_to_MemoryviewSlice_dsds_long(values[1], PyBUF_WRITABLE); if (unlikely(!__pyx_v_object_1_surface_voxel_coordinates.memview)) __PYX_ERR(0, 192, __pyx_L3_error)
+    __pyx_v_object_2_surface_voxel_coordinates = __Pyx_PyObject_to_MemoryviewSlice_dsds_long(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_object_2_surface_voxel_coordinates.memview)) __PYX_ERR(0, 193, __pyx_L3_error)
+    __pyx_v_current_pair_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_current_pair_contact_sites.memview)) __PYX_ERR(0, 194, __pyx_L3_error)
+    __pyx_v_max_num_voxels = __Pyx_PyInt_As_int(values[4]); if (unlikely((__pyx_v_max_num_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 195, __pyx_L3_error)
+    __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 196, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("__pyx_fused_cpdef", 0, 4, 5, __pyx_nargs); __PYX_ERR(0, 103, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("bresenham_3D_lines", 1, 6, 6, __pyx_nargs); __PYX_ERR(0, 191, __pyx_L3_error)
   __pyx_L6_skip:;
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L3_error:;
   {
     Py_ssize_t __pyx_temp;
     for (__pyx_temp=0; __pyx_temp < (Py_ssize_t)(sizeof(values)/sizeof(values[0])); ++__pyx_temp) {
-      __Pyx_Arg_XDECREF_VARARGS(values[__pyx_temp]);
+      __Pyx_Arg_XDECREF_FASTCALL(values[__pyx_temp]);
     }
   }
-  __Pyx_AddTraceback("bresenham3D.__pyx_fused_cpdef", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_object_1_surface_voxel_coordinates, 1);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_object_2_surface_voxel_coordinates, 1);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_current_pair_contact_sites, 1);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_mask, 1);
+  __Pyx_AddTraceback("bresenham3D.bresenham_3D_lines", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
-  __pyx_r = __pyx_pf_11bresenham3D_4find_boundary(__pyx_self, __pyx_v_signatures, __pyx_v_args, __pyx_v_kwargs, __pyx_v_defaults, __pyx_v__fused_sigindex);
+  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_contact_voxels_list_of_lists), (&PyList_Type), 1, "contact_voxels_list_of_lists", 1))) __PYX_ERR(0, 191, __pyx_L1_error)
+  __pyx_r = __pyx_pf_11bresenham3D_4bresenham_3D_lines(__pyx_self, __pyx_v_contact_voxels_list_of_lists, __pyx_v_object_1_surface_voxel_coordinates, __pyx_v_object_2_surface_voxel_coordinates, __pyx_v_current_pair_contact_sites, __pyx_v_max_num_voxels, __pyx_v_mask);
 
   /* function exit code */
+  goto __pyx_L0;
+  __pyx_L1_error:;
+  __pyx_r = NULL;
+  __pyx_L0:;
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_object_1_surface_voxel_coordinates, 1);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_object_2_surface_voxel_coordinates, 1);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_current_pair_contact_sites, 1);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_mask, 1);
   {
     Py_ssize_t __pyx_temp;
     for (__pyx_temp=0; __pyx_temp < (Py_ssize_t)(sizeof(values)/sizeof(values[0])); ++__pyx_temp) {
-      __Pyx_Arg_XDECREF_VARARGS(values[__pyx_temp]);
+      __Pyx_Arg_XDECREF_FASTCALL(values[__pyx_temp]);
     }
   }
   __Pyx_RefNannyFinishContext();
   return __pyx_r;
 }
 
-static PyObject *__pyx_pf_11bresenham3D_4find_boundary(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_signatures, PyObject *__pyx_v_args, PyObject *__pyx_v_kwargs, CYTHON_UNUSED PyObject *__pyx_v_defaults, PyObject *__pyx_v__fused_sigindex) {
-  PyObject *__pyx_v_search_list = 0;
-  PyObject *__pyx_v_sigindex_node = 0;
-  PyObject *__pyx_v_dest_sig = NULL;
-  PyTypeObject *__pyx_v_ndarray = 0;
-  PyObject *__pyx_v_arg_as_memoryview = 0;
-  __Pyx_memviewslice __pyx_v_memslice;
-  Py_ssize_t __pyx_v_itemsize;
-  int __pyx_v_dtype_signed;
-  Py_UCS4 __pyx_v_kind;
-  int __pyx_v_unsigned_char_is_signed;
-  int __pyx_v_unsigned_short_is_signed;
-  int __pyx_v_unsigned_int_is_signed;
-  int __pyx_v_unsigned_long_long_is_signed;
-  PyObject *__pyx_v_arg = NULL;
-  PyObject *__pyx_v_dtype = NULL;
-  PyObject *__pyx_v_arg_base = NULL;
-  PyObject *__pyx_v_sig = NULL;
-  PyObject *__pyx_v_sig_series = NULL;
-  PyObject *__pyx_v_last_type = NULL;
-  PyObject *__pyx_v_sig_type = NULL;
-  PyObject *__pyx_v_sigindex_matches = NULL;
-  PyObject *__pyx_v_sigindex_candidates = NULL;
-  PyObject *__pyx_v_dst_type = NULL;
-  PyObject *__pyx_v_found_matches = NULL;
-  PyObject *__pyx_v_found_candidates = NULL;
-  PyObject *__pyx_v_sn = NULL;
-  PyObject *__pyx_v_type_match = NULL;
-  PyObject *__pyx_v_candidates = NULL;
+static PyObject *__pyx_pf_11bresenham3D_4bresenham_3D_lines(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v_contact_voxels_list_of_lists, __Pyx_memviewslice __pyx_v_object_1_surface_voxel_coordinates, __Pyx_memviewslice __pyx_v_object_2_surface_voxel_coordinates, __Pyx_memviewslice __pyx_v_current_pair_contact_sites, int __pyx_v_max_num_voxels, __Pyx_memviewslice __pyx_v_mask) {
+  PyObject *__pyx_v_all_valid_voxels = 0;
+  PyObject *__pyx_v_points = NULL;
+  int __pyx_v_i;
+  int __pyx_v_j;
+  int __pyx_v_x;
+  int __pyx_v_y;
+  int __pyx_v_z;
+  PyObject *__pyx_v_sublist = 0;
+  PyBoolObject *__pyx_v_found_contact_voxels = 0;
+  __Pyx_memviewslice __pyx_v_contact_voxel_1 = { 0, 0, { 0 }, { 0 }, { 0 } };
+  __Pyx_memviewslice __pyx_v_contact_voxel_2 = { 0, 0, { 0 }, { 0 }, { 0 } };
+  int __pyx_v_idx;
+  CYTHON_UNUSED int __pyx_7genexpr__pyx_v__;
   PyObject *__pyx_r = NULL;
   __Pyx_RefNannyDeclarations
   PyObject *__pyx_t_1 = NULL;
@@ -20337,2938 +20942,696 @@ static PyObject *__pyx_pf_11bresenham3D_4find_boundary(CYTHON_UNUSED PyObject *_
   int __pyx_t_4;
   Py_ssize_t __pyx_t_5;
   PyObject *__pyx_t_6 = NULL;
-  long __pyx_t_7;
+  Py_ssize_t __pyx_t_7;
   PyObject *__pyx_t_8 = NULL;
-  PyObject *__pyx_t_9 = NULL;
-  PyObject *__pyx_t_10 = NULL;
-  int __pyx_t_11;
-  __Pyx_memviewslice __pyx_t_12;
-  PyObject *__pyx_t_13 = NULL;
+  __Pyx_memviewslice __pyx_t_9 = { 0, 0, { 0 }, { 0 }, { 0 } };
+  int __pyx_t_10;
+  Py_ssize_t __pyx_t_11;
+  Py_ssize_t __pyx_t_12;
+  Py_ssize_t __pyx_t_13;
   Py_ssize_t __pyx_t_14;
-  int __pyx_t_15;
-  PyObject *__pyx_t_16 = NULL;
-  PyObject *__pyx_t_17 = NULL;
-  Py_ssize_t __pyx_t_18;
-  int __pyx_t_19;
+  Py_ssize_t __pyx_t_15;
+  Py_ssize_t __pyx_t_16;
+  int __pyx_t_17;
+  struct __pyx_opt_args_11bresenham3D_bresenham3DWithMaskSingleInline __pyx_t_18;
+  PyObject *__pyx_t_19 = NULL;
+  PyObject *__pyx_t_20 = NULL;
+  PyObject *__pyx_t_21 = NULL;
+  PyObject *(*__pyx_t_22)(PyObject *);
+  int __pyx_t_23;
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
-  __Pyx_RefNannySetupContext("find_boundary", 0);
-  __Pyx_INCREF(__pyx_v_kwargs);
-  __pyx_t_1 = PyList_New(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 103, __pyx_L1_error)
+  __Pyx_RefNannySetupContext("bresenham_3D_lines", 1);
+
+  /* "bresenham3D.pyx":197
+ *     int max_num_voxels,
+ *     unsigned char[:,:,:] mask):
+ *     cdef set all_valid_voxels = set()             # <<<<<<<<<<<<<<
+ *     points=[() for _ in range(max_num_voxels)]
+ *     cdef int i,j,x,y,z
+ */
+  __pyx_t_1 = PySet_New(0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 197, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __Pyx_INCREF(Py_None);
-  __Pyx_GIVEREF(Py_None);
-  if (__Pyx_PyList_SET_ITEM(__pyx_t_1, 0, Py_None)) __PYX_ERR(0, 103, __pyx_L1_error);
-  __pyx_v_dest_sig = ((PyObject*)__pyx_t_1);
+  __pyx_v_all_valid_voxels = ((PyObject*)__pyx_t_1);
   __pyx_t_1 = 0;
-  __pyx_t_3 = (__pyx_v_kwargs != Py_None);
-  if (__pyx_t_3) {
-  } else {
-    __pyx_t_2 = __pyx_t_3;
-    goto __pyx_L4_bool_binop_done;
-  }
-  __pyx_t_3 = __Pyx_PyObject_IsTrue(__pyx_v_kwargs); if (unlikely((__pyx_t_3 < 0))) __PYX_ERR(0, 103, __pyx_L1_error)
-  __pyx_t_4 = (!__pyx_t_3);
-  __pyx_t_2 = __pyx_t_4;
-  __pyx_L4_bool_binop_done:;
-  if (__pyx_t_2) {
-    __Pyx_INCREF(Py_None);
-    __Pyx_DECREF_SET(__pyx_v_kwargs, Py_None);
-  }
-  __pyx_t_1 = ((PyObject *)__Pyx_ImportNumPyArrayTypeIfAvailable()); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 103, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_1);
-  __pyx_v_ndarray = ((PyTypeObject*)__pyx_t_1);
+
+  /* "bresenham3D.pyx":198
+ *     unsigned char[:,:,:] mask):
+ *     cdef set all_valid_voxels = set()
+ *     points=[() for _ in range(max_num_voxels)]             # <<<<<<<<<<<<<<
+ *     cdef int i,j,x,y,z
+ *     cdef list sublist
+ */
+  { /* enter inner scope */
+    __pyx_t_1 = PyList_New(0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 198, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_1);
+    __pyx_t_2 = __pyx_v_max_num_voxels;
+    __pyx_t_3 = __pyx_t_2;
+    for (__pyx_t_4 = 0; __pyx_t_4 < __pyx_t_3; __pyx_t_4+=1) {
+      __pyx_7genexpr__pyx_v__ = __pyx_t_4;
+      if (unlikely(__Pyx_ListComp_Append(__pyx_t_1, (PyObject*)__pyx_empty_tuple))) __PYX_ERR(0, 198, __pyx_L1_error)
+    }
+  } /* exit inner scope */
+  __pyx_v_points = ((PyObject*)__pyx_t_1);
   __pyx_t_1 = 0;
-  __pyx_v_itemsize = -1L;
-  __pyx_v_unsigned_char_is_signed = (!(((unsigned char)-1L) > 0));
-  __pyx_v_unsigned_short_is_signed = (!(((unsigned short)-1L) > 0));
-  __pyx_v_unsigned_int_is_signed = (!(((unsigned int)-1L) > 0));
-  __pyx_v_unsigned_long_long_is_signed = (!(((unsigned PY_LONG_LONG)-1L) > 0));
-  if (unlikely(__pyx_v_args == Py_None)) {
-    PyErr_SetString(PyExc_TypeError, "object of type 'NoneType' has no len()");
-    __PYX_ERR(0, 103, __pyx_L1_error)
-  }
-  __pyx_t_5 = __Pyx_PyTuple_GET_SIZE(((PyObject*)__pyx_v_args)); if (unlikely(__pyx_t_5 == ((Py_ssize_t)-1))) __PYX_ERR(0, 103, __pyx_L1_error)
-  __pyx_t_2 = (0 < __pyx_t_5);
-  if (__pyx_t_2) {
-    if (unlikely(__pyx_v_args == Py_None)) {
-      PyErr_SetString(PyExc_TypeError, "'NoneType' object is not subscriptable");
-      __PYX_ERR(0, 103, __pyx_L1_error)
-    }
-    __pyx_t_1 = __Pyx_GetItemInt_Tuple(((PyObject*)__pyx_v_args), 0, long, 1, __Pyx_PyInt_From_long, 0, 0, 1); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 103, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_1);
-    __pyx_v_arg = __pyx_t_1;
-    __pyx_t_1 = 0;
-    goto __pyx_L6;
-  }
-  __pyx_t_4 = (__pyx_v_kwargs != Py_None);
-  if (__pyx_t_4) {
-  } else {
-    __pyx_t_2 = __pyx_t_4;
-    goto __pyx_L7_bool_binop_done;
-  }
-  if (unlikely(__pyx_v_kwargs == Py_None)) {
-    PyErr_SetString(PyExc_TypeError, "'NoneType' object is not iterable");
-    __PYX_ERR(0, 103, __pyx_L1_error)
-  }
-  __pyx_t_4 = (__Pyx_PyDict_ContainsTF(__pyx_n_s_volume, ((PyObject*)__pyx_v_kwargs), Py_EQ)); if (unlikely((__pyx_t_4 < 0))) __PYX_ERR(0, 103, __pyx_L1_error)
-  __pyx_t_2 = __pyx_t_4;
-  __pyx_L7_bool_binop_done:;
-  if (likely(__pyx_t_2)) {
-    if (unlikely(__pyx_v_kwargs == Py_None)) {
-      PyErr_SetString(PyExc_TypeError, "'NoneType' object is not subscriptable");
-      __PYX_ERR(0, 103, __pyx_L1_error)
-    }
-    __pyx_t_1 = __Pyx_PyDict_GetItem(((PyObject*)__pyx_v_kwargs), __pyx_n_s_volume); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 103, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_1);
-    __pyx_v_arg = __pyx_t_1;
-    __pyx_t_1 = 0;
-    goto __pyx_L6;
-  }
-  /*else*/ {
-    if (unlikely(__pyx_v_args == Py_None)) {
-      PyErr_SetString(PyExc_TypeError, "object of type 'NoneType' has no len()");
-      __PYX_ERR(0, 103, __pyx_L1_error)
-    }
-    __pyx_t_5 = __Pyx_PyTuple_GET_SIZE(((PyObject*)__pyx_v_args)); if (unlikely(__pyx_t_5 == ((Py_ssize_t)-1))) __PYX_ERR(0, 103, __pyx_L1_error)
-    __pyx_t_1 = PyInt_FromSsize_t(__pyx_t_5); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 103, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_1);
-    __pyx_t_6 = PyTuple_New(3); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 103, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_6);
-    __Pyx_INCREF(__pyx_int_2);
-    __Pyx_GIVEREF(__pyx_int_2);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 0, __pyx_int_2)) __PYX_ERR(0, 103, __pyx_L1_error);
-    __Pyx_INCREF(__pyx_n_s_s);
-    __Pyx_GIVEREF(__pyx_n_s_s);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 1, __pyx_n_s_s)) __PYX_ERR(0, 103, __pyx_L1_error);
-    __Pyx_GIVEREF(__pyx_t_1);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_6, 2, __pyx_t_1)) __PYX_ERR(0, 103, __pyx_L1_error);
-    __pyx_t_1 = 0;
-    __pyx_t_1 = __Pyx_PyString_Format(__pyx_kp_s_Expected_at_least_d_argument_s_g, __pyx_t_6); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 103, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_1);
-    __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-    __pyx_t_6 = __Pyx_PyObject_CallOneArg(__pyx_builtin_TypeError, __pyx_t_1); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 103, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_6);
-    __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-    __Pyx_Raise(__pyx_t_6, 0, 0, 0);
-    __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-    __PYX_ERR(0, 103, __pyx_L1_error)
-  }
-  __pyx_L6:;
-  while (1) {
-    __pyx_t_2 = (__pyx_v_ndarray != ((PyTypeObject*)Py_None));
-    if (__pyx_t_2) {
-      __pyx_t_2 = __Pyx_TypeCheck(__pyx_v_arg, __pyx_v_ndarray); 
-      if (__pyx_t_2) {
-        __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_v_arg, __pyx_n_s_dtype); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 103, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_6);
-        __pyx_v_dtype = __pyx_t_6;
-        __pyx_t_6 = 0;
-        goto __pyx_L12;
-      }
-      __pyx_t_2 = __pyx_memoryview_check(__pyx_v_arg); 
-      if (__pyx_t_2) {
-        __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_v_arg, __pyx_n_s_base); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 103, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_6);
-        __pyx_v_arg_base = __pyx_t_6;
-        __pyx_t_6 = 0;
-        __pyx_t_2 = __Pyx_TypeCheck(__pyx_v_arg_base, __pyx_v_ndarray); 
-        if (__pyx_t_2) {
-          __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_v_arg_base, __pyx_n_s_dtype); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 103, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_6);
-          __pyx_v_dtype = __pyx_t_6;
-          __pyx_t_6 = 0;
-          goto __pyx_L13;
-        }
-        /*else*/ {
-          __Pyx_INCREF(Py_None);
-          __pyx_v_dtype = Py_None;
-        }
-        __pyx_L13:;
-        goto __pyx_L12;
-      }
-      /*else*/ {
-        __Pyx_INCREF(Py_None);
-        __pyx_v_dtype = Py_None;
-      }
-      __pyx_L12:;
-      __pyx_v_itemsize = -1L;
-      __pyx_t_2 = (__pyx_v_dtype != Py_None);
-      if (__pyx_t_2) {
-        __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_v_dtype, __pyx_n_s_itemsize); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 103, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_6);
-        __pyx_t_5 = __Pyx_PyIndex_AsSsize_t(__pyx_t_6); if (unlikely((__pyx_t_5 == (Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L1_error)
-        __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-        __pyx_v_itemsize = __pyx_t_5;
-        __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_v_dtype, __pyx_n_s_kind); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 103, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_6);
-        __pyx_t_7 = __Pyx_PyObject_Ord(__pyx_t_6); if (unlikely(__pyx_t_7 == ((long)(long)(Py_UCS4)-1))) __PYX_ERR(0, 103, __pyx_L1_error)
-        __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-        __pyx_v_kind = __pyx_t_7;
-        __pyx_v_dtype_signed = (__pyx_v_kind == 0x69);
-        switch (__pyx_v_kind) {
-          case 0x69:
-          case 0x75:
-          __pyx_t_4 = ((sizeof(unsigned char)) == __pyx_v_itemsize);
-          if (__pyx_t_4) {
-          } else {
-            __pyx_t_2 = __pyx_t_4;
-            goto __pyx_L16_bool_binop_done;
-          }
-          __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_v_arg, __pyx_n_s_ndim); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 103, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_6);
-          __pyx_t_5 = __Pyx_PyIndex_AsSsize_t(__pyx_t_6); if (unlikely((__pyx_t_5 == (Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L1_error)
-          __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-          __pyx_t_4 = (((Py_ssize_t)__pyx_t_5) == 3);
-          if (__pyx_t_4) {
-          } else {
-            __pyx_t_2 = __pyx_t_4;
-            goto __pyx_L16_bool_binop_done;
-          }
-          __pyx_t_4 = (!(__pyx_v_unsigned_char_is_signed ^ __pyx_v_dtype_signed));
-          __pyx_t_2 = __pyx_t_4;
-          __pyx_L16_bool_binop_done:;
-          if (__pyx_t_2) {
-            if (unlikely((__Pyx_SetItemInt(__pyx_v_dest_sig, 0, __pyx_kp_s_unsigned_char, long, 1, __Pyx_PyInt_From_long, 1, 0, 1) < 0))) __PYX_ERR(0, 103, __pyx_L1_error)
-            goto __pyx_L10_break;
-          }
-          __pyx_t_4 = ((sizeof(unsigned short)) == __pyx_v_itemsize);
-          if (__pyx_t_4) {
-          } else {
-            __pyx_t_2 = __pyx_t_4;
-            goto __pyx_L20_bool_binop_done;
-          }
-          __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_v_arg, __pyx_n_s_ndim); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 103, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_6);
-          __pyx_t_5 = __Pyx_PyIndex_AsSsize_t(__pyx_t_6); if (unlikely((__pyx_t_5 == (Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L1_error)
-          __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-          __pyx_t_4 = (((Py_ssize_t)__pyx_t_5) == 3);
-          if (__pyx_t_4) {
-          } else {
-            __pyx_t_2 = __pyx_t_4;
-            goto __pyx_L20_bool_binop_done;
-          }
-          __pyx_t_4 = (!(__pyx_v_unsigned_short_is_signed ^ __pyx_v_dtype_signed));
-          __pyx_t_2 = __pyx_t_4;
-          __pyx_L20_bool_binop_done:;
-          if (__pyx_t_2) {
-            if (unlikely((__Pyx_SetItemInt(__pyx_v_dest_sig, 0, __pyx_kp_s_unsigned_short, long, 1, __Pyx_PyInt_From_long, 1, 0, 1) < 0))) __PYX_ERR(0, 103, __pyx_L1_error)
-            goto __pyx_L10_break;
-          }
-          __pyx_t_4 = ((sizeof(unsigned int)) == __pyx_v_itemsize);
-          if (__pyx_t_4) {
-          } else {
-            __pyx_t_2 = __pyx_t_4;
-            goto __pyx_L24_bool_binop_done;
-          }
-          __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_v_arg, __pyx_n_s_ndim); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 103, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_6);
-          __pyx_t_5 = __Pyx_PyIndex_AsSsize_t(__pyx_t_6); if (unlikely((__pyx_t_5 == (Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L1_error)
-          __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-          __pyx_t_4 = (((Py_ssize_t)__pyx_t_5) == 3);
-          if (__pyx_t_4) {
-          } else {
-            __pyx_t_2 = __pyx_t_4;
-            goto __pyx_L24_bool_binop_done;
-          }
-          __pyx_t_4 = (!(__pyx_v_unsigned_int_is_signed ^ __pyx_v_dtype_signed));
-          __pyx_t_2 = __pyx_t_4;
-          __pyx_L24_bool_binop_done:;
-          if (__pyx_t_2) {
-            if (unlikely((__Pyx_SetItemInt(__pyx_v_dest_sig, 0, __pyx_kp_s_unsigned_int, long, 1, __Pyx_PyInt_From_long, 1, 0, 1) < 0))) __PYX_ERR(0, 103, __pyx_L1_error)
-            goto __pyx_L10_break;
-          }
-          __pyx_t_4 = ((sizeof(unsigned PY_LONG_LONG)) == __pyx_v_itemsize);
-          if (__pyx_t_4) {
-          } else {
-            __pyx_t_2 = __pyx_t_4;
-            goto __pyx_L28_bool_binop_done;
-          }
-          __pyx_t_6 = __Pyx_PyObject_GetAttrStr(__pyx_v_arg, __pyx_n_s_ndim); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 103, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_6);
-          __pyx_t_5 = __Pyx_PyIndex_AsSsize_t(__pyx_t_6); if (unlikely((__pyx_t_5 == (Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L1_error)
-          __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-          __pyx_t_4 = (((Py_ssize_t)__pyx_t_5) == 3);
-          if (__pyx_t_4) {
-          } else {
-            __pyx_t_2 = __pyx_t_4;
-            goto __pyx_L28_bool_binop_done;
-          }
-          __pyx_t_4 = (!(__pyx_v_unsigned_long_long_is_signed ^ __pyx_v_dtype_signed));
-          __pyx_t_2 = __pyx_t_4;
-          __pyx_L28_bool_binop_done:;
-          if (__pyx_t_2) {
-            if (unlikely((__Pyx_SetItemInt(__pyx_v_dest_sig, 0, __pyx_kp_s_unsigned_long_long, long, 1, __Pyx_PyInt_From_long, 1, 0, 1) < 0))) __PYX_ERR(0, 103, __pyx_L1_error)
-            goto __pyx_L10_break;
-          }
-          break;
-          case 0x66:
-          break;
-          case 99:
-          break;
-          case 79:
-          break;
-          default: break;
-        }
-      }
-    }
-    __pyx_t_2 = (__pyx_v_arg == Py_None);
-    if (__pyx_t_2) {
-      if (unlikely((__Pyx_SetItemInt(__pyx_v_dest_sig, 0, __pyx_kp_s_unsigned_char, long, 1, __Pyx_PyInt_From_long, 1, 0, 1) < 0))) __PYX_ERR(0, 103, __pyx_L1_error)
-      goto __pyx_L10_break;
-    }
-    {
-      __Pyx_PyThreadState_declare
-      __Pyx_PyThreadState_assign
-      __Pyx_ExceptionSave(&__pyx_t_8, &__pyx_t_9, &__pyx_t_10);
-      __Pyx_XGOTREF(__pyx_t_8);
-      __Pyx_XGOTREF(__pyx_t_9);
-      __Pyx_XGOTREF(__pyx_t_10);
-      /*try:*/ {
-        __pyx_t_6 = PyMemoryView_FromObject(__pyx_v_arg); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 103, __pyx_L32_error)
-        __Pyx_GOTREF(__pyx_t_6);
-        __pyx_v_arg_as_memoryview = ((PyObject*)__pyx_t_6);
-        __pyx_t_6 = 0;
-      }
-      /*else:*/ {
-        __pyx_t_4 = (__pyx_v_itemsize == -1L);
-        if (!__pyx_t_4) {
-          goto __pyx_L43_next_or;
-        } else {
-        }
-        __pyx_t_5 = __Pyx_PyMemoryView_Get_itemsize(__pyx_v_arg_as_memoryview); if (unlikely(__pyx_t_5 == ((Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L34_except_error)
-        __pyx_t_4 = (__pyx_t_5 == (sizeof(unsigned char)));
-        if (!__pyx_t_4) {
-        } else {
-          goto __pyx_L42_next_and;
-        }
-        __pyx_L43_next_or:;
-        __pyx_t_4 = (__pyx_v_itemsize == (sizeof(unsigned char)));
-        if (__pyx_t_4) {
-        } else {
-          __pyx_t_2 = __pyx_t_4;
-          goto __pyx_L41_bool_binop_done;
-        }
-        __pyx_L42_next_and:;
-        __pyx_t_11 = __Pyx_PyMemoryView_Get_ndim(__pyx_v_arg_as_memoryview); if (unlikely(__pyx_t_11 == ((int)-1) && PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L34_except_error)
-        __pyx_t_4 = (__pyx_t_11 == 3);
-        __pyx_t_2 = __pyx_t_4;
-        __pyx_L41_bool_binop_done:;
-        if (__pyx_t_2) {
-          __pyx_t_12 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(__pyx_v_arg_as_memoryview, 0); 
-          __pyx_v_memslice = __pyx_t_12;
-          __pyx_t_2 = (__pyx_v_memslice.memview != 0);
-          if (__pyx_t_2) {
-            __PYX_XCLEAR_MEMVIEW((&__pyx_v_memslice), 1); 
-            if (unlikely((__Pyx_SetItemInt(__pyx_v_dest_sig, 0, __pyx_kp_s_unsigned_char, long, 1, __Pyx_PyInt_From_long, 1, 0, 1) < 0))) __PYX_ERR(0, 103, __pyx_L34_except_error)
-            goto __pyx_L37_try_break;
-          }
-          /*else*/ {
-            PyErr_Clear(); 
-          }
-        }
-        __pyx_t_4 = (__pyx_v_itemsize == -1L);
-        if (!__pyx_t_4) {
-          goto __pyx_L49_next_or;
-        } else {
-        }
-        __pyx_t_5 = __Pyx_PyMemoryView_Get_itemsize(__pyx_v_arg_as_memoryview); if (unlikely(__pyx_t_5 == ((Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L34_except_error)
-        __pyx_t_4 = (__pyx_t_5 == (sizeof(unsigned short)));
-        if (!__pyx_t_4) {
-        } else {
-          goto __pyx_L48_next_and;
-        }
-        __pyx_L49_next_or:;
-        __pyx_t_4 = (__pyx_v_itemsize == (sizeof(unsigned short)));
-        if (__pyx_t_4) {
-        } else {
-          __pyx_t_2 = __pyx_t_4;
-          goto __pyx_L47_bool_binop_done;
-        }
-        __pyx_L48_next_and:;
-        __pyx_t_11 = __Pyx_PyMemoryView_Get_ndim(__pyx_v_arg_as_memoryview); if (unlikely(__pyx_t_11 == ((int)-1) && PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L34_except_error)
-        __pyx_t_4 = (__pyx_t_11 == 3);
-        __pyx_t_2 = __pyx_t_4;
-        __pyx_L47_bool_binop_done:;
-        if (__pyx_t_2) {
-          __pyx_t_12 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_short(__pyx_v_arg_as_memoryview, 0); 
-          __pyx_v_memslice = __pyx_t_12;
-          __pyx_t_2 = (__pyx_v_memslice.memview != 0);
-          if (__pyx_t_2) {
-            __PYX_XCLEAR_MEMVIEW((&__pyx_v_memslice), 1); 
-            if (unlikely((__Pyx_SetItemInt(__pyx_v_dest_sig, 0, __pyx_kp_s_unsigned_short, long, 1, __Pyx_PyInt_From_long, 1, 0, 1) < 0))) __PYX_ERR(0, 103, __pyx_L34_except_error)
-            goto __pyx_L37_try_break;
-          }
-          /*else*/ {
-            PyErr_Clear(); 
-          }
-        }
-        __pyx_t_4 = (__pyx_v_itemsize == -1L);
-        if (!__pyx_t_4) {
-          goto __pyx_L55_next_or;
-        } else {
-        }
-        __pyx_t_5 = __Pyx_PyMemoryView_Get_itemsize(__pyx_v_arg_as_memoryview); if (unlikely(__pyx_t_5 == ((Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L34_except_error)
-        __pyx_t_4 = (__pyx_t_5 == (sizeof(unsigned int)));
-        if (!__pyx_t_4) {
-        } else {
-          goto __pyx_L54_next_and;
-        }
-        __pyx_L55_next_or:;
-        __pyx_t_4 = (__pyx_v_itemsize == (sizeof(unsigned int)));
-        if (__pyx_t_4) {
-        } else {
-          __pyx_t_2 = __pyx_t_4;
-          goto __pyx_L53_bool_binop_done;
-        }
-        __pyx_L54_next_and:;
-        __pyx_t_11 = __Pyx_PyMemoryView_Get_ndim(__pyx_v_arg_as_memoryview); if (unlikely(__pyx_t_11 == ((int)-1) && PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L34_except_error)
-        __pyx_t_4 = (__pyx_t_11 == 3);
-        __pyx_t_2 = __pyx_t_4;
-        __pyx_L53_bool_binop_done:;
-        if (__pyx_t_2) {
-          __pyx_t_12 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_int(__pyx_v_arg_as_memoryview, 0); 
-          __pyx_v_memslice = __pyx_t_12;
-          __pyx_t_2 = (__pyx_v_memslice.memview != 0);
-          if (__pyx_t_2) {
-            __PYX_XCLEAR_MEMVIEW((&__pyx_v_memslice), 1); 
-            if (unlikely((__Pyx_SetItemInt(__pyx_v_dest_sig, 0, __pyx_kp_s_unsigned_int, long, 1, __Pyx_PyInt_From_long, 1, 0, 1) < 0))) __PYX_ERR(0, 103, __pyx_L34_except_error)
-            goto __pyx_L37_try_break;
-          }
-          /*else*/ {
-            PyErr_Clear(); 
-          }
-        }
-        __pyx_t_4 = (__pyx_v_itemsize == -1L);
-        if (!__pyx_t_4) {
-          goto __pyx_L61_next_or;
-        } else {
-        }
-        __pyx_t_5 = __Pyx_PyMemoryView_Get_itemsize(__pyx_v_arg_as_memoryview); if (unlikely(__pyx_t_5 == ((Py_ssize_t)-1) && PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L34_except_error)
-        __pyx_t_4 = (__pyx_t_5 == (sizeof(unsigned PY_LONG_LONG)));
-        if (!__pyx_t_4) {
-        } else {
-          goto __pyx_L60_next_and;
-        }
-        __pyx_L61_next_or:;
-        __pyx_t_4 = (__pyx_v_itemsize == (sizeof(unsigned PY_LONG_LONG)));
-        if (__pyx_t_4) {
-        } else {
-          __pyx_t_2 = __pyx_t_4;
-          goto __pyx_L59_bool_binop_done;
-        }
-        __pyx_L60_next_and:;
-        __pyx_t_11 = __Pyx_PyMemoryView_Get_ndim(__pyx_v_arg_as_memoryview); if (unlikely(__pyx_t_11 == ((int)-1) && PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L34_except_error)
-        __pyx_t_4 = (__pyx_t_11 == 3);
-        __pyx_t_2 = __pyx_t_4;
-        __pyx_L59_bool_binop_done:;
-        if (__pyx_t_2) {
-          __pyx_t_12 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(__pyx_v_arg_as_memoryview, 0); 
-          __pyx_v_memslice = __pyx_t_12;
-          __pyx_t_2 = (__pyx_v_memslice.memview != 0);
-          if (__pyx_t_2) {
-            __PYX_XCLEAR_MEMVIEW((&__pyx_v_memslice), 1); 
-            if (unlikely((__Pyx_SetItemInt(__pyx_v_dest_sig, 0, __pyx_kp_s_unsigned_long_long, long, 1, __Pyx_PyInt_From_long, 1, 0, 1) < 0))) __PYX_ERR(0, 103, __pyx_L34_except_error)
-            goto __pyx_L37_try_break;
-          }
-          /*else*/ {
-            PyErr_Clear(); 
-          }
-        }
-      }
-      __Pyx_XDECREF(__pyx_t_8); __pyx_t_8 = 0;
-      __Pyx_XDECREF(__pyx_t_9); __pyx_t_9 = 0;
-      __Pyx_XDECREF(__pyx_t_10); __pyx_t_10 = 0;
-      goto __pyx_L39_try_end;
-      __pyx_L32_error:;
-      __Pyx_XDECREF(__pyx_t_1); __pyx_t_1 = 0;
-      __Pyx_XDECREF(__pyx_t_6); __pyx_t_6 = 0;
-      __pyx_t_11 = __Pyx_PyErr_ExceptionMatches2(__pyx_builtin_ValueError, __pyx_builtin_TypeError);
-      if (__pyx_t_11) {
-        __Pyx_AddTraceback("bresenham3D.__pyx_fused_cpdef", __pyx_clineno, __pyx_lineno, __pyx_filename);
-        if (__Pyx_GetException(&__pyx_t_6, &__pyx_t_1, &__pyx_t_13) < 0) __PYX_ERR(0, 103, __pyx_L34_except_error)
-        __Pyx_XGOTREF(__pyx_t_6);
-        __Pyx_XGOTREF(__pyx_t_1);
-        __Pyx_XGOTREF(__pyx_t_13);
-        __Pyx_XDECREF(__pyx_t_6); __pyx_t_6 = 0;
-        __Pyx_XDECREF(__pyx_t_1); __pyx_t_1 = 0;
-        __Pyx_XDECREF(__pyx_t_13); __pyx_t_13 = 0;
-        goto __pyx_L33_exception_handled;
-      }
-      goto __pyx_L34_except_error;
-      __pyx_L34_except_error:;
-      __Pyx_XGIVEREF(__pyx_t_8);
-      __Pyx_XGIVEREF(__pyx_t_9);
-      __Pyx_XGIVEREF(__pyx_t_10);
-      __Pyx_ExceptionReset(__pyx_t_8, __pyx_t_9, __pyx_t_10);
-      goto __pyx_L1_error;
-      __pyx_L37_try_break:;
-      __Pyx_XGIVEREF(__pyx_t_8);
-      __Pyx_XGIVEREF(__pyx_t_9);
-      __Pyx_XGIVEREF(__pyx_t_10);
-      __Pyx_ExceptionReset(__pyx_t_8, __pyx_t_9, __pyx_t_10);
-      goto __pyx_L10_break;
-      __pyx_L33_exception_handled:;
-      __Pyx_XGIVEREF(__pyx_t_8);
-      __Pyx_XGIVEREF(__pyx_t_9);
-      __Pyx_XGIVEREF(__pyx_t_10);
-      __Pyx_ExceptionReset(__pyx_t_8, __pyx_t_9, __pyx_t_10);
-      __pyx_L39_try_end:;
-    }
-    if (unlikely((__Pyx_SetItemInt(__pyx_v_dest_sig, 0, Py_None, long, 1, __Pyx_PyInt_From_long, 1, 0, 1) < 0))) __PYX_ERR(0, 103, __pyx_L1_error)
-    goto __pyx_L10_break;
-  }
-  __pyx_L10_break:;
-  __pyx_t_2 = __Pyx_PyObject_IsTrue(__pyx_v__fused_sigindex); if (unlikely((__pyx_t_2 < 0))) __PYX_ERR(0, 103, __pyx_L1_error)
-  __pyx_t_4 = (!__pyx_t_2);
-  if (__pyx_t_4) {
-    __pyx_t_5 = 0;
-    if (unlikely(__pyx_v_signatures == Py_None)) {
-      PyErr_SetString(PyExc_TypeError, "'NoneType' object is not iterable");
-      __PYX_ERR(0, 103, __pyx_L1_error)
-    }
-    __pyx_t_1 = __Pyx_dict_iterator(((PyObject*)__pyx_v_signatures), 1, ((PyObject *)NULL), (&__pyx_t_14), (&__pyx_t_11)); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 103, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_1);
-    __Pyx_XDECREF(__pyx_t_13);
-    __pyx_t_13 = __pyx_t_1;
-    __pyx_t_1 = 0;
-    while (1) {
-      __pyx_t_15 = __Pyx_dict_iter_next(__pyx_t_13, __pyx_t_14, &__pyx_t_5, &__pyx_t_1, NULL, NULL, __pyx_t_11);
-      if (unlikely(__pyx_t_15 == 0)) break;
-      if (unlikely(__pyx_t_15 == -1)) __PYX_ERR(0, 103, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_1);
-      __Pyx_XDECREF_SET(__pyx_v_sig, __pyx_t_1);
-      __pyx_t_1 = 0;
-      __pyx_t_1 = __pyx_v__fused_sigindex;
-      __Pyx_INCREF(__pyx_t_1);
-      __Pyx_XDECREF_SET(__pyx_v_sigindex_node, ((PyObject*)__pyx_t_1));
-      __pyx_t_1 = 0;
-      __pyx_t_16 = __Pyx_PyObject_GetAttrStr(__pyx_v_sig, __pyx_n_s_strip); if (unlikely(!__pyx_t_16)) __PYX_ERR(0, 103, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_16);
-      __pyx_t_17 = NULL;
-      __pyx_t_15 = 0;
-      #if CYTHON_UNPACK_METHODS
-      if (likely(PyMethod_Check(__pyx_t_16))) {
-        __pyx_t_17 = PyMethod_GET_SELF(__pyx_t_16);
-        if (likely(__pyx_t_17)) {
-          PyObject* function = PyMethod_GET_FUNCTION(__pyx_t_16);
-          __Pyx_INCREF(__pyx_t_17);
-          __Pyx_INCREF(function);
-          __Pyx_DECREF_SET(__pyx_t_16, function);
-          __pyx_t_15 = 1;
-        }
-      }
-      #endif
-      {
-        PyObject *__pyx_callargs[2] = {__pyx_t_17, __pyx_kp_s__10};
-        __pyx_t_6 = __Pyx_PyObject_FastCall(__pyx_t_16, __pyx_callargs+1-__pyx_t_15, 1+__pyx_t_15);
-        __Pyx_XDECREF(__pyx_t_17); __pyx_t_17 = 0;
-        if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 103, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_6);
-        __Pyx_DECREF(__pyx_t_16); __pyx_t_16 = 0;
-      }
-      __pyx_t_16 = __Pyx_PyObject_GetAttrStr(__pyx_t_6, __pyx_n_s_split); if (unlikely(!__pyx_t_16)) __PYX_ERR(0, 103, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_16);
-      __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-      __pyx_t_6 = NULL;
-      __pyx_t_15 = 0;
-      #if CYTHON_UNPACK_METHODS
-      if (likely(PyMethod_Check(__pyx_t_16))) {
-        __pyx_t_6 = PyMethod_GET_SELF(__pyx_t_16);
-        if (likely(__pyx_t_6)) {
-          PyObject* function = PyMethod_GET_FUNCTION(__pyx_t_16);
-          __Pyx_INCREF(__pyx_t_6);
-          __Pyx_INCREF(function);
-          __Pyx_DECREF_SET(__pyx_t_16, function);
-          __pyx_t_15 = 1;
-        }
-      }
-      #endif
-      {
-        PyObject *__pyx_callargs[2] = {__pyx_t_6, __pyx_kp_s__11};
-        __pyx_t_1 = __Pyx_PyObject_FastCall(__pyx_t_16, __pyx_callargs+1-__pyx_t_15, 1+__pyx_t_15);
-        __Pyx_XDECREF(__pyx_t_6); __pyx_t_6 = 0;
-        if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 103, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_1);
-        __Pyx_DECREF(__pyx_t_16); __pyx_t_16 = 0;
-      }
-      __pyx_t_16 = __Pyx_PySequence_ListKeepNew(__pyx_t_1); if (unlikely(!__pyx_t_16)) __PYX_ERR(0, 103, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_16);
-      __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-      __pyx_t_18 = PyList_GET_SIZE(__pyx_t_16);
-      if (unlikely(__pyx_t_18 < 1)) {
-        __Pyx_RaiseNeedMoreValuesError(0+__pyx_t_18); __PYX_ERR(0, 103, __pyx_L1_error)
-      }
-      #if CYTHON_COMPILING_IN_CPYTHON
-      __pyx_t_6 = PyList_GET_ITEM(__pyx_t_16, __pyx_t_18-1); 
-      ((PyVarObject*)__pyx_t_16)->ob_size--;
-      #else
-      __pyx_t_6 = PySequence_ITEM(__pyx_t_16, __pyx_t_18-1); 
-      #endif
-      __Pyx_GOTREF(__pyx_t_6);
-      #if !CYTHON_COMPILING_IN_CPYTHON
-      __pyx_t_17 = PySequence_GetSlice(__pyx_t_16, 0, __pyx_t_18-1); if (unlikely(!__pyx_t_17)) __PYX_ERR(0, 103, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_17);
-      __Pyx_DECREF(__pyx_t_16);
-      __pyx_t_16 = __pyx_t_17; __pyx_t_17 = NULL;
-      #else
-      CYTHON_UNUSED_VAR(__pyx_t_17);
-      #endif
-      __Pyx_XDECREF_SET(__pyx_v_sig_series, ((PyObject*)__pyx_t_16));
-      __pyx_t_16 = 0;
-      __Pyx_XDECREF_SET(__pyx_v_last_type, __pyx_t_6);
-      __pyx_t_6 = 0;
-      __pyx_t_1 = __pyx_v_sig_series; __Pyx_INCREF(__pyx_t_1);
-      __pyx_t_18 = 0;
-      for (;;) {
-        {
-          Py_ssize_t __pyx_temp = __Pyx_PyList_GET_SIZE(__pyx_t_1);
-          #if !CYTHON_ASSUME_SAFE_MACROS
-          if (unlikely((__pyx_temp < 0))) __PYX_ERR(0, 103, __pyx_L1_error)
-          #endif
-          if (__pyx_t_18 >= __pyx_temp) break;
-        }
-        #if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
-        __pyx_t_6 = PyList_GET_ITEM(__pyx_t_1, __pyx_t_18); __Pyx_INCREF(__pyx_t_6); __pyx_t_18++; if (unlikely((0 < 0))) __PYX_ERR(0, 103, __pyx_L1_error)
-        #else
-        __pyx_t_6 = __Pyx_PySequence_ITEM(__pyx_t_1, __pyx_t_18); __pyx_t_18++; if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 103, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_6);
-        #endif
-        __Pyx_XDECREF_SET(__pyx_v_sig_type, __pyx_t_6);
-        __pyx_t_6 = 0;
-        if (unlikely(__pyx_v_sigindex_node == Py_None)) {
-          PyErr_SetString(PyExc_TypeError, "'NoneType' object is not iterable");
-          __PYX_ERR(0, 103, __pyx_L1_error)
-        }
-        __pyx_t_4 = (__Pyx_PyDict_ContainsTF(__pyx_v_sig_type, __pyx_v_sigindex_node, Py_NE)); if (unlikely((__pyx_t_4 < 0))) __PYX_ERR(0, 103, __pyx_L1_error)
-        if (__pyx_t_4) {
-          __pyx_t_6 = __Pyx_PyDict_NewPresized(0); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 103, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_6);
-          if (unlikely(__pyx_v_sigindex_node == Py_None)) {
-            PyErr_SetString(PyExc_TypeError, "'NoneType' object is not subscriptable");
-            __PYX_ERR(0, 103, __pyx_L1_error)
-          }
-          if (unlikely((PyDict_SetItem(__pyx_v_sigindex_node, __pyx_v_sig_type, __pyx_t_6) < 0))) __PYX_ERR(0, 103, __pyx_L1_error)
-          __Pyx_INCREF(__pyx_t_6);
-          __Pyx_DECREF_SET(__pyx_v_sigindex_node, __pyx_t_6);
-          __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-          goto __pyx_L71;
-        }
-        /*else*/ {
-          if (unlikely(__pyx_v_sigindex_node == Py_None)) {
-            PyErr_SetString(PyExc_TypeError, "'NoneType' object is not subscriptable");
-            __PYX_ERR(0, 103, __pyx_L1_error)
-          }
-          __pyx_t_6 = __Pyx_PyDict_GetItem(__pyx_v_sigindex_node, __pyx_v_sig_type); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 103, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_6);
-          __pyx_t_16 = __pyx_t_6;
-          __Pyx_INCREF(__pyx_t_16);
-          __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-          __Pyx_DECREF_SET(__pyx_v_sigindex_node, ((PyObject*)__pyx_t_16));
-          __pyx_t_16 = 0;
-        }
-        __pyx_L71:;
-      }
-      __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-      if (unlikely(__pyx_v_sigindex_node == Py_None)) {
-        PyErr_SetString(PyExc_TypeError, "'NoneType' object is not subscriptable");
-        __PYX_ERR(0, 103, __pyx_L1_error)
-      }
-      if (unlikely((PyDict_SetItem(__pyx_v_sigindex_node, __pyx_v_last_type, __pyx_v_sig) < 0))) __PYX_ERR(0, 103, __pyx_L1_error)
-    }
-    __Pyx_DECREF(__pyx_t_13); __pyx_t_13 = 0;
-  }
-  __pyx_t_13 = PyList_New(0); if (unlikely(!__pyx_t_13)) __PYX_ERR(0, 103, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_13);
-  __pyx_v_sigindex_matches = ((PyObject*)__pyx_t_13);
-  __pyx_t_13 = 0;
-  __pyx_t_13 = PyList_New(1); if (unlikely(!__pyx_t_13)) __PYX_ERR(0, 103, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_13);
-  __Pyx_INCREF(__pyx_v__fused_sigindex);
-  __Pyx_GIVEREF(__pyx_v__fused_sigindex);
-  if (__Pyx_PyList_SET_ITEM(__pyx_t_13, 0, __pyx_v__fused_sigindex)) __PYX_ERR(0, 103, __pyx_L1_error);
-  __pyx_v_sigindex_candidates = ((PyObject*)__pyx_t_13);
-  __pyx_t_13 = 0;
-  __pyx_t_13 = __pyx_v_dest_sig; __Pyx_INCREF(__pyx_t_13);
-  __pyx_t_14 = 0;
+
+  /* "bresenham3D.pyx":202
+ *     cdef list sublist
+ *     cdef tuple point
+ *     cdef bool found_contact_voxels = False             # <<<<<<<<<<<<<<
+ *     for i, sublist in enumerate(contact_voxels_list_of_lists):
+ *         for j in sublist:
+ */
+  __Pyx_INCREF(Py_False);
+  __pyx_v_found_contact_voxels = ((PyBoolObject *)Py_False);
+
+  /* "bresenham3D.pyx":203
+ *     cdef tuple point
+ *     cdef bool found_contact_voxels = False
+ *     for i, sublist in enumerate(contact_voxels_list_of_lists):             # <<<<<<<<<<<<<<
+ *         for j in sublist:
+ *             contact_voxel_1 = object_1_surface_voxel_coordinates[i]
+ */
+  __pyx_t_2 = 0;
+  __pyx_t_1 = __pyx_v_contact_voxels_list_of_lists; __Pyx_INCREF(__pyx_t_1);
+  __pyx_t_5 = 0;
   for (;;) {
     {
-      Py_ssize_t __pyx_temp = __Pyx_PyList_GET_SIZE(__pyx_t_13);
+      Py_ssize_t __pyx_temp = __Pyx_PyList_GET_SIZE(__pyx_t_1);
       #if !CYTHON_ASSUME_SAFE_MACROS
-      if (unlikely((__pyx_temp < 0))) __PYX_ERR(0, 103, __pyx_L1_error)
+      if (unlikely((__pyx_temp < 0))) __PYX_ERR(0, 203, __pyx_L1_error)
       #endif
-      if (__pyx_t_14 >= __pyx_temp) break;
+      if (__pyx_t_5 >= __pyx_temp) break;
     }
     #if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
-    __pyx_t_1 = PyList_GET_ITEM(__pyx_t_13, __pyx_t_14); __Pyx_INCREF(__pyx_t_1); __pyx_t_14++; if (unlikely((0 < 0))) __PYX_ERR(0, 103, __pyx_L1_error)
+    __pyx_t_6 = PyList_GET_ITEM(__pyx_t_1, __pyx_t_5); __Pyx_INCREF(__pyx_t_6); __pyx_t_5++; if (unlikely((0 < 0))) __PYX_ERR(0, 203, __pyx_L1_error)
     #else
-    __pyx_t_1 = __Pyx_PySequence_ITEM(__pyx_t_13, __pyx_t_14); __pyx_t_14++; if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 103, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_1);
+    __pyx_t_6 = __Pyx_PySequence_ITEM(__pyx_t_1, __pyx_t_5); __pyx_t_5++; if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 203, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_6);
     #endif
-    __Pyx_XDECREF_SET(__pyx_v_dst_type, __pyx_t_1);
-    __pyx_t_1 = 0;
-    __pyx_t_1 = PyList_New(0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 103, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_1);
-    __Pyx_XDECREF_SET(__pyx_v_found_matches, ((PyObject*)__pyx_t_1));
-    __pyx_t_1 = 0;
-    __pyx_t_1 = PyList_New(0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 103, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_1);
-    __Pyx_XDECREF_SET(__pyx_v_found_candidates, ((PyObject*)__pyx_t_1));
-    __pyx_t_1 = 0;
-    __pyx_t_4 = (__pyx_v_dst_type == Py_None);
-    if (__pyx_t_4) {
-      __pyx_t_1 = __pyx_v_sigindex_matches; __Pyx_INCREF(__pyx_t_1);
-      __pyx_t_5 = 0;
-      for (;;) {
-        {
-          Py_ssize_t __pyx_temp = __Pyx_PyList_GET_SIZE(__pyx_t_1);
-          #if !CYTHON_ASSUME_SAFE_MACROS
-          if (unlikely((__pyx_temp < 0))) __PYX_ERR(0, 103, __pyx_L1_error)
-          #endif
-          if (__pyx_t_5 >= __pyx_temp) break;
-        }
-        #if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
-        __pyx_t_16 = PyList_GET_ITEM(__pyx_t_1, __pyx_t_5); __Pyx_INCREF(__pyx_t_16); __pyx_t_5++; if (unlikely((0 < 0))) __PYX_ERR(0, 103, __pyx_L1_error)
-        #else
-        __pyx_t_16 = __Pyx_PySequence_ITEM(__pyx_t_1, __pyx_t_5); __pyx_t_5++; if (unlikely(!__pyx_t_16)) __PYX_ERR(0, 103, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_16);
-        #endif
-        __Pyx_XDECREF_SET(__pyx_v_sn, __pyx_t_16);
-        __pyx_t_16 = 0;
-        if (unlikely(__pyx_v_sn == Py_None)) {
-          PyErr_Format(PyExc_AttributeError, "'NoneType' object has no attribute '%.30s'", "values");
-          __PYX_ERR(0, 103, __pyx_L1_error)
-        }
-        __pyx_t_16 = __Pyx_PyDict_Values(((PyObject*)__pyx_v_sn)); if (unlikely(!__pyx_t_16)) __PYX_ERR(0, 103, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_16);
-        __pyx_t_19 = __Pyx_PyList_Extend(__pyx_v_found_matches, __pyx_t_16); if (unlikely(__pyx_t_19 == ((int)-1))) __PYX_ERR(0, 103, __pyx_L1_error)
-        __Pyx_DECREF(__pyx_t_16); __pyx_t_16 = 0;
-      }
-      __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-      __pyx_t_1 = __pyx_v_sigindex_candidates; __Pyx_INCREF(__pyx_t_1);
-      __pyx_t_5 = 0;
-      for (;;) {
-        {
-          Py_ssize_t __pyx_temp = __Pyx_PyList_GET_SIZE(__pyx_t_1);
-          #if !CYTHON_ASSUME_SAFE_MACROS
-          if (unlikely((__pyx_temp < 0))) __PYX_ERR(0, 103, __pyx_L1_error)
-          #endif
-          if (__pyx_t_5 >= __pyx_temp) break;
-        }
-        #if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
-        __pyx_t_16 = PyList_GET_ITEM(__pyx_t_1, __pyx_t_5); __Pyx_INCREF(__pyx_t_16); __pyx_t_5++; if (unlikely((0 < 0))) __PYX_ERR(0, 103, __pyx_L1_error)
-        #else
-        __pyx_t_16 = __Pyx_PySequence_ITEM(__pyx_t_1, __pyx_t_5); __pyx_t_5++; if (unlikely(!__pyx_t_16)) __PYX_ERR(0, 103, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_16);
-        #endif
-        __Pyx_XDECREF_SET(__pyx_v_sn, __pyx_t_16);
-        __pyx_t_16 = 0;
-        if (unlikely(__pyx_v_sn == Py_None)) {
-          PyErr_Format(PyExc_AttributeError, "'NoneType' object has no attribute '%.30s'", "values");
-          __PYX_ERR(0, 103, __pyx_L1_error)
-        }
-        __pyx_t_16 = __Pyx_PyDict_Values(((PyObject*)__pyx_v_sn)); if (unlikely(!__pyx_t_16)) __PYX_ERR(0, 103, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_16);
-        __pyx_t_19 = __Pyx_PyList_Extend(__pyx_v_found_candidates, __pyx_t_16); if (unlikely(__pyx_t_19 == ((int)-1))) __PYX_ERR(0, 103, __pyx_L1_error)
-        __Pyx_DECREF(__pyx_t_16); __pyx_t_16 = 0;
-      }
-      __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-      goto __pyx_L75;
+    if (!(likely(PyList_CheckExact(__pyx_t_6))||((__pyx_t_6) == Py_None) || __Pyx_RaiseUnexpectedTypeError("list", __pyx_t_6))) __PYX_ERR(0, 203, __pyx_L1_error)
+    __Pyx_XDECREF_SET(__pyx_v_sublist, ((PyObject*)__pyx_t_6));
+    __pyx_t_6 = 0;
+    __pyx_v_i = __pyx_t_2;
+    __pyx_t_2 = (__pyx_t_2 + 1);
+
+    /* "bresenham3D.pyx":204
+ *     cdef bool found_contact_voxels = False
+ *     for i, sublist in enumerate(contact_voxels_list_of_lists):
+ *         for j in sublist:             # <<<<<<<<<<<<<<
+ *             contact_voxel_1 = object_1_surface_voxel_coordinates[i]
+ *             contact_voxel_2 = object_2_surface_voxel_coordinates[j]
+ */
+    if (unlikely(__pyx_v_sublist == Py_None)) {
+      PyErr_SetString(PyExc_TypeError, "'NoneType' object is not iterable");
+      __PYX_ERR(0, 204, __pyx_L1_error)
     }
-    /*else*/ {
-      __pyx_t_1 = PyTuple_New(2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 103, __pyx_L1_error)
-      __Pyx_GOTREF(__pyx_t_1);
-      __Pyx_INCREF(__pyx_v_sigindex_matches);
-      __Pyx_GIVEREF(__pyx_v_sigindex_matches);
-      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_1, 0, __pyx_v_sigindex_matches)) __PYX_ERR(0, 103, __pyx_L1_error);
-      __Pyx_INCREF(__pyx_v_sigindex_candidates);
-      __Pyx_GIVEREF(__pyx_v_sigindex_candidates);
-      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_1, 1, __pyx_v_sigindex_candidates)) __PYX_ERR(0, 103, __pyx_L1_error);
-      __pyx_t_16 = __pyx_t_1; __Pyx_INCREF(__pyx_t_16);
-      __pyx_t_5 = 0;
-      __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-      for (;;) {
-        if (__pyx_t_5 >= 2) break;
-        #if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
-        __pyx_t_1 = PyTuple_GET_ITEM(__pyx_t_16, __pyx_t_5); __Pyx_INCREF(__pyx_t_1); __pyx_t_5++; if (unlikely((0 < 0))) __PYX_ERR(0, 103, __pyx_L1_error)
-        #else
-        __pyx_t_1 = __Pyx_PySequence_ITEM(__pyx_t_16, __pyx_t_5); __pyx_t_5++; if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 103, __pyx_L1_error)
-        __Pyx_GOTREF(__pyx_t_1);
+    __pyx_t_6 = __pyx_v_sublist; __Pyx_INCREF(__pyx_t_6);
+    __pyx_t_7 = 0;
+    for (;;) {
+      {
+        Py_ssize_t __pyx_temp = __Pyx_PyList_GET_SIZE(__pyx_t_6);
+        #if !CYTHON_ASSUME_SAFE_MACROS
+        if (unlikely((__pyx_temp < 0))) __PYX_ERR(0, 204, __pyx_L1_error)
         #endif
-        __Pyx_XDECREF_SET(__pyx_v_search_list, ((PyObject*)__pyx_t_1));
-        __pyx_t_1 = 0;
-        if (unlikely(__pyx_v_search_list == Py_None)) {
-          PyErr_SetString(PyExc_TypeError, "'NoneType' object is not iterable");
-          __PYX_ERR(0, 103, __pyx_L1_error)
-        }
-        __pyx_t_1 = __pyx_v_search_list; __Pyx_INCREF(__pyx_t_1);
-        __pyx_t_18 = 0;
-        for (;;) {
-          {
-            Py_ssize_t __pyx_temp = __Pyx_PyList_GET_SIZE(__pyx_t_1);
-            #if !CYTHON_ASSUME_SAFE_MACROS
-            if (unlikely((__pyx_temp < 0))) __PYX_ERR(0, 103, __pyx_L1_error)
-            #endif
-            if (__pyx_t_18 >= __pyx_temp) break;
-          }
-          #if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
-          __pyx_t_6 = PyList_GET_ITEM(__pyx_t_1, __pyx_t_18); __Pyx_INCREF(__pyx_t_6); __pyx_t_18++; if (unlikely((0 < 0))) __PYX_ERR(0, 103, __pyx_L1_error)
-          #else
-          __pyx_t_6 = __Pyx_PySequence_ITEM(__pyx_t_1, __pyx_t_18); __pyx_t_18++; if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 103, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_6);
-          #endif
-          __Pyx_XDECREF_SET(__pyx_v_sn, __pyx_t_6);
-          __pyx_t_6 = 0;
-          if (unlikely(__pyx_v_sn == Py_None)) {
-            PyErr_Format(PyExc_AttributeError, "'NoneType' object has no attribute '%.30s'", "get");
-            __PYX_ERR(0, 103, __pyx_L1_error)
-          }
-          __pyx_t_6 = __Pyx_PyDict_GetItemDefault(((PyObject*)__pyx_v_sn), __pyx_v_dst_type, Py_None); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 103, __pyx_L1_error)
-          __Pyx_GOTREF(__pyx_t_6);
-          __Pyx_XDECREF_SET(__pyx_v_type_match, __pyx_t_6);
-          __pyx_t_6 = 0;
-          __pyx_t_4 = (__pyx_v_type_match != Py_None);
-          if (__pyx_t_4) {
-            __pyx_t_19 = __Pyx_PyList_Append(__pyx_v_found_matches, __pyx_v_type_match); if (unlikely(__pyx_t_19 == ((int)-1))) __PYX_ERR(0, 103, __pyx_L1_error)
-          }
-        }
-        __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
+        if (__pyx_t_7 >= __pyx_temp) break;
       }
-      __Pyx_DECREF(__pyx_t_16); __pyx_t_16 = 0;
+      #if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
+      __pyx_t_8 = PyList_GET_ITEM(__pyx_t_6, __pyx_t_7); __Pyx_INCREF(__pyx_t_8); __pyx_t_7++; if (unlikely((0 < 0))) __PYX_ERR(0, 204, __pyx_L1_error)
+      #else
+      __pyx_t_8 = __Pyx_PySequence_ITEM(__pyx_t_6, __pyx_t_7); __pyx_t_7++; if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 204, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_8);
+      #endif
+      __pyx_t_3 = __Pyx_PyInt_As_int(__pyx_t_8); if (unlikely((__pyx_t_3 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 204, __pyx_L1_error)
+      __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
+      __pyx_v_j = __pyx_t_3;
+
+      /* "bresenham3D.pyx":205
+ *     for i, sublist in enumerate(contact_voxels_list_of_lists):
+ *         for j in sublist:
+ *             contact_voxel_1 = object_1_surface_voxel_coordinates[i]             # <<<<<<<<<<<<<<
+ *             contact_voxel_2 = object_2_surface_voxel_coordinates[j]
+ *             if (
+ */
+      __pyx_t_9.data = __pyx_v_object_1_surface_voxel_coordinates.data;
+      __pyx_t_9.memview = __pyx_v_object_1_surface_voxel_coordinates.memview;
+      __PYX_INC_MEMVIEW(&__pyx_t_9, 1);
+      {
+    Py_ssize_t __pyx_tmp_idx = __pyx_v_i;
+        Py_ssize_t __pyx_tmp_shape = __pyx_v_object_1_surface_voxel_coordinates.shape[0];
+    Py_ssize_t __pyx_tmp_stride = __pyx_v_object_1_surface_voxel_coordinates.strides[0];
+        if (__pyx_tmp_idx < 0)
+            __pyx_tmp_idx += __pyx_tmp_shape;
+        if (unlikely(!__Pyx_is_valid_index(__pyx_tmp_idx, __pyx_tmp_shape))) {
+            PyErr_SetString(PyExc_IndexError,
+                            "Index out of bounds (axis 0)");
+            __PYX_ERR(0, 205, __pyx_L1_error)
+        }
+        __pyx_t_9.data += __pyx_tmp_idx * __pyx_tmp_stride;
+}
+
+__pyx_t_9.shape[0] = __pyx_v_object_1_surface_voxel_coordinates.shape[1];
+__pyx_t_9.strides[0] = __pyx_v_object_1_surface_voxel_coordinates.strides[1];
+    __pyx_t_9.suboffsets[0] = -1;
+
+__PYX_XCLEAR_MEMVIEW(&__pyx_v_contact_voxel_1, 1);
+      __pyx_v_contact_voxel_1 = __pyx_t_9;
+      __pyx_t_9.memview = NULL;
+      __pyx_t_9.data = NULL;
+
+      /* "bresenham3D.pyx":206
+ *         for j in sublist:
+ *             contact_voxel_1 = object_1_surface_voxel_coordinates[i]
+ *             contact_voxel_2 = object_2_surface_voxel_coordinates[j]             # <<<<<<<<<<<<<<
+ *             if (
+ *                 current_pair_contact_sites[
+ */
+      __pyx_t_9.data = __pyx_v_object_2_surface_voxel_coordinates.data;
+      __pyx_t_9.memview = __pyx_v_object_2_surface_voxel_coordinates.memview;
+      __PYX_INC_MEMVIEW(&__pyx_t_9, 1);
+      {
+    Py_ssize_t __pyx_tmp_idx = __pyx_v_j;
+        Py_ssize_t __pyx_tmp_shape = __pyx_v_object_2_surface_voxel_coordinates.shape[0];
+    Py_ssize_t __pyx_tmp_stride = __pyx_v_object_2_surface_voxel_coordinates.strides[0];
+        if (__pyx_tmp_idx < 0)
+            __pyx_tmp_idx += __pyx_tmp_shape;
+        if (unlikely(!__Pyx_is_valid_index(__pyx_tmp_idx, __pyx_tmp_shape))) {
+            PyErr_SetString(PyExc_IndexError,
+                            "Index out of bounds (axis 0)");
+            __PYX_ERR(0, 206, __pyx_L1_error)
+        }
+        __pyx_t_9.data += __pyx_tmp_idx * __pyx_tmp_stride;
+}
+
+__pyx_t_9.shape[0] = __pyx_v_object_2_surface_voxel_coordinates.shape[1];
+__pyx_t_9.strides[0] = __pyx_v_object_2_surface_voxel_coordinates.strides[1];
+    __pyx_t_9.suboffsets[0] = -1;
+
+__PYX_XCLEAR_MEMVIEW(&__pyx_v_contact_voxel_2, 1);
+      __pyx_v_contact_voxel_2 = __pyx_t_9;
+      __pyx_t_9.memview = NULL;
+      __pyx_t_9.data = NULL;
+
+      /* "bresenham3D.pyx":209
+ *             if (
+ *                 current_pair_contact_sites[
+ *                     contact_voxel_1[0], contact_voxel_1[1], contact_voxel_1[2]             # <<<<<<<<<<<<<<
+ *                 ]
+ *                 or current_pair_contact_sites[
+ */
+      __pyx_t_11 = 0;
+      __pyx_t_3 = -1;
+      if (__pyx_t_11 < 0) {
+        __pyx_t_11 += __pyx_v_contact_voxel_1.shape[0];
+        if (unlikely(__pyx_t_11 < 0)) __pyx_t_3 = 0;
+      } else if (unlikely(__pyx_t_11 >= __pyx_v_contact_voxel_1.shape[0])) __pyx_t_3 = 0;
+      if (unlikely(__pyx_t_3 != -1)) {
+        __Pyx_RaiseBufferIndexError(__pyx_t_3);
+        __PYX_ERR(0, 209, __pyx_L1_error)
+      }
+      __pyx_t_12 = 1;
+      __pyx_t_3 = -1;
+      if (__pyx_t_12 < 0) {
+        __pyx_t_12 += __pyx_v_contact_voxel_1.shape[0];
+        if (unlikely(__pyx_t_12 < 0)) __pyx_t_3 = 0;
+      } else if (unlikely(__pyx_t_12 >= __pyx_v_contact_voxel_1.shape[0])) __pyx_t_3 = 0;
+      if (unlikely(__pyx_t_3 != -1)) {
+        __Pyx_RaiseBufferIndexError(__pyx_t_3);
+        __PYX_ERR(0, 209, __pyx_L1_error)
+      }
+      __pyx_t_13 = 2;
+      __pyx_t_3 = -1;
+      if (__pyx_t_13 < 0) {
+        __pyx_t_13 += __pyx_v_contact_voxel_1.shape[0];
+        if (unlikely(__pyx_t_13 < 0)) __pyx_t_3 = 0;
+      } else if (unlikely(__pyx_t_13 >= __pyx_v_contact_voxel_1.shape[0])) __pyx_t_3 = 0;
+      if (unlikely(__pyx_t_3 != -1)) {
+        __Pyx_RaiseBufferIndexError(__pyx_t_3);
+        __PYX_ERR(0, 209, __pyx_L1_error)
+      }
+
+      /* "bresenham3D.pyx":208
+ *             contact_voxel_2 = object_2_surface_voxel_coordinates[j]
+ *             if (
+ *                 current_pair_contact_sites[             # <<<<<<<<<<<<<<
+ *                     contact_voxel_1[0], contact_voxel_1[1], contact_voxel_1[2]
+ *                 ]
+ */
+      __pyx_t_14 = (*((long *) ( /* dim=0 */ (__pyx_v_contact_voxel_1.data + __pyx_t_11 * __pyx_v_contact_voxel_1.strides[0]) )));
+      __pyx_t_15 = (*((long *) ( /* dim=0 */ (__pyx_v_contact_voxel_1.data + __pyx_t_12 * __pyx_v_contact_voxel_1.strides[0]) )));
+      __pyx_t_16 = (*((long *) ( /* dim=0 */ (__pyx_v_contact_voxel_1.data + __pyx_t_13 * __pyx_v_contact_voxel_1.strides[0]) )));
+      __pyx_t_3 = -1;
+      if (__pyx_t_14 < 0) {
+        __pyx_t_14 += __pyx_v_current_pair_contact_sites.shape[0];
+        if (unlikely(__pyx_t_14 < 0)) __pyx_t_3 = 0;
+      } else if (unlikely(__pyx_t_14 >= __pyx_v_current_pair_contact_sites.shape[0])) __pyx_t_3 = 0;
+      if (__pyx_t_15 < 0) {
+        __pyx_t_15 += __pyx_v_current_pair_contact_sites.shape[1];
+        if (unlikely(__pyx_t_15 < 0)) __pyx_t_3 = 1;
+      } else if (unlikely(__pyx_t_15 >= __pyx_v_current_pair_contact_sites.shape[1])) __pyx_t_3 = 1;
+      if (__pyx_t_16 < 0) {
+        __pyx_t_16 += __pyx_v_current_pair_contact_sites.shape[2];
+        if (unlikely(__pyx_t_16 < 0)) __pyx_t_3 = 2;
+      } else if (unlikely(__pyx_t_16 >= __pyx_v_current_pair_contact_sites.shape[2])) __pyx_t_3 = 2;
+      if (unlikely(__pyx_t_3 != -1)) {
+        __Pyx_RaiseBufferIndexError(__pyx_t_3);
+        __PYX_ERR(0, 208, __pyx_L1_error)
+      }
+      __pyx_t_17 = ((*((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_current_pair_contact_sites.data + __pyx_t_14 * __pyx_v_current_pair_contact_sites.strides[0]) ) + __pyx_t_15 * __pyx_v_current_pair_contact_sites.strides[1]) ) + __pyx_t_16 * __pyx_v_current_pair_contact_sites.strides[2]) ))) != 0);
+      if (!__pyx_t_17) {
+      } else {
+        __pyx_t_10 = __pyx_t_17;
+        goto __pyx_L10_bool_binop_done;
+      }
+
+      /* "bresenham3D.pyx":212
+ *                 ]
+ *                 or current_pair_contact_sites[
+ *                     contact_voxel_2[0], contact_voxel_2[1], contact_voxel_2[2]             # <<<<<<<<<<<<<<
+ *                 ]
+ *             ):
+ */
+      __pyx_t_13 = 0;
+      __pyx_t_3 = -1;
+      if (__pyx_t_13 < 0) {
+        __pyx_t_13 += __pyx_v_contact_voxel_2.shape[0];
+        if (unlikely(__pyx_t_13 < 0)) __pyx_t_3 = 0;
+      } else if (unlikely(__pyx_t_13 >= __pyx_v_contact_voxel_2.shape[0])) __pyx_t_3 = 0;
+      if (unlikely(__pyx_t_3 != -1)) {
+        __Pyx_RaiseBufferIndexError(__pyx_t_3);
+        __PYX_ERR(0, 212, __pyx_L1_error)
+      }
+      __pyx_t_12 = 1;
+      __pyx_t_3 = -1;
+      if (__pyx_t_12 < 0) {
+        __pyx_t_12 += __pyx_v_contact_voxel_2.shape[0];
+        if (unlikely(__pyx_t_12 < 0)) __pyx_t_3 = 0;
+      } else if (unlikely(__pyx_t_12 >= __pyx_v_contact_voxel_2.shape[0])) __pyx_t_3 = 0;
+      if (unlikely(__pyx_t_3 != -1)) {
+        __Pyx_RaiseBufferIndexError(__pyx_t_3);
+        __PYX_ERR(0, 212, __pyx_L1_error)
+      }
+      __pyx_t_11 = 2;
+      __pyx_t_3 = -1;
+      if (__pyx_t_11 < 0) {
+        __pyx_t_11 += __pyx_v_contact_voxel_2.shape[0];
+        if (unlikely(__pyx_t_11 < 0)) __pyx_t_3 = 0;
+      } else if (unlikely(__pyx_t_11 >= __pyx_v_contact_voxel_2.shape[0])) __pyx_t_3 = 0;
+      if (unlikely(__pyx_t_3 != -1)) {
+        __Pyx_RaiseBufferIndexError(__pyx_t_3);
+        __PYX_ERR(0, 212, __pyx_L1_error)
+      }
+
+      /* "bresenham3D.pyx":211
+ *                     contact_voxel_1[0], contact_voxel_1[1], contact_voxel_1[2]
+ *                 ]
+ *                 or current_pair_contact_sites[             # <<<<<<<<<<<<<<
+ *                     contact_voxel_2[0], contact_voxel_2[1], contact_voxel_2[2]
+ *                 ]
+ */
+      __pyx_t_16 = (*((long *) ( /* dim=0 */ (__pyx_v_contact_voxel_2.data + __pyx_t_13 * __pyx_v_contact_voxel_2.strides[0]) )));
+      __pyx_t_15 = (*((long *) ( /* dim=0 */ (__pyx_v_contact_voxel_2.data + __pyx_t_12 * __pyx_v_contact_voxel_2.strides[0]) )));
+      __pyx_t_14 = (*((long *) ( /* dim=0 */ (__pyx_v_contact_voxel_2.data + __pyx_t_11 * __pyx_v_contact_voxel_2.strides[0]) )));
+      __pyx_t_3 = -1;
+      if (__pyx_t_16 < 0) {
+        __pyx_t_16 += __pyx_v_current_pair_contact_sites.shape[0];
+        if (unlikely(__pyx_t_16 < 0)) __pyx_t_3 = 0;
+      } else if (unlikely(__pyx_t_16 >= __pyx_v_current_pair_contact_sites.shape[0])) __pyx_t_3 = 0;
+      if (__pyx_t_15 < 0) {
+        __pyx_t_15 += __pyx_v_current_pair_contact_sites.shape[1];
+        if (unlikely(__pyx_t_15 < 0)) __pyx_t_3 = 1;
+      } else if (unlikely(__pyx_t_15 >= __pyx_v_current_pair_contact_sites.shape[1])) __pyx_t_3 = 1;
+      if (__pyx_t_14 < 0) {
+        __pyx_t_14 += __pyx_v_current_pair_contact_sites.shape[2];
+        if (unlikely(__pyx_t_14 < 0)) __pyx_t_3 = 2;
+      } else if (unlikely(__pyx_t_14 >= __pyx_v_current_pair_contact_sites.shape[2])) __pyx_t_3 = 2;
+      if (unlikely(__pyx_t_3 != -1)) {
+        __Pyx_RaiseBufferIndexError(__pyx_t_3);
+        __PYX_ERR(0, 211, __pyx_L1_error)
+      }
+      __pyx_t_17 = ((*((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_current_pair_contact_sites.data + __pyx_t_16 * __pyx_v_current_pair_contact_sites.strides[0]) ) + __pyx_t_15 * __pyx_v_current_pair_contact_sites.strides[1]) ) + __pyx_t_14 * __pyx_v_current_pair_contact_sites.strides[2]) ))) != 0);
+      __pyx_t_10 = __pyx_t_17;
+      __pyx_L10_bool_binop_done:;
+
+      /* "bresenham3D.pyx":207
+ *             contact_voxel_1 = object_1_surface_voxel_coordinates[i]
+ *             contact_voxel_2 = object_2_surface_voxel_coordinates[j]
+ *             if (             # <<<<<<<<<<<<<<
+ *                 current_pair_contact_sites[
+ *                     contact_voxel_1[0], contact_voxel_1[1], contact_voxel_1[2]
+ */
+      if (__pyx_t_10) {
+
+        /* "bresenham3D.pyx":215
+ *                 ]
+ *             ):
+ *                 continue             # <<<<<<<<<<<<<<
+ *             idx = bresenham3DWithMaskSingleInline(
+ *                 contact_voxel_1[0],
+ */
+        goto __pyx_L7_continue;
+
+        /* "bresenham3D.pyx":207
+ *             contact_voxel_1 = object_1_surface_voxel_coordinates[i]
+ *             contact_voxel_2 = object_2_surface_voxel_coordinates[j]
+ *             if (             # <<<<<<<<<<<<<<
+ *                 current_pair_contact_sites[
+ *                     contact_voxel_1[0], contact_voxel_1[1], contact_voxel_1[2]
+ */
+      }
+
+      /* "bresenham3D.pyx":217
+ *                 continue
+ *             idx = bresenham3DWithMaskSingleInline(
+ *                 contact_voxel_1[0],             # <<<<<<<<<<<<<<
+ *                 contact_voxel_1[1],
+ *                 contact_voxel_1[2],
+ */
+      __pyx_t_11 = 0;
+      __pyx_t_3 = -1;
+      if (__pyx_t_11 < 0) {
+        __pyx_t_11 += __pyx_v_contact_voxel_1.shape[0];
+        if (unlikely(__pyx_t_11 < 0)) __pyx_t_3 = 0;
+      } else if (unlikely(__pyx_t_11 >= __pyx_v_contact_voxel_1.shape[0])) __pyx_t_3 = 0;
+      if (unlikely(__pyx_t_3 != -1)) {
+        __Pyx_RaiseBufferIndexError(__pyx_t_3);
+        __PYX_ERR(0, 217, __pyx_L1_error)
+      }
+
+      /* "bresenham3D.pyx":218
+ *             idx = bresenham3DWithMaskSingleInline(
+ *                 contact_voxel_1[0],
+ *                 contact_voxel_1[1],             # <<<<<<<<<<<<<<
+ *                 contact_voxel_1[2],
+ *                 contact_voxel_2[0],
+ */
+      __pyx_t_12 = 1;
+      __pyx_t_3 = -1;
+      if (__pyx_t_12 < 0) {
+        __pyx_t_12 += __pyx_v_contact_voxel_1.shape[0];
+        if (unlikely(__pyx_t_12 < 0)) __pyx_t_3 = 0;
+      } else if (unlikely(__pyx_t_12 >= __pyx_v_contact_voxel_1.shape[0])) __pyx_t_3 = 0;
+      if (unlikely(__pyx_t_3 != -1)) {
+        __Pyx_RaiseBufferIndexError(__pyx_t_3);
+        __PYX_ERR(0, 218, __pyx_L1_error)
+      }
+
+      /* "bresenham3D.pyx":219
+ *                 contact_voxel_1[0],
+ *                 contact_voxel_1[1],
+ *                 contact_voxel_1[2],             # <<<<<<<<<<<<<<
+ *                 contact_voxel_2[0],
+ *                 contact_voxel_2[1],
+ */
+      __pyx_t_13 = 2;
+      __pyx_t_3 = -1;
+      if (__pyx_t_13 < 0) {
+        __pyx_t_13 += __pyx_v_contact_voxel_1.shape[0];
+        if (unlikely(__pyx_t_13 < 0)) __pyx_t_3 = 0;
+      } else if (unlikely(__pyx_t_13 >= __pyx_v_contact_voxel_1.shape[0])) __pyx_t_3 = 0;
+      if (unlikely(__pyx_t_3 != -1)) {
+        __Pyx_RaiseBufferIndexError(__pyx_t_3);
+        __PYX_ERR(0, 219, __pyx_L1_error)
+      }
+
+      /* "bresenham3D.pyx":220
+ *                 contact_voxel_1[1],
+ *                 contact_voxel_1[2],
+ *                 contact_voxel_2[0],             # <<<<<<<<<<<<<<
+ *                 contact_voxel_2[1],
+ *                 contact_voxel_2[2],
+ */
+      __pyx_t_14 = 0;
+      __pyx_t_3 = -1;
+      if (__pyx_t_14 < 0) {
+        __pyx_t_14 += __pyx_v_contact_voxel_2.shape[0];
+        if (unlikely(__pyx_t_14 < 0)) __pyx_t_3 = 0;
+      } else if (unlikely(__pyx_t_14 >= __pyx_v_contact_voxel_2.shape[0])) __pyx_t_3 = 0;
+      if (unlikely(__pyx_t_3 != -1)) {
+        __Pyx_RaiseBufferIndexError(__pyx_t_3);
+        __PYX_ERR(0, 220, __pyx_L1_error)
+      }
+
+      /* "bresenham3D.pyx":221
+ *                 contact_voxel_1[2],
+ *                 contact_voxel_2[0],
+ *                 contact_voxel_2[1],             # <<<<<<<<<<<<<<
+ *                 contact_voxel_2[2],
+ *                 points,
+ */
+      __pyx_t_15 = 1;
+      __pyx_t_3 = -1;
+      if (__pyx_t_15 < 0) {
+        __pyx_t_15 += __pyx_v_contact_voxel_2.shape[0];
+        if (unlikely(__pyx_t_15 < 0)) __pyx_t_3 = 0;
+      } else if (unlikely(__pyx_t_15 >= __pyx_v_contact_voxel_2.shape[0])) __pyx_t_3 = 0;
+      if (unlikely(__pyx_t_3 != -1)) {
+        __Pyx_RaiseBufferIndexError(__pyx_t_3);
+        __PYX_ERR(0, 221, __pyx_L1_error)
+      }
+
+      /* "bresenham3D.pyx":222
+ *                 contact_voxel_2[0],
+ *                 contact_voxel_2[1],
+ *                 contact_voxel_2[2],             # <<<<<<<<<<<<<<
+ *                 points,
+ *                 mask=mask,
+ */
+      __pyx_t_16 = 2;
+      __pyx_t_3 = -1;
+      if (__pyx_t_16 < 0) {
+        __pyx_t_16 += __pyx_v_contact_voxel_2.shape[0];
+        if (unlikely(__pyx_t_16 < 0)) __pyx_t_3 = 0;
+      } else if (unlikely(__pyx_t_16 >= __pyx_v_contact_voxel_2.shape[0])) __pyx_t_3 = 0;
+      if (unlikely(__pyx_t_3 != -1)) {
+        __Pyx_RaiseBufferIndexError(__pyx_t_3);
+        __PYX_ERR(0, 222, __pyx_L1_error)
+      }
+
+      /* "bresenham3D.pyx":216
+ *             ):
+ *                 continue
+ *             idx = bresenham3DWithMaskSingleInline(             # <<<<<<<<<<<<<<
+ *                 contact_voxel_1[0],
+ *                 contact_voxel_1[1],
+ */
+      __pyx_t_18.__pyx_n = 1;
+      __pyx_t_18.mask = __pyx_v_mask;
+      __pyx_t_3 = __pyx_f_11bresenham3D_bresenham3DWithMaskSingleInline((*((long *) ( /* dim=0 */ (__pyx_v_contact_voxel_1.data + __pyx_t_11 * __pyx_v_contact_voxel_1.strides[0]) ))), (*((long *) ( /* dim=0 */ (__pyx_v_contact_voxel_1.data + __pyx_t_12 * __pyx_v_contact_voxel_1.strides[0]) ))), (*((long *) ( /* dim=0 */ (__pyx_v_contact_voxel_1.data + __pyx_t_13 * __pyx_v_contact_voxel_1.strides[0]) ))), (*((long *) ( /* dim=0 */ (__pyx_v_contact_voxel_2.data + __pyx_t_14 * __pyx_v_contact_voxel_2.strides[0]) ))), (*((long *) ( /* dim=0 */ (__pyx_v_contact_voxel_2.data + __pyx_t_15 * __pyx_v_contact_voxel_2.strides[0]) ))), (*((long *) ( /* dim=0 */ (__pyx_v_contact_voxel_2.data + __pyx_t_16 * __pyx_v_contact_voxel_2.strides[0]) ))), __pyx_v_points, &__pyx_t_18); if (unlikely(__pyx_t_3 == ((int)-1) && PyErr_Occurred())) __PYX_ERR(0, 216, __pyx_L1_error)
+      __pyx_v_idx = __pyx_t_3;
+
+      /* "bresenham3D.pyx":226
+ *                 mask=mask,
+ *             )
+ *             if idx>0:             # <<<<<<<<<<<<<<
+ *                 found_contact_voxels = True
+ *                 all_valid_voxels.update(points[:idx])
+ */
+      __pyx_t_10 = (__pyx_v_idx > 0);
+      if (__pyx_t_10) {
+
+        /* "bresenham3D.pyx":227
+ *             )
+ *             if idx>0:
+ *                 found_contact_voxels = True             # <<<<<<<<<<<<<<
+ *                 all_valid_voxels.update(points[:idx])
+ *     for (x,y,z) in all_valid_voxels:
+ */
+        __Pyx_INCREF(Py_True);
+        __Pyx_DECREF_SET(__pyx_v_found_contact_voxels, ((PyBoolObject *)Py_True));
+
+        /* "bresenham3D.pyx":228
+ *             if idx>0:
+ *                 found_contact_voxels = True
+ *                 all_valid_voxels.update(points[:idx])             # <<<<<<<<<<<<<<
+ *     for (x,y,z) in all_valid_voxels:
+ *         current_pair_contact_sites[x,y,z] = 1
+ */
+        __pyx_t_8 = __Pyx_PyList_GetSlice(__pyx_v_points, 0, __pyx_v_idx); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 228, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_8);
+        __pyx_t_19 = __Pyx_CallUnboundCMethod1(&__pyx_umethod_PySet_Type_update, __pyx_v_all_valid_voxels, __pyx_t_8); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 228, __pyx_L1_error)
+        __Pyx_GOTREF(__pyx_t_19);
+        __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
+        __Pyx_DECREF(__pyx_t_19); __pyx_t_19 = 0;
+
+        /* "bresenham3D.pyx":226
+ *                 mask=mask,
+ *             )
+ *             if idx>0:             # <<<<<<<<<<<<<<
+ *                 found_contact_voxels = True
+ *                 all_valid_voxels.update(points[:idx])
+ */
+      }
+
+      /* "bresenham3D.pyx":204
+ *     cdef bool found_contact_voxels = False
+ *     for i, sublist in enumerate(contact_voxels_list_of_lists):
+ *         for j in sublist:             # <<<<<<<<<<<<<<
+ *             contact_voxel_1 = object_1_surface_voxel_coordinates[i]
+ *             contact_voxel_2 = object_2_surface_voxel_coordinates[j]
+ */
+      __pyx_L7_continue:;
     }
-    __pyx_L75:;
-    __Pyx_INCREF(__pyx_v_found_matches);
-    __Pyx_DECREF_SET(__pyx_v_sigindex_matches, __pyx_v_found_matches);
-    __Pyx_INCREF(__pyx_v_found_candidates);
-    __Pyx_DECREF_SET(__pyx_v_sigindex_candidates, __pyx_v_found_candidates);
-    __pyx_t_2 = (PyList_GET_SIZE(__pyx_v_found_matches) != 0);
-    if (!__pyx_t_2) {
+    __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
+
+    /* "bresenham3D.pyx":203
+ *     cdef tuple point
+ *     cdef bool found_contact_voxels = False
+ *     for i, sublist in enumerate(contact_voxels_list_of_lists):             # <<<<<<<<<<<<<<
+ *         for j in sublist:
+ *             contact_voxel_1 = object_1_surface_voxel_coordinates[i]
+ */
+  }
+  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
+
+  /* "bresenham3D.pyx":229
+ *                 found_contact_voxels = True
+ *                 all_valid_voxels.update(points[:idx])
+ *     for (x,y,z) in all_valid_voxels:             # <<<<<<<<<<<<<<
+ *         current_pair_contact_sites[x,y,z] = 1
+ *     return found_contact_voxels
+ */
+  __pyx_t_5 = 0;
+  __pyx_t_6 = __Pyx_set_iterator(__pyx_v_all_valid_voxels, 1, (&__pyx_t_7), (&__pyx_t_2)); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 229, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_6);
+  __Pyx_XDECREF(__pyx_t_1);
+  __pyx_t_1 = __pyx_t_6;
+  __pyx_t_6 = 0;
+  while (1) {
+    __pyx_t_3 = __Pyx_set_iter_next(__pyx_t_1, __pyx_t_7, &__pyx_t_5, &__pyx_t_6, __pyx_t_2);
+    if (unlikely(__pyx_t_3 == 0)) break;
+    if (unlikely(__pyx_t_3 == -1)) __PYX_ERR(0, 229, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_6);
+    if ((likely(PyTuple_CheckExact(__pyx_t_6))) || (PyList_CheckExact(__pyx_t_6))) {
+      PyObject* sequence = __pyx_t_6;
+      Py_ssize_t size = __Pyx_PySequence_SIZE(sequence);
+      if (unlikely(size != 3)) {
+        if (size > 3) __Pyx_RaiseTooManyValuesError(3);
+        else if (size >= 0) __Pyx_RaiseNeedMoreValuesError(size);
+        __PYX_ERR(0, 229, __pyx_L1_error)
+      }
+      #if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
+      if (likely(PyTuple_CheckExact(sequence))) {
+        __pyx_t_19 = PyTuple_GET_ITEM(sequence, 0); 
+        __pyx_t_8 = PyTuple_GET_ITEM(sequence, 1); 
+        __pyx_t_20 = PyTuple_GET_ITEM(sequence, 2); 
+      } else {
+        __pyx_t_19 = PyList_GET_ITEM(sequence, 0); 
+        __pyx_t_8 = PyList_GET_ITEM(sequence, 1); 
+        __pyx_t_20 = PyList_GET_ITEM(sequence, 2); 
+      }
+      __Pyx_INCREF(__pyx_t_19);
+      __Pyx_INCREF(__pyx_t_8);
+      __Pyx_INCREF(__pyx_t_20);
+      #else
+      __pyx_t_19 = PySequence_ITEM(sequence, 0); if (unlikely(!__pyx_t_19)) __PYX_ERR(0, 229, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_19);
+      __pyx_t_8 = PySequence_ITEM(sequence, 1); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 229, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_8);
+      __pyx_t_20 = PySequence_ITEM(sequence, 2); if (unlikely(!__pyx_t_20)) __PYX_ERR(0, 229, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_20);
+      #endif
+      __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
     } else {
-      __pyx_t_4 = __pyx_t_2;
-      goto __pyx_L90_bool_binop_done;
+      Py_ssize_t index = -1;
+      __pyx_t_21 = PyObject_GetIter(__pyx_t_6); if (unlikely(!__pyx_t_21)) __PYX_ERR(0, 229, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_21);
+      __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
+      __pyx_t_22 = __Pyx_PyObject_GetIterNextFunc(__pyx_t_21);
+      index = 0; __pyx_t_19 = __pyx_t_22(__pyx_t_21); if (unlikely(!__pyx_t_19)) goto __pyx_L17_unpacking_failed;
+      __Pyx_GOTREF(__pyx_t_19);
+      index = 1; __pyx_t_8 = __pyx_t_22(__pyx_t_21); if (unlikely(!__pyx_t_8)) goto __pyx_L17_unpacking_failed;
+      __Pyx_GOTREF(__pyx_t_8);
+      index = 2; __pyx_t_20 = __pyx_t_22(__pyx_t_21); if (unlikely(!__pyx_t_20)) goto __pyx_L17_unpacking_failed;
+      __Pyx_GOTREF(__pyx_t_20);
+      if (__Pyx_IternextUnpackEndCheck(__pyx_t_22(__pyx_t_21), 3) < 0) __PYX_ERR(0, 229, __pyx_L1_error)
+      __pyx_t_22 = NULL;
+      __Pyx_DECREF(__pyx_t_21); __pyx_t_21 = 0;
+      goto __pyx_L18_unpacking_done;
+      __pyx_L17_unpacking_failed:;
+      __Pyx_DECREF(__pyx_t_21); __pyx_t_21 = 0;
+      __pyx_t_22 = NULL;
+      if (__Pyx_IterFinish() == 0) __Pyx_RaiseNeedMoreValuesError(index);
+      __PYX_ERR(0, 229, __pyx_L1_error)
+      __pyx_L18_unpacking_done:;
     }
-    __pyx_t_2 = (PyList_GET_SIZE(__pyx_v_found_candidates) != 0);
-    __pyx_t_4 = __pyx_t_2;
-    __pyx_L90_bool_binop_done:;
-    __pyx_t_2 = (!__pyx_t_4);
-    if (__pyx_t_2) {
-      goto __pyx_L74_break;
+    __pyx_t_3 = __Pyx_PyInt_As_int(__pyx_t_19); if (unlikely((__pyx_t_3 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 229, __pyx_L1_error)
+    __Pyx_DECREF(__pyx_t_19); __pyx_t_19 = 0;
+    __pyx_t_4 = __Pyx_PyInt_As_int(__pyx_t_8); if (unlikely((__pyx_t_4 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 229, __pyx_L1_error)
+    __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
+    __pyx_t_23 = __Pyx_PyInt_As_int(__pyx_t_20); if (unlikely((__pyx_t_23 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 229, __pyx_L1_error)
+    __Pyx_DECREF(__pyx_t_20); __pyx_t_20 = 0;
+    __pyx_v_x = __pyx_t_3;
+    __pyx_v_y = __pyx_t_4;
+    __pyx_v_z = __pyx_t_23;
+
+    /* "bresenham3D.pyx":230
+ *                 all_valid_voxels.update(points[:idx])
+ *     for (x,y,z) in all_valid_voxels:
+ *         current_pair_contact_sites[x,y,z] = 1             # <<<<<<<<<<<<<<
+ *     return found_contact_voxels
+ */
+    __pyx_t_16 = __pyx_v_x;
+    __pyx_t_15 = __pyx_v_y;
+    __pyx_t_14 = __pyx_v_z;
+    __pyx_t_23 = -1;
+    if (__pyx_t_16 < 0) {
+      __pyx_t_16 += __pyx_v_current_pair_contact_sites.shape[0];
+      if (unlikely(__pyx_t_16 < 0)) __pyx_t_23 = 0;
+    } else if (unlikely(__pyx_t_16 >= __pyx_v_current_pair_contact_sites.shape[0])) __pyx_t_23 = 0;
+    if (__pyx_t_15 < 0) {
+      __pyx_t_15 += __pyx_v_current_pair_contact_sites.shape[1];
+      if (unlikely(__pyx_t_15 < 0)) __pyx_t_23 = 1;
+    } else if (unlikely(__pyx_t_15 >= __pyx_v_current_pair_contact_sites.shape[1])) __pyx_t_23 = 1;
+    if (__pyx_t_14 < 0) {
+      __pyx_t_14 += __pyx_v_current_pair_contact_sites.shape[2];
+      if (unlikely(__pyx_t_14 < 0)) __pyx_t_23 = 2;
+    } else if (unlikely(__pyx_t_14 >= __pyx_v_current_pair_contact_sites.shape[2])) __pyx_t_23 = 2;
+    if (unlikely(__pyx_t_23 != -1)) {
+      __Pyx_RaiseBufferIndexError(__pyx_t_23);
+      __PYX_ERR(0, 230, __pyx_L1_error)
     }
+    *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_current_pair_contact_sites.data + __pyx_t_16 * __pyx_v_current_pair_contact_sites.strides[0]) ) + __pyx_t_15 * __pyx_v_current_pair_contact_sites.strides[1]) ) + __pyx_t_14 * __pyx_v_current_pair_contact_sites.strides[2]) )) = 1;
   }
-  __Pyx_DECREF(__pyx_t_13); __pyx_t_13 = 0;
-  goto __pyx_L92_for_end;
-  __pyx_L74_break:;
-  __Pyx_DECREF(__pyx_t_13); __pyx_t_13 = 0;
-  goto __pyx_L92_for_end;
-  __pyx_L92_for_end:;
-  __Pyx_INCREF(__pyx_v_sigindex_matches);
-  __pyx_v_candidates = __pyx_v_sigindex_matches;
-  __pyx_t_2 = (PyList_GET_SIZE(__pyx_v_candidates) != 0);
-  __pyx_t_4 = (!__pyx_t_2);
-  if (unlikely(__pyx_t_4)) {
-    __pyx_t_13 = __Pyx_PyObject_Call(__pyx_builtin_TypeError, __pyx_tuple__12, NULL); if (unlikely(!__pyx_t_13)) __PYX_ERR(0, 103, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_13);
-    __Pyx_Raise(__pyx_t_13, 0, 0, 0);
-    __Pyx_DECREF(__pyx_t_13); __pyx_t_13 = 0;
-    __PYX_ERR(0, 103, __pyx_L1_error)
-  }
-  __pyx_t_14 = __Pyx_PyList_GET_SIZE(__pyx_v_candidates); if (unlikely(__pyx_t_14 == ((Py_ssize_t)-1))) __PYX_ERR(0, 103, __pyx_L1_error)
-  __pyx_t_4 = (__pyx_t_14 > 1);
-  if (unlikely(__pyx_t_4)) {
-    __pyx_t_13 = __Pyx_PyObject_Call(__pyx_builtin_TypeError, __pyx_tuple__13, NULL); if (unlikely(!__pyx_t_13)) __PYX_ERR(0, 103, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_13);
-    __Pyx_Raise(__pyx_t_13, 0, 0, 0);
-    __Pyx_DECREF(__pyx_t_13); __pyx_t_13 = 0;
-    __PYX_ERR(0, 103, __pyx_L1_error)
-  }
-  /*else*/ {
-    __Pyx_XDECREF(__pyx_r);
-    if (unlikely(__pyx_v_signatures == Py_None)) {
-      PyErr_SetString(PyExc_TypeError, "'NoneType' object is not subscriptable");
-      __PYX_ERR(0, 103, __pyx_L1_error)
-    }
-    __pyx_t_13 = __Pyx_GetItemInt_List(__pyx_v_candidates, 0, long, 1, __Pyx_PyInt_From_long, 1, 0, 1); if (unlikely(!__pyx_t_13)) __PYX_ERR(0, 103, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_13);
-    __pyx_t_16 = __Pyx_PyDict_GetItem(((PyObject*)__pyx_v_signatures), __pyx_t_13); if (unlikely(!__pyx_t_16)) __PYX_ERR(0, 103, __pyx_L1_error)
-    __Pyx_GOTREF(__pyx_t_16);
-    __Pyx_DECREF(__pyx_t_13); __pyx_t_13 = 0;
-    __pyx_r = __pyx_t_16;
-    __pyx_t_16 = 0;
-    goto __pyx_L0;
-  }
+  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
+
+  /* "bresenham3D.pyx":231
+ *     for (x,y,z) in all_valid_voxels:
+ *         current_pair_contact_sites[x,y,z] = 1
+ *     return found_contact_voxels             # <<<<<<<<<<<<<<
+ */
+  __Pyx_XDECREF(__pyx_r);
+  __Pyx_INCREF((PyObject *)__pyx_v_found_contact_voxels);
+  __pyx_r = ((PyObject *)__pyx_v_found_contact_voxels);
+  goto __pyx_L0;
+
+  /* "bresenham3D.pyx":191
+ *     return output_list
+ * 
+ * def bresenham_3D_lines(list contact_voxels_list_of_lists,             # <<<<<<<<<<<<<<
+ *     long  [:,:] object_1_surface_voxel_coordinates,
+ *     long  [:,:] object_2_surface_voxel_coordinates,
+ */
 
   /* function exit code */
   __pyx_L1_error:;
   __Pyx_XDECREF(__pyx_t_1);
   __Pyx_XDECREF(__pyx_t_6);
-  __Pyx_XDECREF(__pyx_t_13);
-  __Pyx_XDECREF(__pyx_t_16);
-  __Pyx_XDECREF(__pyx_t_17);
-  __Pyx_AddTraceback("bresenham3D.__pyx_fused_cpdef", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __Pyx_XDECREF(__pyx_t_8);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_t_9, 1);
+  __Pyx_XDECREF(__pyx_t_19);
+  __Pyx_XDECREF(__pyx_t_20);
+  __Pyx_XDECREF(__pyx_t_21);
+  __Pyx_AddTraceback("bresenham3D.bresenham_3D_lines", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_r = NULL;
   __pyx_L0:;
-  __Pyx_XDECREF(__pyx_v_search_list);
-  __Pyx_XDECREF(__pyx_v_sigindex_node);
-  __Pyx_XDECREF(__pyx_v_dest_sig);
-  __Pyx_XDECREF((PyObject *)__pyx_v_ndarray);
-  __Pyx_XDECREF(__pyx_v_arg_as_memoryview);
-  __Pyx_XDECREF(__pyx_v_arg);
-  __Pyx_XDECREF(__pyx_v_dtype);
-  __Pyx_XDECREF(__pyx_v_arg_base);
-  __Pyx_XDECREF(__pyx_v_sig);
-  __Pyx_XDECREF(__pyx_v_sig_series);
-  __Pyx_XDECREF(__pyx_v_last_type);
-  __Pyx_XDECREF(__pyx_v_sig_type);
-  __Pyx_XDECREF(__pyx_v_sigindex_matches);
-  __Pyx_XDECREF(__pyx_v_sigindex_candidates);
-  __Pyx_XDECREF(__pyx_v_dst_type);
-  __Pyx_XDECREF(__pyx_v_found_matches);
-  __Pyx_XDECREF(__pyx_v_found_candidates);
-  __Pyx_XDECREF(__pyx_v_sn);
-  __Pyx_XDECREF(__pyx_v_type_match);
-  __Pyx_XDECREF(__pyx_v_candidates);
-  __Pyx_XDECREF(__pyx_v_kwargs);
-  __Pyx_XGIVEREF(__pyx_r);
-  __Pyx_RefNannyFinishContext();
-  return __pyx_r;
-}
-
-/* Python wrapper */
-static PyObject *__pyx_fuse_0__pyx_pw_11bresenham3D_7find_boundary(PyObject *__pyx_self, PyObject *__pyx_args, PyObject *__pyx_kwds); /*proto*/
-static PyMethodDef __pyx_fuse_0__pyx_mdef_11bresenham3D_7find_boundary = {"__pyx_fuse_0find_boundary", (PyCFunction)(void*)(PyCFunctionWithKeywords)__pyx_fuse_0__pyx_pw_11bresenham3D_7find_boundary, METH_VARARGS|METH_KEYWORDS, 0};
-static PyObject *__pyx_fuse_0__pyx_pw_11bresenham3D_7find_boundary(PyObject *__pyx_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
-  __Pyx_memviewslice __pyx_v_volume = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_surface_voxels = { 0, 0, { 0 }, { 0 }, { 0 } };
-  CYTHON_UNUSED Py_ssize_t __pyx_nargs;
-  CYTHON_UNUSED PyObject *const *__pyx_kwvalues;
-  PyObject* values[2] = {0,0};
-  int __pyx_lineno = 0;
-  const char *__pyx_filename = NULL;
-  int __pyx_clineno = 0;
-  PyObject *__pyx_r = 0;
-  __Pyx_RefNannyDeclarations
-  __Pyx_RefNannySetupContext("find_boundary (wrapper)", 0);
-  #if CYTHON_ASSUME_SAFE_MACROS
-  __pyx_nargs = PyTuple_GET_SIZE(__pyx_args);
-  #else
-  __pyx_nargs = PyTuple_Size(__pyx_args); if (unlikely(__pyx_nargs < 0)) return NULL;
-  #endif
-  __pyx_kwvalues = __Pyx_KwValues_VARARGS(__pyx_args, __pyx_nargs);
-  {
-    PyObject **__pyx_pyargnames[] = {&__pyx_n_s_volume,&__pyx_n_s_surface_voxels,0};
-    if (__pyx_kwds) {
-      Py_ssize_t kw_args;
-      switch (__pyx_nargs) {
-        case  2: values[1] = __Pyx_Arg_VARARGS(__pyx_args, 1);
-        CYTHON_FALLTHROUGH;
-        case  1: values[0] = __Pyx_Arg_VARARGS(__pyx_args, 0);
-        CYTHON_FALLTHROUGH;
-        case  0: break;
-        default: goto __pyx_L5_argtuple_error;
-      }
-      kw_args = __Pyx_NumKwargs_VARARGS(__pyx_kwds);
-      switch (__pyx_nargs) {
-        case  0:
-        if (likely((values[0] = __Pyx_GetKwValue_VARARGS(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_volume)) != 0)) {
-          (void)__Pyx_Arg_NewRef_VARARGS(values[0]);
-          kw_args--;
-        }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L3_error)
-        else goto __pyx_L5_argtuple_error;
-        CYTHON_FALLTHROUGH;
-        case  1:
-        if (likely((values[1] = __Pyx_GetKwValue_VARARGS(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_surface_voxels)) != 0)) {
-          (void)__Pyx_Arg_NewRef_VARARGS(values[1]);
-          kw_args--;
-        }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L3_error)
-        else {
-          __Pyx_RaiseArgtupleInvalid("find_boundary", 1, 2, 2, 1); __PYX_ERR(0, 103, __pyx_L3_error)
-        }
-      }
-      if (unlikely(kw_args > 0)) {
-        const Py_ssize_t kwd_pos_args = __pyx_nargs;
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "find_boundary") < 0)) __PYX_ERR(0, 103, __pyx_L3_error)
-      }
-    } else if (unlikely(__pyx_nargs != 2)) {
-      goto __pyx_L5_argtuple_error;
-    } else {
-      values[0] = __Pyx_Arg_VARARGS(__pyx_args, 0);
-      values[1] = __Pyx_Arg_VARARGS(__pyx_args, 1);
-    }
-    __pyx_v_volume = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[0], PyBUF_WRITABLE); if (unlikely(!__pyx_v_volume.memview)) __PYX_ERR(0, 104, __pyx_L3_error)
-    __pyx_v_surface_voxels = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[1], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels.memview)) __PYX_ERR(0, 104, __pyx_L3_error)
-  }
-  goto __pyx_L6_skip;
-  __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("find_boundary", 1, 2, 2, __pyx_nargs); __PYX_ERR(0, 103, __pyx_L3_error)
-  __pyx_L6_skip:;
-  goto __pyx_L4_argument_unpacking_done;
-  __pyx_L3_error:;
-  {
-    Py_ssize_t __pyx_temp;
-    for (__pyx_temp=0; __pyx_temp < (Py_ssize_t)(sizeof(values)/sizeof(values[0])); ++__pyx_temp) {
-      __Pyx_Arg_XDECREF_VARARGS(values[__pyx_temp]);
-    }
-  }
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_volume, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_surface_voxels, 1);
-  __Pyx_AddTraceback("bresenham3D.find_boundary", __pyx_clineno, __pyx_lineno, __pyx_filename);
-  __Pyx_RefNannyFinishContext();
-  return NULL;
-  __pyx_L4_argument_unpacking_done:;
-  __pyx_r = __pyx_pf_11bresenham3D_6find_boundary(__pyx_self, __pyx_v_volume, __pyx_v_surface_voxels);
-
-  /* function exit code */
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_volume, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_surface_voxels, 1);
-  {
-    Py_ssize_t __pyx_temp;
-    for (__pyx_temp=0; __pyx_temp < (Py_ssize_t)(sizeof(values)/sizeof(values[0])); ++__pyx_temp) {
-      __Pyx_Arg_XDECREF_VARARGS(values[__pyx_temp]);
-    }
-  }
-  __Pyx_RefNannyFinishContext();
-  return __pyx_r;
-}
-
-static PyObject *__pyx_pf_11bresenham3D_6find_boundary(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_volume, __Pyx_memviewslice __pyx_v_surface_voxels) {
-  int __pyx_v_x;
-  int __pyx_v_y;
-  int __pyx_v_z;
-  int __pyx_v_nx;
-  int __pyx_v_ny;
-  int __pyx_v_nz;
-  unsigned char __pyx_v_voxel_value;
-  PyObject *__pyx_r = NULL;
-  __Pyx_RefNannyDeclarations
-  long __pyx_t_1;
-  long __pyx_t_2;
-  int __pyx_t_3;
-  long __pyx_t_4;
-  long __pyx_t_5;
-  int __pyx_t_6;
-  long __pyx_t_7;
-  long __pyx_t_8;
-  int __pyx_t_9;
-  Py_ssize_t __pyx_t_10;
-  Py_ssize_t __pyx_t_11;
-  Py_ssize_t __pyx_t_12;
-  int __pyx_t_13;
-  int __pyx_t_14;
-  int __pyx_t_15;
-  int __pyx_lineno = 0;
-  const char *__pyx_filename = NULL;
-  int __pyx_clineno = 0;
-  __Pyx_RefNannySetupContext("__pyx_fuse_0find_boundary", 1);
-
-  /* "bresenham3D.pyx":108
- * 
- *     cdef int x, y, z
- *     cdef int nx = volume.shape[0]             # <<<<<<<<<<<<<<
- *     cdef int ny = volume.shape[1]
- *     cdef int nz = volume.shape[2]
- */
-  __pyx_v_nx = (__pyx_v_volume.shape[0]);
-
-  /* "bresenham3D.pyx":109
- *     cdef int x, y, z
- *     cdef int nx = volume.shape[0]
- *     cdef int ny = volume.shape[1]             # <<<<<<<<<<<<<<
- *     cdef int nz = volume.shape[2]
- *     cdef uint_t voxel_value
- */
-  __pyx_v_ny = (__pyx_v_volume.shape[1]);
-
-  /* "bresenham3D.pyx":110
- *     cdef int nx = volume.shape[0]
- *     cdef int ny = volume.shape[1]
- *     cdef int nz = volume.shape[2]             # <<<<<<<<<<<<<<
- *     cdef uint_t voxel_value
- *     # Iterate over each voxel in the volume
- */
-  __pyx_v_nz = (__pyx_v_volume.shape[2]);
-
-  /* "bresenham3D.pyx":113
- *     cdef uint_t voxel_value
- *     # Iterate over each voxel in the volume
- *     for x in range(1, nx-1):             # <<<<<<<<<<<<<<
- *         for y in range(1, ny-1):
- *             for z in range(1, nz-1):
- */
-  __pyx_t_1 = (__pyx_v_nx - 1);
-  __pyx_t_2 = __pyx_t_1;
-  for (__pyx_t_3 = 1; __pyx_t_3 < __pyx_t_2; __pyx_t_3+=1) {
-    __pyx_v_x = __pyx_t_3;
-
-    /* "bresenham3D.pyx":114
- *     # Iterate over each voxel in the volume
- *     for x in range(1, nx-1):
- *         for y in range(1, ny-1):             # <<<<<<<<<<<<<<
- *             for z in range(1, nz-1):
- *                 # Get the value of the current voxel
- */
-    __pyx_t_4 = (__pyx_v_ny - 1);
-    __pyx_t_5 = __pyx_t_4;
-    for (__pyx_t_6 = 1; __pyx_t_6 < __pyx_t_5; __pyx_t_6+=1) {
-      __pyx_v_y = __pyx_t_6;
-
-      /* "bresenham3D.pyx":115
- *     for x in range(1, nx-1):
- *         for y in range(1, ny-1):
- *             for z in range(1, nz-1):             # <<<<<<<<<<<<<<
- *                 # Get the value of the current voxel
- *                 voxel_value = volume[x, y, z]
- */
-      __pyx_t_7 = (__pyx_v_nz - 1);
-      __pyx_t_8 = __pyx_t_7;
-      for (__pyx_t_9 = 1; __pyx_t_9 < __pyx_t_8; __pyx_t_9+=1) {
-        __pyx_v_z = __pyx_t_9;
-
-        /* "bresenham3D.pyx":117
- *             for z in range(1, nz-1):
- *                 # Get the value of the current voxel
- *                 voxel_value = volume[x, y, z]             # <<<<<<<<<<<<<<
- * 
- *                 # Check the 6 neighbors
- */
-        __pyx_t_10 = __pyx_v_x;
-        __pyx_t_11 = __pyx_v_y;
-        __pyx_t_12 = __pyx_v_z;
-        __pyx_t_13 = -1;
-        if (__pyx_t_10 < 0) {
-          __pyx_t_10 += __pyx_v_volume.shape[0];
-          if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 0;
-        } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-        if (__pyx_t_11 < 0) {
-          __pyx_t_11 += __pyx_v_volume.shape[1];
-          if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-        } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-        if (__pyx_t_12 < 0) {
-          __pyx_t_12 += __pyx_v_volume.shape[2];
-          if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 2;
-        } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-        if (unlikely(__pyx_t_13 != -1)) {
-          __Pyx_RaiseBufferIndexError(__pyx_t_13);
-          __PYX_ERR(0, 117, __pyx_L1_error)
-        }
-        __pyx_v_voxel_value = (*((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_10 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_12 * __pyx_v_volume.strides[2]) )));
-
-        /* "bresenham3D.pyx":120
- * 
- *                 # Check the 6 neighbors
- *                 if voxel_value>0:             # <<<<<<<<<<<<<<
- *                     if (volume[x-1, y, z] != voxel_value or
- *                         volume[x+1, y, z] != voxel_value or
- */
-        __pyx_t_14 = (__pyx_v_voxel_value > 0);
-        if (__pyx_t_14) {
-
-          /* "bresenham3D.pyx":121
- *                 # Check the 6 neighbors
- *                 if voxel_value>0:
- *                     if (volume[x-1, y, z] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x+1, y, z] != voxel_value or
- *                         volume[x, y-1, z] != voxel_value or
- */
-          __pyx_t_12 = (__pyx_v_x - 1);
-          __pyx_t_11 = __pyx_v_y;
-          __pyx_t_10 = __pyx_v_z;
-          __pyx_t_13 = -1;
-          if (__pyx_t_12 < 0) {
-            __pyx_t_12 += __pyx_v_volume.shape[0];
-            if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 0;
-          } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-          if (__pyx_t_11 < 0) {
-            __pyx_t_11 += __pyx_v_volume.shape[1];
-            if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-          } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-          if (__pyx_t_10 < 0) {
-            __pyx_t_10 += __pyx_v_volume.shape[2];
-            if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 2;
-          } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-          if (unlikely(__pyx_t_13 != -1)) {
-            __Pyx_RaiseBufferIndexError(__pyx_t_13);
-            __PYX_ERR(0, 121, __pyx_L1_error)
-          }
-          __pyx_t_15 = ((*((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_12 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_10 * __pyx_v_volume.strides[2]) ))) != __pyx_v_voxel_value);
-          if (!__pyx_t_15) {
-          } else {
-            __pyx_t_14 = __pyx_t_15;
-            goto __pyx_L11_bool_binop_done;
-          }
-
-          /* "bresenham3D.pyx":122
- *                 if voxel_value>0:
- *                     if (volume[x-1, y, z] != voxel_value or
- *                         volume[x+1, y, z] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x, y-1, z] != voxel_value or
- *                         volume[x, y+1, z] != voxel_value or
- */
-          __pyx_t_10 = (__pyx_v_x + 1);
-          __pyx_t_11 = __pyx_v_y;
-          __pyx_t_12 = __pyx_v_z;
-          __pyx_t_13 = -1;
-          if (__pyx_t_10 < 0) {
-            __pyx_t_10 += __pyx_v_volume.shape[0];
-            if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 0;
-          } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-          if (__pyx_t_11 < 0) {
-            __pyx_t_11 += __pyx_v_volume.shape[1];
-            if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-          } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-          if (__pyx_t_12 < 0) {
-            __pyx_t_12 += __pyx_v_volume.shape[2];
-            if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 2;
-          } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-          if (unlikely(__pyx_t_13 != -1)) {
-            __Pyx_RaiseBufferIndexError(__pyx_t_13);
-            __PYX_ERR(0, 122, __pyx_L1_error)
-          }
-          __pyx_t_15 = ((*((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_10 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_12 * __pyx_v_volume.strides[2]) ))) != __pyx_v_voxel_value);
-          if (!__pyx_t_15) {
-          } else {
-            __pyx_t_14 = __pyx_t_15;
-            goto __pyx_L11_bool_binop_done;
-          }
-
-          /* "bresenham3D.pyx":123
- *                     if (volume[x-1, y, z] != voxel_value or
- *                         volume[x+1, y, z] != voxel_value or
- *                         volume[x, y-1, z] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x, y+1, z] != voxel_value or
- *                         volume[x, y, z-1] != voxel_value or
- */
-          __pyx_t_12 = __pyx_v_x;
-          __pyx_t_11 = (__pyx_v_y - 1);
-          __pyx_t_10 = __pyx_v_z;
-          __pyx_t_13 = -1;
-          if (__pyx_t_12 < 0) {
-            __pyx_t_12 += __pyx_v_volume.shape[0];
-            if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 0;
-          } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-          if (__pyx_t_11 < 0) {
-            __pyx_t_11 += __pyx_v_volume.shape[1];
-            if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-          } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-          if (__pyx_t_10 < 0) {
-            __pyx_t_10 += __pyx_v_volume.shape[2];
-            if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 2;
-          } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-          if (unlikely(__pyx_t_13 != -1)) {
-            __Pyx_RaiseBufferIndexError(__pyx_t_13);
-            __PYX_ERR(0, 123, __pyx_L1_error)
-          }
-          __pyx_t_15 = ((*((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_12 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_10 * __pyx_v_volume.strides[2]) ))) != __pyx_v_voxel_value);
-          if (!__pyx_t_15) {
-          } else {
-            __pyx_t_14 = __pyx_t_15;
-            goto __pyx_L11_bool_binop_done;
-          }
-
-          /* "bresenham3D.pyx":124
- *                         volume[x+1, y, z] != voxel_value or
- *                         volume[x, y-1, z] != voxel_value or
- *                         volume[x, y+1, z] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x, y, z-1] != voxel_value or
- *                         volume[x, y, z+1] != voxel_value):
- */
-          __pyx_t_10 = __pyx_v_x;
-          __pyx_t_11 = (__pyx_v_y + 1);
-          __pyx_t_12 = __pyx_v_z;
-          __pyx_t_13 = -1;
-          if (__pyx_t_10 < 0) {
-            __pyx_t_10 += __pyx_v_volume.shape[0];
-            if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 0;
-          } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-          if (__pyx_t_11 < 0) {
-            __pyx_t_11 += __pyx_v_volume.shape[1];
-            if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-          } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-          if (__pyx_t_12 < 0) {
-            __pyx_t_12 += __pyx_v_volume.shape[2];
-            if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 2;
-          } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-          if (unlikely(__pyx_t_13 != -1)) {
-            __Pyx_RaiseBufferIndexError(__pyx_t_13);
-            __PYX_ERR(0, 124, __pyx_L1_error)
-          }
-          __pyx_t_15 = ((*((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_10 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_12 * __pyx_v_volume.strides[2]) ))) != __pyx_v_voxel_value);
-          if (!__pyx_t_15) {
-          } else {
-            __pyx_t_14 = __pyx_t_15;
-            goto __pyx_L11_bool_binop_done;
-          }
-
-          /* "bresenham3D.pyx":125
- *                         volume[x, y-1, z] != voxel_value or
- *                         volume[x, y+1, z] != voxel_value or
- *                         volume[x, y, z-1] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x, y, z+1] != voxel_value):
- *                         # Add the surface voxel coordinates to the list
- */
-          __pyx_t_12 = __pyx_v_x;
-          __pyx_t_11 = __pyx_v_y;
-          __pyx_t_10 = (__pyx_v_z - 1);
-          __pyx_t_13 = -1;
-          if (__pyx_t_12 < 0) {
-            __pyx_t_12 += __pyx_v_volume.shape[0];
-            if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 0;
-          } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-          if (__pyx_t_11 < 0) {
-            __pyx_t_11 += __pyx_v_volume.shape[1];
-            if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-          } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-          if (__pyx_t_10 < 0) {
-            __pyx_t_10 += __pyx_v_volume.shape[2];
-            if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 2;
-          } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-          if (unlikely(__pyx_t_13 != -1)) {
-            __Pyx_RaiseBufferIndexError(__pyx_t_13);
-            __PYX_ERR(0, 125, __pyx_L1_error)
-          }
-          __pyx_t_15 = ((*((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_12 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_10 * __pyx_v_volume.strides[2]) ))) != __pyx_v_voxel_value);
-          if (!__pyx_t_15) {
-          } else {
-            __pyx_t_14 = __pyx_t_15;
-            goto __pyx_L11_bool_binop_done;
-          }
-
-          /* "bresenham3D.pyx":126
- *                         volume[x, y+1, z] != voxel_value or
- *                         volume[x, y, z-1] != voxel_value or
- *                         volume[x, y, z+1] != voxel_value):             # <<<<<<<<<<<<<<
- *                         # Add the surface voxel coordinates to the list
- *                         surface_voxels[x, y, z] = 1
- */
-          __pyx_t_10 = __pyx_v_x;
-          __pyx_t_11 = __pyx_v_y;
-          __pyx_t_12 = (__pyx_v_z + 1);
-          __pyx_t_13 = -1;
-          if (__pyx_t_10 < 0) {
-            __pyx_t_10 += __pyx_v_volume.shape[0];
-            if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 0;
-          } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-          if (__pyx_t_11 < 0) {
-            __pyx_t_11 += __pyx_v_volume.shape[1];
-            if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-          } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-          if (__pyx_t_12 < 0) {
-            __pyx_t_12 += __pyx_v_volume.shape[2];
-            if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 2;
-          } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-          if (unlikely(__pyx_t_13 != -1)) {
-            __Pyx_RaiseBufferIndexError(__pyx_t_13);
-            __PYX_ERR(0, 126, __pyx_L1_error)
-          }
-          __pyx_t_15 = ((*((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_10 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_12 * __pyx_v_volume.strides[2]) ))) != __pyx_v_voxel_value);
-          __pyx_t_14 = __pyx_t_15;
-          __pyx_L11_bool_binop_done:;
-
-          /* "bresenham3D.pyx":121
- *                 # Check the 6 neighbors
- *                 if voxel_value>0:
- *                     if (volume[x-1, y, z] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x+1, y, z] != voxel_value or
- *                         volume[x, y-1, z] != voxel_value or
- */
-          if (__pyx_t_14) {
-
-            /* "bresenham3D.pyx":128
- *                         volume[x, y, z+1] != voxel_value):
- *                         # Add the surface voxel coordinates to the list
- *                         surface_voxels[x, y, z] = 1             # <<<<<<<<<<<<<<
- * 
- */
-            __pyx_t_12 = __pyx_v_x;
-            __pyx_t_11 = __pyx_v_y;
-            __pyx_t_10 = __pyx_v_z;
-            __pyx_t_13 = -1;
-            if (__pyx_t_12 < 0) {
-              __pyx_t_12 += __pyx_v_surface_voxels.shape[0];
-              if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 0;
-            } else if (unlikely(__pyx_t_12 >= __pyx_v_surface_voxels.shape[0])) __pyx_t_13 = 0;
-            if (__pyx_t_11 < 0) {
-              __pyx_t_11 += __pyx_v_surface_voxels.shape[1];
-              if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-            } else if (unlikely(__pyx_t_11 >= __pyx_v_surface_voxels.shape[1])) __pyx_t_13 = 1;
-            if (__pyx_t_10 < 0) {
-              __pyx_t_10 += __pyx_v_surface_voxels.shape[2];
-              if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 2;
-            } else if (unlikely(__pyx_t_10 >= __pyx_v_surface_voxels.shape[2])) __pyx_t_13 = 2;
-            if (unlikely(__pyx_t_13 != -1)) {
-              __Pyx_RaiseBufferIndexError(__pyx_t_13);
-              __PYX_ERR(0, 128, __pyx_L1_error)
-            }
-            *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_surface_voxels.data + __pyx_t_12 * __pyx_v_surface_voxels.strides[0]) ) + __pyx_t_11 * __pyx_v_surface_voxels.strides[1]) ) + __pyx_t_10 * __pyx_v_surface_voxels.strides[2]) )) = 1;
-
-            /* "bresenham3D.pyx":121
- *                 # Check the 6 neighbors
- *                 if voxel_value>0:
- *                     if (volume[x-1, y, z] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x+1, y, z] != voxel_value or
- *                         volume[x, y-1, z] != voxel_value or
- */
-          }
-
-          /* "bresenham3D.pyx":120
- * 
- *                 # Check the 6 neighbors
- *                 if voxel_value>0:             # <<<<<<<<<<<<<<
- *                     if (volume[x-1, y, z] != voxel_value or
- *                         volume[x+1, y, z] != voxel_value or
- */
-        }
-      }
-    }
-  }
-
-  /* "bresenham3D.pyx":103
- *     unsigned long long
- * 
- * def find_boundary(             # <<<<<<<<<<<<<<
- *     uint_t[:, :, :] volume, unsigned char[:,:,:] surface_voxels
- * ):
- */
-
-  /* function exit code */
-  __pyx_r = Py_None; __Pyx_INCREF(Py_None);
-  goto __pyx_L0;
-  __pyx_L1_error:;
-  __Pyx_AddTraceback("bresenham3D.find_boundary", __pyx_clineno, __pyx_lineno, __pyx_filename);
-  __pyx_r = NULL;
-  __pyx_L0:;
-  __Pyx_XGIVEREF(__pyx_r);
-  __Pyx_RefNannyFinishContext();
-  return __pyx_r;
-}
-
-/* Python wrapper */
-static PyObject *__pyx_fuse_1__pyx_pw_11bresenham3D_9find_boundary(PyObject *__pyx_self, PyObject *__pyx_args, PyObject *__pyx_kwds); /*proto*/
-static PyMethodDef __pyx_fuse_1__pyx_mdef_11bresenham3D_9find_boundary = {"__pyx_fuse_1find_boundary", (PyCFunction)(void*)(PyCFunctionWithKeywords)__pyx_fuse_1__pyx_pw_11bresenham3D_9find_boundary, METH_VARARGS|METH_KEYWORDS, 0};
-static PyObject *__pyx_fuse_1__pyx_pw_11bresenham3D_9find_boundary(PyObject *__pyx_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
-  __Pyx_memviewslice __pyx_v_volume = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_surface_voxels = { 0, 0, { 0 }, { 0 }, { 0 } };
-  CYTHON_UNUSED Py_ssize_t __pyx_nargs;
-  CYTHON_UNUSED PyObject *const *__pyx_kwvalues;
-  PyObject* values[2] = {0,0};
-  int __pyx_lineno = 0;
-  const char *__pyx_filename = NULL;
-  int __pyx_clineno = 0;
-  PyObject *__pyx_r = 0;
-  __Pyx_RefNannyDeclarations
-  __Pyx_RefNannySetupContext("find_boundary (wrapper)", 0);
-  #if CYTHON_ASSUME_SAFE_MACROS
-  __pyx_nargs = PyTuple_GET_SIZE(__pyx_args);
-  #else
-  __pyx_nargs = PyTuple_Size(__pyx_args); if (unlikely(__pyx_nargs < 0)) return NULL;
-  #endif
-  __pyx_kwvalues = __Pyx_KwValues_VARARGS(__pyx_args, __pyx_nargs);
-  {
-    PyObject **__pyx_pyargnames[] = {&__pyx_n_s_volume,&__pyx_n_s_surface_voxels,0};
-    if (__pyx_kwds) {
-      Py_ssize_t kw_args;
-      switch (__pyx_nargs) {
-        case  2: values[1] = __Pyx_Arg_VARARGS(__pyx_args, 1);
-        CYTHON_FALLTHROUGH;
-        case  1: values[0] = __Pyx_Arg_VARARGS(__pyx_args, 0);
-        CYTHON_FALLTHROUGH;
-        case  0: break;
-        default: goto __pyx_L5_argtuple_error;
-      }
-      kw_args = __Pyx_NumKwargs_VARARGS(__pyx_kwds);
-      switch (__pyx_nargs) {
-        case  0:
-        if (likely((values[0] = __Pyx_GetKwValue_VARARGS(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_volume)) != 0)) {
-          (void)__Pyx_Arg_NewRef_VARARGS(values[0]);
-          kw_args--;
-        }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L3_error)
-        else goto __pyx_L5_argtuple_error;
-        CYTHON_FALLTHROUGH;
-        case  1:
-        if (likely((values[1] = __Pyx_GetKwValue_VARARGS(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_surface_voxels)) != 0)) {
-          (void)__Pyx_Arg_NewRef_VARARGS(values[1]);
-          kw_args--;
-        }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L3_error)
-        else {
-          __Pyx_RaiseArgtupleInvalid("find_boundary", 1, 2, 2, 1); __PYX_ERR(0, 103, __pyx_L3_error)
-        }
-      }
-      if (unlikely(kw_args > 0)) {
-        const Py_ssize_t kwd_pos_args = __pyx_nargs;
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "find_boundary") < 0)) __PYX_ERR(0, 103, __pyx_L3_error)
-      }
-    } else if (unlikely(__pyx_nargs != 2)) {
-      goto __pyx_L5_argtuple_error;
-    } else {
-      values[0] = __Pyx_Arg_VARARGS(__pyx_args, 0);
-      values[1] = __Pyx_Arg_VARARGS(__pyx_args, 1);
-    }
-    __pyx_v_volume = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_short(values[0], PyBUF_WRITABLE); if (unlikely(!__pyx_v_volume.memview)) __PYX_ERR(0, 104, __pyx_L3_error)
-    __pyx_v_surface_voxels = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[1], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels.memview)) __PYX_ERR(0, 104, __pyx_L3_error)
-  }
-  goto __pyx_L6_skip;
-  __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("find_boundary", 1, 2, 2, __pyx_nargs); __PYX_ERR(0, 103, __pyx_L3_error)
-  __pyx_L6_skip:;
-  goto __pyx_L4_argument_unpacking_done;
-  __pyx_L3_error:;
-  {
-    Py_ssize_t __pyx_temp;
-    for (__pyx_temp=0; __pyx_temp < (Py_ssize_t)(sizeof(values)/sizeof(values[0])); ++__pyx_temp) {
-      __Pyx_Arg_XDECREF_VARARGS(values[__pyx_temp]);
-    }
-  }
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_volume, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_surface_voxels, 1);
-  __Pyx_AddTraceback("bresenham3D.find_boundary", __pyx_clineno, __pyx_lineno, __pyx_filename);
-  __Pyx_RefNannyFinishContext();
-  return NULL;
-  __pyx_L4_argument_unpacking_done:;
-  __pyx_r = __pyx_pf_11bresenham3D_8find_boundary(__pyx_self, __pyx_v_volume, __pyx_v_surface_voxels);
-
-  /* function exit code */
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_volume, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_surface_voxels, 1);
-  {
-    Py_ssize_t __pyx_temp;
-    for (__pyx_temp=0; __pyx_temp < (Py_ssize_t)(sizeof(values)/sizeof(values[0])); ++__pyx_temp) {
-      __Pyx_Arg_XDECREF_VARARGS(values[__pyx_temp]);
-    }
-  }
-  __Pyx_RefNannyFinishContext();
-  return __pyx_r;
-}
-
-static PyObject *__pyx_pf_11bresenham3D_8find_boundary(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_volume, __Pyx_memviewslice __pyx_v_surface_voxels) {
-  int __pyx_v_x;
-  int __pyx_v_y;
-  int __pyx_v_z;
-  int __pyx_v_nx;
-  int __pyx_v_ny;
-  int __pyx_v_nz;
-  unsigned short __pyx_v_voxel_value;
-  PyObject *__pyx_r = NULL;
-  __Pyx_RefNannyDeclarations
-  long __pyx_t_1;
-  long __pyx_t_2;
-  int __pyx_t_3;
-  long __pyx_t_4;
-  long __pyx_t_5;
-  int __pyx_t_6;
-  long __pyx_t_7;
-  long __pyx_t_8;
-  int __pyx_t_9;
-  Py_ssize_t __pyx_t_10;
-  Py_ssize_t __pyx_t_11;
-  Py_ssize_t __pyx_t_12;
-  int __pyx_t_13;
-  int __pyx_t_14;
-  int __pyx_t_15;
-  int __pyx_lineno = 0;
-  const char *__pyx_filename = NULL;
-  int __pyx_clineno = 0;
-  __Pyx_RefNannySetupContext("__pyx_fuse_1find_boundary", 1);
-
-  /* "bresenham3D.pyx":108
- * 
- *     cdef int x, y, z
- *     cdef int nx = volume.shape[0]             # <<<<<<<<<<<<<<
- *     cdef int ny = volume.shape[1]
- *     cdef int nz = volume.shape[2]
- */
-  __pyx_v_nx = (__pyx_v_volume.shape[0]);
-
-  /* "bresenham3D.pyx":109
- *     cdef int x, y, z
- *     cdef int nx = volume.shape[0]
- *     cdef int ny = volume.shape[1]             # <<<<<<<<<<<<<<
- *     cdef int nz = volume.shape[2]
- *     cdef uint_t voxel_value
- */
-  __pyx_v_ny = (__pyx_v_volume.shape[1]);
-
-  /* "bresenham3D.pyx":110
- *     cdef int nx = volume.shape[0]
- *     cdef int ny = volume.shape[1]
- *     cdef int nz = volume.shape[2]             # <<<<<<<<<<<<<<
- *     cdef uint_t voxel_value
- *     # Iterate over each voxel in the volume
- */
-  __pyx_v_nz = (__pyx_v_volume.shape[2]);
-
-  /* "bresenham3D.pyx":113
- *     cdef uint_t voxel_value
- *     # Iterate over each voxel in the volume
- *     for x in range(1, nx-1):             # <<<<<<<<<<<<<<
- *         for y in range(1, ny-1):
- *             for z in range(1, nz-1):
- */
-  __pyx_t_1 = (__pyx_v_nx - 1);
-  __pyx_t_2 = __pyx_t_1;
-  for (__pyx_t_3 = 1; __pyx_t_3 < __pyx_t_2; __pyx_t_3+=1) {
-    __pyx_v_x = __pyx_t_3;
-
-    /* "bresenham3D.pyx":114
- *     # Iterate over each voxel in the volume
- *     for x in range(1, nx-1):
- *         for y in range(1, ny-1):             # <<<<<<<<<<<<<<
- *             for z in range(1, nz-1):
- *                 # Get the value of the current voxel
- */
-    __pyx_t_4 = (__pyx_v_ny - 1);
-    __pyx_t_5 = __pyx_t_4;
-    for (__pyx_t_6 = 1; __pyx_t_6 < __pyx_t_5; __pyx_t_6+=1) {
-      __pyx_v_y = __pyx_t_6;
-
-      /* "bresenham3D.pyx":115
- *     for x in range(1, nx-1):
- *         for y in range(1, ny-1):
- *             for z in range(1, nz-1):             # <<<<<<<<<<<<<<
- *                 # Get the value of the current voxel
- *                 voxel_value = volume[x, y, z]
- */
-      __pyx_t_7 = (__pyx_v_nz - 1);
-      __pyx_t_8 = __pyx_t_7;
-      for (__pyx_t_9 = 1; __pyx_t_9 < __pyx_t_8; __pyx_t_9+=1) {
-        __pyx_v_z = __pyx_t_9;
-
-        /* "bresenham3D.pyx":117
- *             for z in range(1, nz-1):
- *                 # Get the value of the current voxel
- *                 voxel_value = volume[x, y, z]             # <<<<<<<<<<<<<<
- * 
- *                 # Check the 6 neighbors
- */
-        __pyx_t_10 = __pyx_v_x;
-        __pyx_t_11 = __pyx_v_y;
-        __pyx_t_12 = __pyx_v_z;
-        __pyx_t_13 = -1;
-        if (__pyx_t_10 < 0) {
-          __pyx_t_10 += __pyx_v_volume.shape[0];
-          if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 0;
-        } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-        if (__pyx_t_11 < 0) {
-          __pyx_t_11 += __pyx_v_volume.shape[1];
-          if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-        } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-        if (__pyx_t_12 < 0) {
-          __pyx_t_12 += __pyx_v_volume.shape[2];
-          if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 2;
-        } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-        if (unlikely(__pyx_t_13 != -1)) {
-          __Pyx_RaiseBufferIndexError(__pyx_t_13);
-          __PYX_ERR(0, 117, __pyx_L1_error)
-        }
-        __pyx_v_voxel_value = (*((unsigned short *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_10 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_12 * __pyx_v_volume.strides[2]) )));
-
-        /* "bresenham3D.pyx":120
- * 
- *                 # Check the 6 neighbors
- *                 if voxel_value>0:             # <<<<<<<<<<<<<<
- *                     if (volume[x-1, y, z] != voxel_value or
- *                         volume[x+1, y, z] != voxel_value or
- */
-        __pyx_t_14 = (__pyx_v_voxel_value > 0);
-        if (__pyx_t_14) {
-
-          /* "bresenham3D.pyx":121
- *                 # Check the 6 neighbors
- *                 if voxel_value>0:
- *                     if (volume[x-1, y, z] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x+1, y, z] != voxel_value or
- *                         volume[x, y-1, z] != voxel_value or
- */
-          __pyx_t_12 = (__pyx_v_x - 1);
-          __pyx_t_11 = __pyx_v_y;
-          __pyx_t_10 = __pyx_v_z;
-          __pyx_t_13 = -1;
-          if (__pyx_t_12 < 0) {
-            __pyx_t_12 += __pyx_v_volume.shape[0];
-            if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 0;
-          } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-          if (__pyx_t_11 < 0) {
-            __pyx_t_11 += __pyx_v_volume.shape[1];
-            if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-          } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-          if (__pyx_t_10 < 0) {
-            __pyx_t_10 += __pyx_v_volume.shape[2];
-            if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 2;
-          } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-          if (unlikely(__pyx_t_13 != -1)) {
-            __Pyx_RaiseBufferIndexError(__pyx_t_13);
-            __PYX_ERR(0, 121, __pyx_L1_error)
-          }
-          __pyx_t_15 = ((*((unsigned short *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_12 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_10 * __pyx_v_volume.strides[2]) ))) != __pyx_v_voxel_value);
-          if (!__pyx_t_15) {
-          } else {
-            __pyx_t_14 = __pyx_t_15;
-            goto __pyx_L11_bool_binop_done;
-          }
-
-          /* "bresenham3D.pyx":122
- *                 if voxel_value>0:
- *                     if (volume[x-1, y, z] != voxel_value or
- *                         volume[x+1, y, z] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x, y-1, z] != voxel_value or
- *                         volume[x, y+1, z] != voxel_value or
- */
-          __pyx_t_10 = (__pyx_v_x + 1);
-          __pyx_t_11 = __pyx_v_y;
-          __pyx_t_12 = __pyx_v_z;
-          __pyx_t_13 = -1;
-          if (__pyx_t_10 < 0) {
-            __pyx_t_10 += __pyx_v_volume.shape[0];
-            if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 0;
-          } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-          if (__pyx_t_11 < 0) {
-            __pyx_t_11 += __pyx_v_volume.shape[1];
-            if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-          } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-          if (__pyx_t_12 < 0) {
-            __pyx_t_12 += __pyx_v_volume.shape[2];
-            if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 2;
-          } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-          if (unlikely(__pyx_t_13 != -1)) {
-            __Pyx_RaiseBufferIndexError(__pyx_t_13);
-            __PYX_ERR(0, 122, __pyx_L1_error)
-          }
-          __pyx_t_15 = ((*((unsigned short *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_10 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_12 * __pyx_v_volume.strides[2]) ))) != __pyx_v_voxel_value);
-          if (!__pyx_t_15) {
-          } else {
-            __pyx_t_14 = __pyx_t_15;
-            goto __pyx_L11_bool_binop_done;
-          }
-
-          /* "bresenham3D.pyx":123
- *                     if (volume[x-1, y, z] != voxel_value or
- *                         volume[x+1, y, z] != voxel_value or
- *                         volume[x, y-1, z] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x, y+1, z] != voxel_value or
- *                         volume[x, y, z-1] != voxel_value or
- */
-          __pyx_t_12 = __pyx_v_x;
-          __pyx_t_11 = (__pyx_v_y - 1);
-          __pyx_t_10 = __pyx_v_z;
-          __pyx_t_13 = -1;
-          if (__pyx_t_12 < 0) {
-            __pyx_t_12 += __pyx_v_volume.shape[0];
-            if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 0;
-          } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-          if (__pyx_t_11 < 0) {
-            __pyx_t_11 += __pyx_v_volume.shape[1];
-            if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-          } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-          if (__pyx_t_10 < 0) {
-            __pyx_t_10 += __pyx_v_volume.shape[2];
-            if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 2;
-          } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-          if (unlikely(__pyx_t_13 != -1)) {
-            __Pyx_RaiseBufferIndexError(__pyx_t_13);
-            __PYX_ERR(0, 123, __pyx_L1_error)
-          }
-          __pyx_t_15 = ((*((unsigned short *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_12 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_10 * __pyx_v_volume.strides[2]) ))) != __pyx_v_voxel_value);
-          if (!__pyx_t_15) {
-          } else {
-            __pyx_t_14 = __pyx_t_15;
-            goto __pyx_L11_bool_binop_done;
-          }
-
-          /* "bresenham3D.pyx":124
- *                         volume[x+1, y, z] != voxel_value or
- *                         volume[x, y-1, z] != voxel_value or
- *                         volume[x, y+1, z] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x, y, z-1] != voxel_value or
- *                         volume[x, y, z+1] != voxel_value):
- */
-          __pyx_t_10 = __pyx_v_x;
-          __pyx_t_11 = (__pyx_v_y + 1);
-          __pyx_t_12 = __pyx_v_z;
-          __pyx_t_13 = -1;
-          if (__pyx_t_10 < 0) {
-            __pyx_t_10 += __pyx_v_volume.shape[0];
-            if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 0;
-          } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-          if (__pyx_t_11 < 0) {
-            __pyx_t_11 += __pyx_v_volume.shape[1];
-            if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-          } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-          if (__pyx_t_12 < 0) {
-            __pyx_t_12 += __pyx_v_volume.shape[2];
-            if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 2;
-          } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-          if (unlikely(__pyx_t_13 != -1)) {
-            __Pyx_RaiseBufferIndexError(__pyx_t_13);
-            __PYX_ERR(0, 124, __pyx_L1_error)
-          }
-          __pyx_t_15 = ((*((unsigned short *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_10 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_12 * __pyx_v_volume.strides[2]) ))) != __pyx_v_voxel_value);
-          if (!__pyx_t_15) {
-          } else {
-            __pyx_t_14 = __pyx_t_15;
-            goto __pyx_L11_bool_binop_done;
-          }
-
-          /* "bresenham3D.pyx":125
- *                         volume[x, y-1, z] != voxel_value or
- *                         volume[x, y+1, z] != voxel_value or
- *                         volume[x, y, z-1] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x, y, z+1] != voxel_value):
- *                         # Add the surface voxel coordinates to the list
- */
-          __pyx_t_12 = __pyx_v_x;
-          __pyx_t_11 = __pyx_v_y;
-          __pyx_t_10 = (__pyx_v_z - 1);
-          __pyx_t_13 = -1;
-          if (__pyx_t_12 < 0) {
-            __pyx_t_12 += __pyx_v_volume.shape[0];
-            if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 0;
-          } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-          if (__pyx_t_11 < 0) {
-            __pyx_t_11 += __pyx_v_volume.shape[1];
-            if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-          } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-          if (__pyx_t_10 < 0) {
-            __pyx_t_10 += __pyx_v_volume.shape[2];
-            if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 2;
-          } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-          if (unlikely(__pyx_t_13 != -1)) {
-            __Pyx_RaiseBufferIndexError(__pyx_t_13);
-            __PYX_ERR(0, 125, __pyx_L1_error)
-          }
-          __pyx_t_15 = ((*((unsigned short *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_12 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_10 * __pyx_v_volume.strides[2]) ))) != __pyx_v_voxel_value);
-          if (!__pyx_t_15) {
-          } else {
-            __pyx_t_14 = __pyx_t_15;
-            goto __pyx_L11_bool_binop_done;
-          }
-
-          /* "bresenham3D.pyx":126
- *                         volume[x, y+1, z] != voxel_value or
- *                         volume[x, y, z-1] != voxel_value or
- *                         volume[x, y, z+1] != voxel_value):             # <<<<<<<<<<<<<<
- *                         # Add the surface voxel coordinates to the list
- *                         surface_voxels[x, y, z] = 1
- */
-          __pyx_t_10 = __pyx_v_x;
-          __pyx_t_11 = __pyx_v_y;
-          __pyx_t_12 = (__pyx_v_z + 1);
-          __pyx_t_13 = -1;
-          if (__pyx_t_10 < 0) {
-            __pyx_t_10 += __pyx_v_volume.shape[0];
-            if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 0;
-          } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-          if (__pyx_t_11 < 0) {
-            __pyx_t_11 += __pyx_v_volume.shape[1];
-            if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-          } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-          if (__pyx_t_12 < 0) {
-            __pyx_t_12 += __pyx_v_volume.shape[2];
-            if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 2;
-          } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-          if (unlikely(__pyx_t_13 != -1)) {
-            __Pyx_RaiseBufferIndexError(__pyx_t_13);
-            __PYX_ERR(0, 126, __pyx_L1_error)
-          }
-          __pyx_t_15 = ((*((unsigned short *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_10 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_12 * __pyx_v_volume.strides[2]) ))) != __pyx_v_voxel_value);
-          __pyx_t_14 = __pyx_t_15;
-          __pyx_L11_bool_binop_done:;
-
-          /* "bresenham3D.pyx":121
- *                 # Check the 6 neighbors
- *                 if voxel_value>0:
- *                     if (volume[x-1, y, z] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x+1, y, z] != voxel_value or
- *                         volume[x, y-1, z] != voxel_value or
- */
-          if (__pyx_t_14) {
-
-            /* "bresenham3D.pyx":128
- *                         volume[x, y, z+1] != voxel_value):
- *                         # Add the surface voxel coordinates to the list
- *                         surface_voxels[x, y, z] = 1             # <<<<<<<<<<<<<<
- * 
- */
-            __pyx_t_12 = __pyx_v_x;
-            __pyx_t_11 = __pyx_v_y;
-            __pyx_t_10 = __pyx_v_z;
-            __pyx_t_13 = -1;
-            if (__pyx_t_12 < 0) {
-              __pyx_t_12 += __pyx_v_surface_voxels.shape[0];
-              if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 0;
-            } else if (unlikely(__pyx_t_12 >= __pyx_v_surface_voxels.shape[0])) __pyx_t_13 = 0;
-            if (__pyx_t_11 < 0) {
-              __pyx_t_11 += __pyx_v_surface_voxels.shape[1];
-              if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-            } else if (unlikely(__pyx_t_11 >= __pyx_v_surface_voxels.shape[1])) __pyx_t_13 = 1;
-            if (__pyx_t_10 < 0) {
-              __pyx_t_10 += __pyx_v_surface_voxels.shape[2];
-              if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 2;
-            } else if (unlikely(__pyx_t_10 >= __pyx_v_surface_voxels.shape[2])) __pyx_t_13 = 2;
-            if (unlikely(__pyx_t_13 != -1)) {
-              __Pyx_RaiseBufferIndexError(__pyx_t_13);
-              __PYX_ERR(0, 128, __pyx_L1_error)
-            }
-            *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_surface_voxels.data + __pyx_t_12 * __pyx_v_surface_voxels.strides[0]) ) + __pyx_t_11 * __pyx_v_surface_voxels.strides[1]) ) + __pyx_t_10 * __pyx_v_surface_voxels.strides[2]) )) = 1;
-
-            /* "bresenham3D.pyx":121
- *                 # Check the 6 neighbors
- *                 if voxel_value>0:
- *                     if (volume[x-1, y, z] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x+1, y, z] != voxel_value or
- *                         volume[x, y-1, z] != voxel_value or
- */
-          }
-
-          /* "bresenham3D.pyx":120
- * 
- *                 # Check the 6 neighbors
- *                 if voxel_value>0:             # <<<<<<<<<<<<<<
- *                     if (volume[x-1, y, z] != voxel_value or
- *                         volume[x+1, y, z] != voxel_value or
- */
-        }
-      }
-    }
-  }
-
-  /* "bresenham3D.pyx":103
- *     unsigned long long
- * 
- * def find_boundary(             # <<<<<<<<<<<<<<
- *     uint_t[:, :, :] volume, unsigned char[:,:,:] surface_voxels
- * ):
- */
-
-  /* function exit code */
-  __pyx_r = Py_None; __Pyx_INCREF(Py_None);
-  goto __pyx_L0;
-  __pyx_L1_error:;
-  __Pyx_AddTraceback("bresenham3D.find_boundary", __pyx_clineno, __pyx_lineno, __pyx_filename);
-  __pyx_r = NULL;
-  __pyx_L0:;
-  __Pyx_XGIVEREF(__pyx_r);
-  __Pyx_RefNannyFinishContext();
-  return __pyx_r;
-}
-
-/* Python wrapper */
-static PyObject *__pyx_fuse_2__pyx_pw_11bresenham3D_11find_boundary(PyObject *__pyx_self, PyObject *__pyx_args, PyObject *__pyx_kwds); /*proto*/
-static PyMethodDef __pyx_fuse_2__pyx_mdef_11bresenham3D_11find_boundary = {"__pyx_fuse_2find_boundary", (PyCFunction)(void*)(PyCFunctionWithKeywords)__pyx_fuse_2__pyx_pw_11bresenham3D_11find_boundary, METH_VARARGS|METH_KEYWORDS, 0};
-static PyObject *__pyx_fuse_2__pyx_pw_11bresenham3D_11find_boundary(PyObject *__pyx_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
-  __Pyx_memviewslice __pyx_v_volume = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_surface_voxels = { 0, 0, { 0 }, { 0 }, { 0 } };
-  CYTHON_UNUSED Py_ssize_t __pyx_nargs;
-  CYTHON_UNUSED PyObject *const *__pyx_kwvalues;
-  PyObject* values[2] = {0,0};
-  int __pyx_lineno = 0;
-  const char *__pyx_filename = NULL;
-  int __pyx_clineno = 0;
-  PyObject *__pyx_r = 0;
-  __Pyx_RefNannyDeclarations
-  __Pyx_RefNannySetupContext("find_boundary (wrapper)", 0);
-  #if CYTHON_ASSUME_SAFE_MACROS
-  __pyx_nargs = PyTuple_GET_SIZE(__pyx_args);
-  #else
-  __pyx_nargs = PyTuple_Size(__pyx_args); if (unlikely(__pyx_nargs < 0)) return NULL;
-  #endif
-  __pyx_kwvalues = __Pyx_KwValues_VARARGS(__pyx_args, __pyx_nargs);
-  {
-    PyObject **__pyx_pyargnames[] = {&__pyx_n_s_volume,&__pyx_n_s_surface_voxels,0};
-    if (__pyx_kwds) {
-      Py_ssize_t kw_args;
-      switch (__pyx_nargs) {
-        case  2: values[1] = __Pyx_Arg_VARARGS(__pyx_args, 1);
-        CYTHON_FALLTHROUGH;
-        case  1: values[0] = __Pyx_Arg_VARARGS(__pyx_args, 0);
-        CYTHON_FALLTHROUGH;
-        case  0: break;
-        default: goto __pyx_L5_argtuple_error;
-      }
-      kw_args = __Pyx_NumKwargs_VARARGS(__pyx_kwds);
-      switch (__pyx_nargs) {
-        case  0:
-        if (likely((values[0] = __Pyx_GetKwValue_VARARGS(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_volume)) != 0)) {
-          (void)__Pyx_Arg_NewRef_VARARGS(values[0]);
-          kw_args--;
-        }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L3_error)
-        else goto __pyx_L5_argtuple_error;
-        CYTHON_FALLTHROUGH;
-        case  1:
-        if (likely((values[1] = __Pyx_GetKwValue_VARARGS(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_surface_voxels)) != 0)) {
-          (void)__Pyx_Arg_NewRef_VARARGS(values[1]);
-          kw_args--;
-        }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L3_error)
-        else {
-          __Pyx_RaiseArgtupleInvalid("find_boundary", 1, 2, 2, 1); __PYX_ERR(0, 103, __pyx_L3_error)
-        }
-      }
-      if (unlikely(kw_args > 0)) {
-        const Py_ssize_t kwd_pos_args = __pyx_nargs;
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "find_boundary") < 0)) __PYX_ERR(0, 103, __pyx_L3_error)
-      }
-    } else if (unlikely(__pyx_nargs != 2)) {
-      goto __pyx_L5_argtuple_error;
-    } else {
-      values[0] = __Pyx_Arg_VARARGS(__pyx_args, 0);
-      values[1] = __Pyx_Arg_VARARGS(__pyx_args, 1);
-    }
-    __pyx_v_volume = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_int(values[0], PyBUF_WRITABLE); if (unlikely(!__pyx_v_volume.memview)) __PYX_ERR(0, 104, __pyx_L3_error)
-    __pyx_v_surface_voxels = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[1], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels.memview)) __PYX_ERR(0, 104, __pyx_L3_error)
-  }
-  goto __pyx_L6_skip;
-  __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("find_boundary", 1, 2, 2, __pyx_nargs); __PYX_ERR(0, 103, __pyx_L3_error)
-  __pyx_L6_skip:;
-  goto __pyx_L4_argument_unpacking_done;
-  __pyx_L3_error:;
-  {
-    Py_ssize_t __pyx_temp;
-    for (__pyx_temp=0; __pyx_temp < (Py_ssize_t)(sizeof(values)/sizeof(values[0])); ++__pyx_temp) {
-      __Pyx_Arg_XDECREF_VARARGS(values[__pyx_temp]);
-    }
-  }
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_volume, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_surface_voxels, 1);
-  __Pyx_AddTraceback("bresenham3D.find_boundary", __pyx_clineno, __pyx_lineno, __pyx_filename);
-  __Pyx_RefNannyFinishContext();
-  return NULL;
-  __pyx_L4_argument_unpacking_done:;
-  __pyx_r = __pyx_pf_11bresenham3D_10find_boundary(__pyx_self, __pyx_v_volume, __pyx_v_surface_voxels);
-
-  /* function exit code */
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_volume, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_surface_voxels, 1);
-  {
-    Py_ssize_t __pyx_temp;
-    for (__pyx_temp=0; __pyx_temp < (Py_ssize_t)(sizeof(values)/sizeof(values[0])); ++__pyx_temp) {
-      __Pyx_Arg_XDECREF_VARARGS(values[__pyx_temp]);
-    }
-  }
-  __Pyx_RefNannyFinishContext();
-  return __pyx_r;
-}
-
-static PyObject *__pyx_pf_11bresenham3D_10find_boundary(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_volume, __Pyx_memviewslice __pyx_v_surface_voxels) {
-  int __pyx_v_x;
-  int __pyx_v_y;
-  int __pyx_v_z;
-  int __pyx_v_nx;
-  int __pyx_v_ny;
-  int __pyx_v_nz;
-  unsigned int __pyx_v_voxel_value;
-  PyObject *__pyx_r = NULL;
-  __Pyx_RefNannyDeclarations
-  long __pyx_t_1;
-  long __pyx_t_2;
-  int __pyx_t_3;
-  long __pyx_t_4;
-  long __pyx_t_5;
-  int __pyx_t_6;
-  long __pyx_t_7;
-  long __pyx_t_8;
-  int __pyx_t_9;
-  Py_ssize_t __pyx_t_10;
-  Py_ssize_t __pyx_t_11;
-  Py_ssize_t __pyx_t_12;
-  int __pyx_t_13;
-  int __pyx_t_14;
-  int __pyx_t_15;
-  int __pyx_lineno = 0;
-  const char *__pyx_filename = NULL;
-  int __pyx_clineno = 0;
-  __Pyx_RefNannySetupContext("__pyx_fuse_2find_boundary", 1);
-
-  /* "bresenham3D.pyx":108
- * 
- *     cdef int x, y, z
- *     cdef int nx = volume.shape[0]             # <<<<<<<<<<<<<<
- *     cdef int ny = volume.shape[1]
- *     cdef int nz = volume.shape[2]
- */
-  __pyx_v_nx = (__pyx_v_volume.shape[0]);
-
-  /* "bresenham3D.pyx":109
- *     cdef int x, y, z
- *     cdef int nx = volume.shape[0]
- *     cdef int ny = volume.shape[1]             # <<<<<<<<<<<<<<
- *     cdef int nz = volume.shape[2]
- *     cdef uint_t voxel_value
- */
-  __pyx_v_ny = (__pyx_v_volume.shape[1]);
-
-  /* "bresenham3D.pyx":110
- *     cdef int nx = volume.shape[0]
- *     cdef int ny = volume.shape[1]
- *     cdef int nz = volume.shape[2]             # <<<<<<<<<<<<<<
- *     cdef uint_t voxel_value
- *     # Iterate over each voxel in the volume
- */
-  __pyx_v_nz = (__pyx_v_volume.shape[2]);
-
-  /* "bresenham3D.pyx":113
- *     cdef uint_t voxel_value
- *     # Iterate over each voxel in the volume
- *     for x in range(1, nx-1):             # <<<<<<<<<<<<<<
- *         for y in range(1, ny-1):
- *             for z in range(1, nz-1):
- */
-  __pyx_t_1 = (__pyx_v_nx - 1);
-  __pyx_t_2 = __pyx_t_1;
-  for (__pyx_t_3 = 1; __pyx_t_3 < __pyx_t_2; __pyx_t_3+=1) {
-    __pyx_v_x = __pyx_t_3;
-
-    /* "bresenham3D.pyx":114
- *     # Iterate over each voxel in the volume
- *     for x in range(1, nx-1):
- *         for y in range(1, ny-1):             # <<<<<<<<<<<<<<
- *             for z in range(1, nz-1):
- *                 # Get the value of the current voxel
- */
-    __pyx_t_4 = (__pyx_v_ny - 1);
-    __pyx_t_5 = __pyx_t_4;
-    for (__pyx_t_6 = 1; __pyx_t_6 < __pyx_t_5; __pyx_t_6+=1) {
-      __pyx_v_y = __pyx_t_6;
-
-      /* "bresenham3D.pyx":115
- *     for x in range(1, nx-1):
- *         for y in range(1, ny-1):
- *             for z in range(1, nz-1):             # <<<<<<<<<<<<<<
- *                 # Get the value of the current voxel
- *                 voxel_value = volume[x, y, z]
- */
-      __pyx_t_7 = (__pyx_v_nz - 1);
-      __pyx_t_8 = __pyx_t_7;
-      for (__pyx_t_9 = 1; __pyx_t_9 < __pyx_t_8; __pyx_t_9+=1) {
-        __pyx_v_z = __pyx_t_9;
-
-        /* "bresenham3D.pyx":117
- *             for z in range(1, nz-1):
- *                 # Get the value of the current voxel
- *                 voxel_value = volume[x, y, z]             # <<<<<<<<<<<<<<
- * 
- *                 # Check the 6 neighbors
- */
-        __pyx_t_10 = __pyx_v_x;
-        __pyx_t_11 = __pyx_v_y;
-        __pyx_t_12 = __pyx_v_z;
-        __pyx_t_13 = -1;
-        if (__pyx_t_10 < 0) {
-          __pyx_t_10 += __pyx_v_volume.shape[0];
-          if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 0;
-        } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-        if (__pyx_t_11 < 0) {
-          __pyx_t_11 += __pyx_v_volume.shape[1];
-          if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-        } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-        if (__pyx_t_12 < 0) {
-          __pyx_t_12 += __pyx_v_volume.shape[2];
-          if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 2;
-        } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-        if (unlikely(__pyx_t_13 != -1)) {
-          __Pyx_RaiseBufferIndexError(__pyx_t_13);
-          __PYX_ERR(0, 117, __pyx_L1_error)
-        }
-        __pyx_v_voxel_value = (*((unsigned int *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_10 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_12 * __pyx_v_volume.strides[2]) )));
-
-        /* "bresenham3D.pyx":120
- * 
- *                 # Check the 6 neighbors
- *                 if voxel_value>0:             # <<<<<<<<<<<<<<
- *                     if (volume[x-1, y, z] != voxel_value or
- *                         volume[x+1, y, z] != voxel_value or
- */
-        __pyx_t_14 = (__pyx_v_voxel_value > 0);
-        if (__pyx_t_14) {
-
-          /* "bresenham3D.pyx":121
- *                 # Check the 6 neighbors
- *                 if voxel_value>0:
- *                     if (volume[x-1, y, z] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x+1, y, z] != voxel_value or
- *                         volume[x, y-1, z] != voxel_value or
- */
-          __pyx_t_12 = (__pyx_v_x - 1);
-          __pyx_t_11 = __pyx_v_y;
-          __pyx_t_10 = __pyx_v_z;
-          __pyx_t_13 = -1;
-          if (__pyx_t_12 < 0) {
-            __pyx_t_12 += __pyx_v_volume.shape[0];
-            if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 0;
-          } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-          if (__pyx_t_11 < 0) {
-            __pyx_t_11 += __pyx_v_volume.shape[1];
-            if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-          } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-          if (__pyx_t_10 < 0) {
-            __pyx_t_10 += __pyx_v_volume.shape[2];
-            if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 2;
-          } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-          if (unlikely(__pyx_t_13 != -1)) {
-            __Pyx_RaiseBufferIndexError(__pyx_t_13);
-            __PYX_ERR(0, 121, __pyx_L1_error)
-          }
-          __pyx_t_15 = ((*((unsigned int *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_12 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_10 * __pyx_v_volume.strides[2]) ))) != __pyx_v_voxel_value);
-          if (!__pyx_t_15) {
-          } else {
-            __pyx_t_14 = __pyx_t_15;
-            goto __pyx_L11_bool_binop_done;
-          }
-
-          /* "bresenham3D.pyx":122
- *                 if voxel_value>0:
- *                     if (volume[x-1, y, z] != voxel_value or
- *                         volume[x+1, y, z] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x, y-1, z] != voxel_value or
- *                         volume[x, y+1, z] != voxel_value or
- */
-          __pyx_t_10 = (__pyx_v_x + 1);
-          __pyx_t_11 = __pyx_v_y;
-          __pyx_t_12 = __pyx_v_z;
-          __pyx_t_13 = -1;
-          if (__pyx_t_10 < 0) {
-            __pyx_t_10 += __pyx_v_volume.shape[0];
-            if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 0;
-          } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-          if (__pyx_t_11 < 0) {
-            __pyx_t_11 += __pyx_v_volume.shape[1];
-            if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-          } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-          if (__pyx_t_12 < 0) {
-            __pyx_t_12 += __pyx_v_volume.shape[2];
-            if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 2;
-          } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-          if (unlikely(__pyx_t_13 != -1)) {
-            __Pyx_RaiseBufferIndexError(__pyx_t_13);
-            __PYX_ERR(0, 122, __pyx_L1_error)
-          }
-          __pyx_t_15 = ((*((unsigned int *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_10 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_12 * __pyx_v_volume.strides[2]) ))) != __pyx_v_voxel_value);
-          if (!__pyx_t_15) {
-          } else {
-            __pyx_t_14 = __pyx_t_15;
-            goto __pyx_L11_bool_binop_done;
-          }
-
-          /* "bresenham3D.pyx":123
- *                     if (volume[x-1, y, z] != voxel_value or
- *                         volume[x+1, y, z] != voxel_value or
- *                         volume[x, y-1, z] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x, y+1, z] != voxel_value or
- *                         volume[x, y, z-1] != voxel_value or
- */
-          __pyx_t_12 = __pyx_v_x;
-          __pyx_t_11 = (__pyx_v_y - 1);
-          __pyx_t_10 = __pyx_v_z;
-          __pyx_t_13 = -1;
-          if (__pyx_t_12 < 0) {
-            __pyx_t_12 += __pyx_v_volume.shape[0];
-            if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 0;
-          } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-          if (__pyx_t_11 < 0) {
-            __pyx_t_11 += __pyx_v_volume.shape[1];
-            if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-          } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-          if (__pyx_t_10 < 0) {
-            __pyx_t_10 += __pyx_v_volume.shape[2];
-            if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 2;
-          } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-          if (unlikely(__pyx_t_13 != -1)) {
-            __Pyx_RaiseBufferIndexError(__pyx_t_13);
-            __PYX_ERR(0, 123, __pyx_L1_error)
-          }
-          __pyx_t_15 = ((*((unsigned int *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_12 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_10 * __pyx_v_volume.strides[2]) ))) != __pyx_v_voxel_value);
-          if (!__pyx_t_15) {
-          } else {
-            __pyx_t_14 = __pyx_t_15;
-            goto __pyx_L11_bool_binop_done;
-          }
-
-          /* "bresenham3D.pyx":124
- *                         volume[x+1, y, z] != voxel_value or
- *                         volume[x, y-1, z] != voxel_value or
- *                         volume[x, y+1, z] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x, y, z-1] != voxel_value or
- *                         volume[x, y, z+1] != voxel_value):
- */
-          __pyx_t_10 = __pyx_v_x;
-          __pyx_t_11 = (__pyx_v_y + 1);
-          __pyx_t_12 = __pyx_v_z;
-          __pyx_t_13 = -1;
-          if (__pyx_t_10 < 0) {
-            __pyx_t_10 += __pyx_v_volume.shape[0];
-            if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 0;
-          } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-          if (__pyx_t_11 < 0) {
-            __pyx_t_11 += __pyx_v_volume.shape[1];
-            if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-          } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-          if (__pyx_t_12 < 0) {
-            __pyx_t_12 += __pyx_v_volume.shape[2];
-            if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 2;
-          } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-          if (unlikely(__pyx_t_13 != -1)) {
-            __Pyx_RaiseBufferIndexError(__pyx_t_13);
-            __PYX_ERR(0, 124, __pyx_L1_error)
-          }
-          __pyx_t_15 = ((*((unsigned int *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_10 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_12 * __pyx_v_volume.strides[2]) ))) != __pyx_v_voxel_value);
-          if (!__pyx_t_15) {
-          } else {
-            __pyx_t_14 = __pyx_t_15;
-            goto __pyx_L11_bool_binop_done;
-          }
-
-          /* "bresenham3D.pyx":125
- *                         volume[x, y-1, z] != voxel_value or
- *                         volume[x, y+1, z] != voxel_value or
- *                         volume[x, y, z-1] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x, y, z+1] != voxel_value):
- *                         # Add the surface voxel coordinates to the list
- */
-          __pyx_t_12 = __pyx_v_x;
-          __pyx_t_11 = __pyx_v_y;
-          __pyx_t_10 = (__pyx_v_z - 1);
-          __pyx_t_13 = -1;
-          if (__pyx_t_12 < 0) {
-            __pyx_t_12 += __pyx_v_volume.shape[0];
-            if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 0;
-          } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-          if (__pyx_t_11 < 0) {
-            __pyx_t_11 += __pyx_v_volume.shape[1];
-            if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-          } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-          if (__pyx_t_10 < 0) {
-            __pyx_t_10 += __pyx_v_volume.shape[2];
-            if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 2;
-          } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-          if (unlikely(__pyx_t_13 != -1)) {
-            __Pyx_RaiseBufferIndexError(__pyx_t_13);
-            __PYX_ERR(0, 125, __pyx_L1_error)
-          }
-          __pyx_t_15 = ((*((unsigned int *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_12 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_10 * __pyx_v_volume.strides[2]) ))) != __pyx_v_voxel_value);
-          if (!__pyx_t_15) {
-          } else {
-            __pyx_t_14 = __pyx_t_15;
-            goto __pyx_L11_bool_binop_done;
-          }
-
-          /* "bresenham3D.pyx":126
- *                         volume[x, y+1, z] != voxel_value or
- *                         volume[x, y, z-1] != voxel_value or
- *                         volume[x, y, z+1] != voxel_value):             # <<<<<<<<<<<<<<
- *                         # Add the surface voxel coordinates to the list
- *                         surface_voxels[x, y, z] = 1
- */
-          __pyx_t_10 = __pyx_v_x;
-          __pyx_t_11 = __pyx_v_y;
-          __pyx_t_12 = (__pyx_v_z + 1);
-          __pyx_t_13 = -1;
-          if (__pyx_t_10 < 0) {
-            __pyx_t_10 += __pyx_v_volume.shape[0];
-            if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 0;
-          } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-          if (__pyx_t_11 < 0) {
-            __pyx_t_11 += __pyx_v_volume.shape[1];
-            if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-          } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-          if (__pyx_t_12 < 0) {
-            __pyx_t_12 += __pyx_v_volume.shape[2];
-            if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 2;
-          } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-          if (unlikely(__pyx_t_13 != -1)) {
-            __Pyx_RaiseBufferIndexError(__pyx_t_13);
-            __PYX_ERR(0, 126, __pyx_L1_error)
-          }
-          __pyx_t_15 = ((*((unsigned int *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_10 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_12 * __pyx_v_volume.strides[2]) ))) != __pyx_v_voxel_value);
-          __pyx_t_14 = __pyx_t_15;
-          __pyx_L11_bool_binop_done:;
-
-          /* "bresenham3D.pyx":121
- *                 # Check the 6 neighbors
- *                 if voxel_value>0:
- *                     if (volume[x-1, y, z] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x+1, y, z] != voxel_value or
- *                         volume[x, y-1, z] != voxel_value or
- */
-          if (__pyx_t_14) {
-
-            /* "bresenham3D.pyx":128
- *                         volume[x, y, z+1] != voxel_value):
- *                         # Add the surface voxel coordinates to the list
- *                         surface_voxels[x, y, z] = 1             # <<<<<<<<<<<<<<
- * 
- */
-            __pyx_t_12 = __pyx_v_x;
-            __pyx_t_11 = __pyx_v_y;
-            __pyx_t_10 = __pyx_v_z;
-            __pyx_t_13 = -1;
-            if (__pyx_t_12 < 0) {
-              __pyx_t_12 += __pyx_v_surface_voxels.shape[0];
-              if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 0;
-            } else if (unlikely(__pyx_t_12 >= __pyx_v_surface_voxels.shape[0])) __pyx_t_13 = 0;
-            if (__pyx_t_11 < 0) {
-              __pyx_t_11 += __pyx_v_surface_voxels.shape[1];
-              if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-            } else if (unlikely(__pyx_t_11 >= __pyx_v_surface_voxels.shape[1])) __pyx_t_13 = 1;
-            if (__pyx_t_10 < 0) {
-              __pyx_t_10 += __pyx_v_surface_voxels.shape[2];
-              if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 2;
-            } else if (unlikely(__pyx_t_10 >= __pyx_v_surface_voxels.shape[2])) __pyx_t_13 = 2;
-            if (unlikely(__pyx_t_13 != -1)) {
-              __Pyx_RaiseBufferIndexError(__pyx_t_13);
-              __PYX_ERR(0, 128, __pyx_L1_error)
-            }
-            *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_surface_voxels.data + __pyx_t_12 * __pyx_v_surface_voxels.strides[0]) ) + __pyx_t_11 * __pyx_v_surface_voxels.strides[1]) ) + __pyx_t_10 * __pyx_v_surface_voxels.strides[2]) )) = 1;
-
-            /* "bresenham3D.pyx":121
- *                 # Check the 6 neighbors
- *                 if voxel_value>0:
- *                     if (volume[x-1, y, z] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x+1, y, z] != voxel_value or
- *                         volume[x, y-1, z] != voxel_value or
- */
-          }
-
-          /* "bresenham3D.pyx":120
- * 
- *                 # Check the 6 neighbors
- *                 if voxel_value>0:             # <<<<<<<<<<<<<<
- *                     if (volume[x-1, y, z] != voxel_value or
- *                         volume[x+1, y, z] != voxel_value or
- */
-        }
-      }
-    }
-  }
-
-  /* "bresenham3D.pyx":103
- *     unsigned long long
- * 
- * def find_boundary(             # <<<<<<<<<<<<<<
- *     uint_t[:, :, :] volume, unsigned char[:,:,:] surface_voxels
- * ):
- */
-
-  /* function exit code */
-  __pyx_r = Py_None; __Pyx_INCREF(Py_None);
-  goto __pyx_L0;
-  __pyx_L1_error:;
-  __Pyx_AddTraceback("bresenham3D.find_boundary", __pyx_clineno, __pyx_lineno, __pyx_filename);
-  __pyx_r = NULL;
-  __pyx_L0:;
-  __Pyx_XGIVEREF(__pyx_r);
-  __Pyx_RefNannyFinishContext();
-  return __pyx_r;
-}
-
-/* Python wrapper */
-static PyObject *__pyx_fuse_3__pyx_pw_11bresenham3D_13find_boundary(PyObject *__pyx_self, PyObject *__pyx_args, PyObject *__pyx_kwds); /*proto*/
-static PyMethodDef __pyx_fuse_3__pyx_mdef_11bresenham3D_13find_boundary = {"__pyx_fuse_3find_boundary", (PyCFunction)(void*)(PyCFunctionWithKeywords)__pyx_fuse_3__pyx_pw_11bresenham3D_13find_boundary, METH_VARARGS|METH_KEYWORDS, 0};
-static PyObject *__pyx_fuse_3__pyx_pw_11bresenham3D_13find_boundary(PyObject *__pyx_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
-  __Pyx_memviewslice __pyx_v_volume = { 0, 0, { 0 }, { 0 }, { 0 } };
-  __Pyx_memviewslice __pyx_v_surface_voxels = { 0, 0, { 0 }, { 0 }, { 0 } };
-  CYTHON_UNUSED Py_ssize_t __pyx_nargs;
-  CYTHON_UNUSED PyObject *const *__pyx_kwvalues;
-  PyObject* values[2] = {0,0};
-  int __pyx_lineno = 0;
-  const char *__pyx_filename = NULL;
-  int __pyx_clineno = 0;
-  PyObject *__pyx_r = 0;
-  __Pyx_RefNannyDeclarations
-  __Pyx_RefNannySetupContext("find_boundary (wrapper)", 0);
-  #if CYTHON_ASSUME_SAFE_MACROS
-  __pyx_nargs = PyTuple_GET_SIZE(__pyx_args);
-  #else
-  __pyx_nargs = PyTuple_Size(__pyx_args); if (unlikely(__pyx_nargs < 0)) return NULL;
-  #endif
-  __pyx_kwvalues = __Pyx_KwValues_VARARGS(__pyx_args, __pyx_nargs);
-  {
-    PyObject **__pyx_pyargnames[] = {&__pyx_n_s_volume,&__pyx_n_s_surface_voxels,0};
-    if (__pyx_kwds) {
-      Py_ssize_t kw_args;
-      switch (__pyx_nargs) {
-        case  2: values[1] = __Pyx_Arg_VARARGS(__pyx_args, 1);
-        CYTHON_FALLTHROUGH;
-        case  1: values[0] = __Pyx_Arg_VARARGS(__pyx_args, 0);
-        CYTHON_FALLTHROUGH;
-        case  0: break;
-        default: goto __pyx_L5_argtuple_error;
-      }
-      kw_args = __Pyx_NumKwargs_VARARGS(__pyx_kwds);
-      switch (__pyx_nargs) {
-        case  0:
-        if (likely((values[0] = __Pyx_GetKwValue_VARARGS(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_volume)) != 0)) {
-          (void)__Pyx_Arg_NewRef_VARARGS(values[0]);
-          kw_args--;
-        }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L3_error)
-        else goto __pyx_L5_argtuple_error;
-        CYTHON_FALLTHROUGH;
-        case  1:
-        if (likely((values[1] = __Pyx_GetKwValue_VARARGS(__pyx_kwds, __pyx_kwvalues, __pyx_n_s_surface_voxels)) != 0)) {
-          (void)__Pyx_Arg_NewRef_VARARGS(values[1]);
-          kw_args--;
-        }
-        else if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 103, __pyx_L3_error)
-        else {
-          __Pyx_RaiseArgtupleInvalid("find_boundary", 1, 2, 2, 1); __PYX_ERR(0, 103, __pyx_L3_error)
-        }
-      }
-      if (unlikely(kw_args > 0)) {
-        const Py_ssize_t kwd_pos_args = __pyx_nargs;
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values + 0, kwd_pos_args, "find_boundary") < 0)) __PYX_ERR(0, 103, __pyx_L3_error)
-      }
-    } else if (unlikely(__pyx_nargs != 2)) {
-      goto __pyx_L5_argtuple_error;
-    } else {
-      values[0] = __Pyx_Arg_VARARGS(__pyx_args, 0);
-      values[1] = __Pyx_Arg_VARARGS(__pyx_args, 1);
-    }
-    __pyx_v_volume = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[0], PyBUF_WRITABLE); if (unlikely(!__pyx_v_volume.memview)) __PYX_ERR(0, 104, __pyx_L3_error)
-    __pyx_v_surface_voxels = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[1], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels.memview)) __PYX_ERR(0, 104, __pyx_L3_error)
-  }
-  goto __pyx_L6_skip;
-  __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("find_boundary", 1, 2, 2, __pyx_nargs); __PYX_ERR(0, 103, __pyx_L3_error)
-  __pyx_L6_skip:;
-  goto __pyx_L4_argument_unpacking_done;
-  __pyx_L3_error:;
-  {
-    Py_ssize_t __pyx_temp;
-    for (__pyx_temp=0; __pyx_temp < (Py_ssize_t)(sizeof(values)/sizeof(values[0])); ++__pyx_temp) {
-      __Pyx_Arg_XDECREF_VARARGS(values[__pyx_temp]);
-    }
-  }
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_volume, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_surface_voxels, 1);
-  __Pyx_AddTraceback("bresenham3D.find_boundary", __pyx_clineno, __pyx_lineno, __pyx_filename);
-  __Pyx_RefNannyFinishContext();
-  return NULL;
-  __pyx_L4_argument_unpacking_done:;
-  __pyx_r = __pyx_pf_11bresenham3D_12find_boundary(__pyx_self, __pyx_v_volume, __pyx_v_surface_voxels);
-
-  /* function exit code */
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_volume, 1);
-  __PYX_XCLEAR_MEMVIEW(&__pyx_v_surface_voxels, 1);
-  {
-    Py_ssize_t __pyx_temp;
-    for (__pyx_temp=0; __pyx_temp < (Py_ssize_t)(sizeof(values)/sizeof(values[0])); ++__pyx_temp) {
-      __Pyx_Arg_XDECREF_VARARGS(values[__pyx_temp]);
-    }
-  }
-  __Pyx_RefNannyFinishContext();
-  return __pyx_r;
-}
-
-static PyObject *__pyx_pf_11bresenham3D_12find_boundary(CYTHON_UNUSED PyObject *__pyx_self, __Pyx_memviewslice __pyx_v_volume, __Pyx_memviewslice __pyx_v_surface_voxels) {
-  int __pyx_v_x;
-  int __pyx_v_y;
-  int __pyx_v_z;
-  int __pyx_v_nx;
-  int __pyx_v_ny;
-  int __pyx_v_nz;
-  unsigned PY_LONG_LONG __pyx_v_voxel_value;
-  PyObject *__pyx_r = NULL;
-  __Pyx_RefNannyDeclarations
-  long __pyx_t_1;
-  long __pyx_t_2;
-  int __pyx_t_3;
-  long __pyx_t_4;
-  long __pyx_t_5;
-  int __pyx_t_6;
-  long __pyx_t_7;
-  long __pyx_t_8;
-  int __pyx_t_9;
-  Py_ssize_t __pyx_t_10;
-  Py_ssize_t __pyx_t_11;
-  Py_ssize_t __pyx_t_12;
-  int __pyx_t_13;
-  int __pyx_t_14;
-  int __pyx_t_15;
-  int __pyx_lineno = 0;
-  const char *__pyx_filename = NULL;
-  int __pyx_clineno = 0;
-  __Pyx_RefNannySetupContext("__pyx_fuse_3find_boundary", 1);
-
-  /* "bresenham3D.pyx":108
- * 
- *     cdef int x, y, z
- *     cdef int nx = volume.shape[0]             # <<<<<<<<<<<<<<
- *     cdef int ny = volume.shape[1]
- *     cdef int nz = volume.shape[2]
- */
-  __pyx_v_nx = (__pyx_v_volume.shape[0]);
-
-  /* "bresenham3D.pyx":109
- *     cdef int x, y, z
- *     cdef int nx = volume.shape[0]
- *     cdef int ny = volume.shape[1]             # <<<<<<<<<<<<<<
- *     cdef int nz = volume.shape[2]
- *     cdef uint_t voxel_value
- */
-  __pyx_v_ny = (__pyx_v_volume.shape[1]);
-
-  /* "bresenham3D.pyx":110
- *     cdef int nx = volume.shape[0]
- *     cdef int ny = volume.shape[1]
- *     cdef int nz = volume.shape[2]             # <<<<<<<<<<<<<<
- *     cdef uint_t voxel_value
- *     # Iterate over each voxel in the volume
- */
-  __pyx_v_nz = (__pyx_v_volume.shape[2]);
-
-  /* "bresenham3D.pyx":113
- *     cdef uint_t voxel_value
- *     # Iterate over each voxel in the volume
- *     for x in range(1, nx-1):             # <<<<<<<<<<<<<<
- *         for y in range(1, ny-1):
- *             for z in range(1, nz-1):
- */
-  __pyx_t_1 = (__pyx_v_nx - 1);
-  __pyx_t_2 = __pyx_t_1;
-  for (__pyx_t_3 = 1; __pyx_t_3 < __pyx_t_2; __pyx_t_3+=1) {
-    __pyx_v_x = __pyx_t_3;
-
-    /* "bresenham3D.pyx":114
- *     # Iterate over each voxel in the volume
- *     for x in range(1, nx-1):
- *         for y in range(1, ny-1):             # <<<<<<<<<<<<<<
- *             for z in range(1, nz-1):
- *                 # Get the value of the current voxel
- */
-    __pyx_t_4 = (__pyx_v_ny - 1);
-    __pyx_t_5 = __pyx_t_4;
-    for (__pyx_t_6 = 1; __pyx_t_6 < __pyx_t_5; __pyx_t_6+=1) {
-      __pyx_v_y = __pyx_t_6;
-
-      /* "bresenham3D.pyx":115
- *     for x in range(1, nx-1):
- *         for y in range(1, ny-1):
- *             for z in range(1, nz-1):             # <<<<<<<<<<<<<<
- *                 # Get the value of the current voxel
- *                 voxel_value = volume[x, y, z]
- */
-      __pyx_t_7 = (__pyx_v_nz - 1);
-      __pyx_t_8 = __pyx_t_7;
-      for (__pyx_t_9 = 1; __pyx_t_9 < __pyx_t_8; __pyx_t_9+=1) {
-        __pyx_v_z = __pyx_t_9;
-
-        /* "bresenham3D.pyx":117
- *             for z in range(1, nz-1):
- *                 # Get the value of the current voxel
- *                 voxel_value = volume[x, y, z]             # <<<<<<<<<<<<<<
- * 
- *                 # Check the 6 neighbors
- */
-        __pyx_t_10 = __pyx_v_x;
-        __pyx_t_11 = __pyx_v_y;
-        __pyx_t_12 = __pyx_v_z;
-        __pyx_t_13 = -1;
-        if (__pyx_t_10 < 0) {
-          __pyx_t_10 += __pyx_v_volume.shape[0];
-          if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 0;
-        } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-        if (__pyx_t_11 < 0) {
-          __pyx_t_11 += __pyx_v_volume.shape[1];
-          if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-        } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-        if (__pyx_t_12 < 0) {
-          __pyx_t_12 += __pyx_v_volume.shape[2];
-          if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 2;
-        } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-        if (unlikely(__pyx_t_13 != -1)) {
-          __Pyx_RaiseBufferIndexError(__pyx_t_13);
-          __PYX_ERR(0, 117, __pyx_L1_error)
-        }
-        __pyx_v_voxel_value = (*((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_10 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_12 * __pyx_v_volume.strides[2]) )));
-
-        /* "bresenham3D.pyx":120
- * 
- *                 # Check the 6 neighbors
- *                 if voxel_value>0:             # <<<<<<<<<<<<<<
- *                     if (volume[x-1, y, z] != voxel_value or
- *                         volume[x+1, y, z] != voxel_value or
- */
-        __pyx_t_14 = (__pyx_v_voxel_value > 0);
-        if (__pyx_t_14) {
-
-          /* "bresenham3D.pyx":121
- *                 # Check the 6 neighbors
- *                 if voxel_value>0:
- *                     if (volume[x-1, y, z] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x+1, y, z] != voxel_value or
- *                         volume[x, y-1, z] != voxel_value or
- */
-          __pyx_t_12 = (__pyx_v_x - 1);
-          __pyx_t_11 = __pyx_v_y;
-          __pyx_t_10 = __pyx_v_z;
-          __pyx_t_13 = -1;
-          if (__pyx_t_12 < 0) {
-            __pyx_t_12 += __pyx_v_volume.shape[0];
-            if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 0;
-          } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-          if (__pyx_t_11 < 0) {
-            __pyx_t_11 += __pyx_v_volume.shape[1];
-            if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-          } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-          if (__pyx_t_10 < 0) {
-            __pyx_t_10 += __pyx_v_volume.shape[2];
-            if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 2;
-          } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-          if (unlikely(__pyx_t_13 != -1)) {
-            __Pyx_RaiseBufferIndexError(__pyx_t_13);
-            __PYX_ERR(0, 121, __pyx_L1_error)
-          }
-          __pyx_t_15 = ((*((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_12 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_10 * __pyx_v_volume.strides[2]) ))) != __pyx_v_voxel_value);
-          if (!__pyx_t_15) {
-          } else {
-            __pyx_t_14 = __pyx_t_15;
-            goto __pyx_L11_bool_binop_done;
-          }
-
-          /* "bresenham3D.pyx":122
- *                 if voxel_value>0:
- *                     if (volume[x-1, y, z] != voxel_value or
- *                         volume[x+1, y, z] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x, y-1, z] != voxel_value or
- *                         volume[x, y+1, z] != voxel_value or
- */
-          __pyx_t_10 = (__pyx_v_x + 1);
-          __pyx_t_11 = __pyx_v_y;
-          __pyx_t_12 = __pyx_v_z;
-          __pyx_t_13 = -1;
-          if (__pyx_t_10 < 0) {
-            __pyx_t_10 += __pyx_v_volume.shape[0];
-            if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 0;
-          } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-          if (__pyx_t_11 < 0) {
-            __pyx_t_11 += __pyx_v_volume.shape[1];
-            if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-          } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-          if (__pyx_t_12 < 0) {
-            __pyx_t_12 += __pyx_v_volume.shape[2];
-            if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 2;
-          } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-          if (unlikely(__pyx_t_13 != -1)) {
-            __Pyx_RaiseBufferIndexError(__pyx_t_13);
-            __PYX_ERR(0, 122, __pyx_L1_error)
-          }
-          __pyx_t_15 = ((*((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_10 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_12 * __pyx_v_volume.strides[2]) ))) != __pyx_v_voxel_value);
-          if (!__pyx_t_15) {
-          } else {
-            __pyx_t_14 = __pyx_t_15;
-            goto __pyx_L11_bool_binop_done;
-          }
-
-          /* "bresenham3D.pyx":123
- *                     if (volume[x-1, y, z] != voxel_value or
- *                         volume[x+1, y, z] != voxel_value or
- *                         volume[x, y-1, z] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x, y+1, z] != voxel_value or
- *                         volume[x, y, z-1] != voxel_value or
- */
-          __pyx_t_12 = __pyx_v_x;
-          __pyx_t_11 = (__pyx_v_y - 1);
-          __pyx_t_10 = __pyx_v_z;
-          __pyx_t_13 = -1;
-          if (__pyx_t_12 < 0) {
-            __pyx_t_12 += __pyx_v_volume.shape[0];
-            if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 0;
-          } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-          if (__pyx_t_11 < 0) {
-            __pyx_t_11 += __pyx_v_volume.shape[1];
-            if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-          } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-          if (__pyx_t_10 < 0) {
-            __pyx_t_10 += __pyx_v_volume.shape[2];
-            if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 2;
-          } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-          if (unlikely(__pyx_t_13 != -1)) {
-            __Pyx_RaiseBufferIndexError(__pyx_t_13);
-            __PYX_ERR(0, 123, __pyx_L1_error)
-          }
-          __pyx_t_15 = ((*((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_12 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_10 * __pyx_v_volume.strides[2]) ))) != __pyx_v_voxel_value);
-          if (!__pyx_t_15) {
-          } else {
-            __pyx_t_14 = __pyx_t_15;
-            goto __pyx_L11_bool_binop_done;
-          }
-
-          /* "bresenham3D.pyx":124
- *                         volume[x+1, y, z] != voxel_value or
- *                         volume[x, y-1, z] != voxel_value or
- *                         volume[x, y+1, z] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x, y, z-1] != voxel_value or
- *                         volume[x, y, z+1] != voxel_value):
- */
-          __pyx_t_10 = __pyx_v_x;
-          __pyx_t_11 = (__pyx_v_y + 1);
-          __pyx_t_12 = __pyx_v_z;
-          __pyx_t_13 = -1;
-          if (__pyx_t_10 < 0) {
-            __pyx_t_10 += __pyx_v_volume.shape[0];
-            if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 0;
-          } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-          if (__pyx_t_11 < 0) {
-            __pyx_t_11 += __pyx_v_volume.shape[1];
-            if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-          } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-          if (__pyx_t_12 < 0) {
-            __pyx_t_12 += __pyx_v_volume.shape[2];
-            if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 2;
-          } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-          if (unlikely(__pyx_t_13 != -1)) {
-            __Pyx_RaiseBufferIndexError(__pyx_t_13);
-            __PYX_ERR(0, 124, __pyx_L1_error)
-          }
-          __pyx_t_15 = ((*((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_10 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_12 * __pyx_v_volume.strides[2]) ))) != __pyx_v_voxel_value);
-          if (!__pyx_t_15) {
-          } else {
-            __pyx_t_14 = __pyx_t_15;
-            goto __pyx_L11_bool_binop_done;
-          }
-
-          /* "bresenham3D.pyx":125
- *                         volume[x, y-1, z] != voxel_value or
- *                         volume[x, y+1, z] != voxel_value or
- *                         volume[x, y, z-1] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x, y, z+1] != voxel_value):
- *                         # Add the surface voxel coordinates to the list
- */
-          __pyx_t_12 = __pyx_v_x;
-          __pyx_t_11 = __pyx_v_y;
-          __pyx_t_10 = (__pyx_v_z - 1);
-          __pyx_t_13 = -1;
-          if (__pyx_t_12 < 0) {
-            __pyx_t_12 += __pyx_v_volume.shape[0];
-            if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 0;
-          } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-          if (__pyx_t_11 < 0) {
-            __pyx_t_11 += __pyx_v_volume.shape[1];
-            if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-          } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-          if (__pyx_t_10 < 0) {
-            __pyx_t_10 += __pyx_v_volume.shape[2];
-            if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 2;
-          } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-          if (unlikely(__pyx_t_13 != -1)) {
-            __Pyx_RaiseBufferIndexError(__pyx_t_13);
-            __PYX_ERR(0, 125, __pyx_L1_error)
-          }
-          __pyx_t_15 = ((*((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_12 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_10 * __pyx_v_volume.strides[2]) ))) != __pyx_v_voxel_value);
-          if (!__pyx_t_15) {
-          } else {
-            __pyx_t_14 = __pyx_t_15;
-            goto __pyx_L11_bool_binop_done;
-          }
-
-          /* "bresenham3D.pyx":126
- *                         volume[x, y+1, z] != voxel_value or
- *                         volume[x, y, z-1] != voxel_value or
- *                         volume[x, y, z+1] != voxel_value):             # <<<<<<<<<<<<<<
- *                         # Add the surface voxel coordinates to the list
- *                         surface_voxels[x, y, z] = 1
- */
-          __pyx_t_10 = __pyx_v_x;
-          __pyx_t_11 = __pyx_v_y;
-          __pyx_t_12 = (__pyx_v_z + 1);
-          __pyx_t_13 = -1;
-          if (__pyx_t_10 < 0) {
-            __pyx_t_10 += __pyx_v_volume.shape[0];
-            if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 0;
-          } else if (unlikely(__pyx_t_10 >= __pyx_v_volume.shape[0])) __pyx_t_13 = 0;
-          if (__pyx_t_11 < 0) {
-            __pyx_t_11 += __pyx_v_volume.shape[1];
-            if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-          } else if (unlikely(__pyx_t_11 >= __pyx_v_volume.shape[1])) __pyx_t_13 = 1;
-          if (__pyx_t_12 < 0) {
-            __pyx_t_12 += __pyx_v_volume.shape[2];
-            if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 2;
-          } else if (unlikely(__pyx_t_12 >= __pyx_v_volume.shape[2])) __pyx_t_13 = 2;
-          if (unlikely(__pyx_t_13 != -1)) {
-            __Pyx_RaiseBufferIndexError(__pyx_t_13);
-            __PYX_ERR(0, 126, __pyx_L1_error)
-          }
-          __pyx_t_15 = ((*((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_volume.data + __pyx_t_10 * __pyx_v_volume.strides[0]) ) + __pyx_t_11 * __pyx_v_volume.strides[1]) ) + __pyx_t_12 * __pyx_v_volume.strides[2]) ))) != __pyx_v_voxel_value);
-          __pyx_t_14 = __pyx_t_15;
-          __pyx_L11_bool_binop_done:;
-
-          /* "bresenham3D.pyx":121
- *                 # Check the 6 neighbors
- *                 if voxel_value>0:
- *                     if (volume[x-1, y, z] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x+1, y, z] != voxel_value or
- *                         volume[x, y-1, z] != voxel_value or
- */
-          if (__pyx_t_14) {
-
-            /* "bresenham3D.pyx":128
- *                         volume[x, y, z+1] != voxel_value):
- *                         # Add the surface voxel coordinates to the list
- *                         surface_voxels[x, y, z] = 1             # <<<<<<<<<<<<<<
- * 
- */
-            __pyx_t_12 = __pyx_v_x;
-            __pyx_t_11 = __pyx_v_y;
-            __pyx_t_10 = __pyx_v_z;
-            __pyx_t_13 = -1;
-            if (__pyx_t_12 < 0) {
-              __pyx_t_12 += __pyx_v_surface_voxels.shape[0];
-              if (unlikely(__pyx_t_12 < 0)) __pyx_t_13 = 0;
-            } else if (unlikely(__pyx_t_12 >= __pyx_v_surface_voxels.shape[0])) __pyx_t_13 = 0;
-            if (__pyx_t_11 < 0) {
-              __pyx_t_11 += __pyx_v_surface_voxels.shape[1];
-              if (unlikely(__pyx_t_11 < 0)) __pyx_t_13 = 1;
-            } else if (unlikely(__pyx_t_11 >= __pyx_v_surface_voxels.shape[1])) __pyx_t_13 = 1;
-            if (__pyx_t_10 < 0) {
-              __pyx_t_10 += __pyx_v_surface_voxels.shape[2];
-              if (unlikely(__pyx_t_10 < 0)) __pyx_t_13 = 2;
-            } else if (unlikely(__pyx_t_10 >= __pyx_v_surface_voxels.shape[2])) __pyx_t_13 = 2;
-            if (unlikely(__pyx_t_13 != -1)) {
-              __Pyx_RaiseBufferIndexError(__pyx_t_13);
-              __PYX_ERR(0, 128, __pyx_L1_error)
-            }
-            *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_surface_voxels.data + __pyx_t_12 * __pyx_v_surface_voxels.strides[0]) ) + __pyx_t_11 * __pyx_v_surface_voxels.strides[1]) ) + __pyx_t_10 * __pyx_v_surface_voxels.strides[2]) )) = 1;
-
-            /* "bresenham3D.pyx":121
- *                 # Check the 6 neighbors
- *                 if voxel_value>0:
- *                     if (volume[x-1, y, z] != voxel_value or             # <<<<<<<<<<<<<<
- *                         volume[x+1, y, z] != voxel_value or
- *                         volume[x, y-1, z] != voxel_value or
- */
-          }
-
-          /* "bresenham3D.pyx":120
- * 
- *                 # Check the 6 neighbors
- *                 if voxel_value>0:             # <<<<<<<<<<<<<<
- *                     if (volume[x-1, y, z] != voxel_value or
- *                         volume[x+1, y, z] != voxel_value or
- */
-        }
-      }
-    }
-  }
-
-  /* "bresenham3D.pyx":103
- *     unsigned long long
- * 
- * def find_boundary(             # <<<<<<<<<<<<<<
- *     uint_t[:, :, :] volume, unsigned char[:,:,:] surface_voxels
- * ):
- */
-
-  /* function exit code */
-  __pyx_r = Py_None; __Pyx_INCREF(Py_None);
-  goto __pyx_L0;
-  __pyx_L1_error:;
-  __Pyx_AddTraceback("bresenham3D.find_boundary", __pyx_clineno, __pyx_lineno, __pyx_filename);
-  __pyx_r = NULL;
-  __pyx_L0:;
+  __Pyx_XDECREF(__pyx_v_all_valid_voxels);
+  __Pyx_XDECREF(__pyx_v_points);
+  __Pyx_XDECREF(__pyx_v_sublist);
+  __Pyx_XDECREF((PyObject *)__pyx_v_found_contact_voxels);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_contact_voxel_1, 1);
+  __PYX_XCLEAR_MEMVIEW(&__pyx_v_contact_voxel_2, 1);
   __Pyx_XGIVEREF(__pyx_r);
   __Pyx_RefNannyFinishContext();
   return __pyx_r;
@@ -24249,8 +22612,6 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_kp_s_Dimension_d_is_not_direct, __pyx_k_Dimension_d_is_not_direct, sizeof(__pyx_k_Dimension_d_is_not_direct), 0, 0, 1, 0},
     {&__pyx_n_s_Ellipsis, __pyx_k_Ellipsis, sizeof(__pyx_k_Ellipsis), 0, 0, 1, 1},
     {&__pyx_kp_s_Empty_shape_tuple_for_cython_arr, __pyx_k_Empty_shape_tuple_for_cython_arr, sizeof(__pyx_k_Empty_shape_tuple_for_cython_arr), 0, 0, 1, 0},
-    {&__pyx_kp_s_Expected_at_least_d_argument_s_g, __pyx_k_Expected_at_least_d_argument_s_g, sizeof(__pyx_k_Expected_at_least_d_argument_s_g), 0, 0, 1, 0},
-    {&__pyx_kp_s_Function_call_with_ambiguous_arg, __pyx_k_Function_call_with_ambiguous_arg, sizeof(__pyx_k_Function_call_with_ambiguous_arg), 0, 0, 1, 0},
     {&__pyx_kp_s_Incompatible_checksums_0x_x_vs_0, __pyx_k_Incompatible_checksums_0x_x_vs_0, sizeof(__pyx_k_Incompatible_checksums_0x_x_vs_0), 0, 0, 1, 0},
     {&__pyx_n_s_IndexError, __pyx_k_IndexError, sizeof(__pyx_k_IndexError), 0, 0, 1, 1},
     {&__pyx_kp_s_Index_out_of_bounds_axis_d, __pyx_k_Index_out_of_bounds_axis_d, sizeof(__pyx_k_Index_out_of_bounds_axis_d), 0, 0, 1, 0},
@@ -24258,11 +22619,9 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_kp_u_Invalid_mode_expected_c_or_fortr, __pyx_k_Invalid_mode_expected_c_or_fortr, sizeof(__pyx_k_Invalid_mode_expected_c_or_fortr), 0, 1, 0, 0},
     {&__pyx_kp_u_Invalid_shape_in_axis, __pyx_k_Invalid_shape_in_axis, sizeof(__pyx_k_Invalid_shape_in_axis), 0, 1, 0, 0},
     {&__pyx_n_s_List, __pyx_k_List, sizeof(__pyx_k_List), 0, 0, 1, 1},
-    {&__pyx_kp_s_List_Tuple_int_int_int, __pyx_k_List_Tuple_int_int_int, sizeof(__pyx_k_List_Tuple_int_int_int), 0, 0, 1, 0},
     {&__pyx_n_s_MemoryError, __pyx_k_MemoryError, sizeof(__pyx_k_MemoryError), 0, 0, 1, 1},
     {&__pyx_kp_s_MemoryView_of_r_at_0x_x, __pyx_k_MemoryView_of_r_at_0x_x, sizeof(__pyx_k_MemoryView_of_r_at_0x_x), 0, 0, 1, 0},
     {&__pyx_kp_s_MemoryView_of_r_object, __pyx_k_MemoryView_of_r_object, sizeof(__pyx_k_MemoryView_of_r_object), 0, 0, 1, 0},
-    {&__pyx_kp_s_No_matching_signature_found, __pyx_k_No_matching_signature_found, sizeof(__pyx_k_No_matching_signature_found), 0, 0, 1, 0},
     {&__pyx_n_b_O, __pyx_k_O, sizeof(__pyx_k_O), 0, 0, 0, 1},
     {&__pyx_kp_u_Out_of_bounds_on_buffer_access_a, __pyx_k_Out_of_bounds_on_buffer_access_a, sizeof(__pyx_k_Out_of_bounds_on_buffer_access_a), 0, 1, 0, 0},
     {&__pyx_n_s_PickleError, __pyx_k_PickleError, sizeof(__pyx_k_PickleError), 0, 0, 1, 1},
@@ -24273,24 +22632,23 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_kp_s_Unable_to_convert_item_to_object, __pyx_k_Unable_to_convert_item_to_object, sizeof(__pyx_k_Unable_to_convert_item_to_object), 0, 0, 1, 0},
     {&__pyx_n_s_ValueError, __pyx_k_ValueError, sizeof(__pyx_k_ValueError), 0, 0, 1, 1},
     {&__pyx_n_s_View_MemoryView, __pyx_k_View_MemoryView, sizeof(__pyx_k_View_MemoryView), 0, 0, 1, 1},
-    {&__pyx_kp_s__10, __pyx_k__10, sizeof(__pyx_k__10), 0, 0, 1, 0},
-    {&__pyx_kp_s__11, __pyx_k__11, sizeof(__pyx_k__11), 0, 0, 1, 0},
-    {&__pyx_kp_u__11, __pyx_k__11, sizeof(__pyx_k__11), 0, 1, 0, 0},
     {&__pyx_kp_u__2, __pyx_k__2, sizeof(__pyx_k__2), 0, 1, 0, 0},
+    {&__pyx_n_s__26, __pyx_k__26, sizeof(__pyx_k__26), 0, 0, 1, 1},
+    {&__pyx_n_s__29, __pyx_k__29, sizeof(__pyx_k__29), 0, 0, 1, 1},
     {&__pyx_n_s__3, __pyx_k__3, sizeof(__pyx_k__3), 0, 0, 1, 1},
-    {&__pyx_n_s__31, __pyx_k__31, sizeof(__pyx_k__31), 0, 0, 1, 1},
     {&__pyx_kp_u__6, __pyx_k__6, sizeof(__pyx_k__6), 0, 1, 0, 0},
     {&__pyx_kp_u__7, __pyx_k__7, sizeof(__pyx_k__7), 0, 1, 0, 0},
     {&__pyx_n_s_abc, __pyx_k_abc, sizeof(__pyx_k_abc), 0, 0, 1, 1},
+    {&__pyx_n_s_all_valid_voxels, __pyx_k_all_valid_voxels, sizeof(__pyx_k_all_valid_voxels), 0, 0, 1, 1},
     {&__pyx_n_s_allocate_buffer, __pyx_k_allocate_buffer, sizeof(__pyx_k_allocate_buffer), 0, 0, 1, 1},
     {&__pyx_kp_u_and, __pyx_k_and, sizeof(__pyx_k_and), 0, 1, 0, 0},
-    {&__pyx_n_s_args, __pyx_k_args, sizeof(__pyx_k_args), 0, 0, 1, 1},
     {&__pyx_n_s_asyncio_coroutines, __pyx_k_asyncio_coroutines, sizeof(__pyx_k_asyncio_coroutines), 0, 0, 1, 1},
     {&__pyx_n_s_base, __pyx_k_base, sizeof(__pyx_k_base), 0, 0, 1, 1},
     {&__pyx_n_s_bresenham3D, __pyx_k_bresenham3D, sizeof(__pyx_k_bresenham3D), 0, 0, 1, 1},
     {&__pyx_n_s_bresenham3DWithMask, __pyx_k_bresenham3DWithMask, sizeof(__pyx_k_bresenham3DWithMask), 0, 0, 1, 1},
     {&__pyx_n_s_bresenham3DWithMaskSingle, __pyx_k_bresenham3DWithMaskSingle, sizeof(__pyx_k_bresenham3DWithMaskSingle), 0, 0, 1, 1},
     {&__pyx_kp_s_bresenham3D_pyx, __pyx_k_bresenham3D_pyx, sizeof(__pyx_k_bresenham3D_pyx), 0, 0, 1, 0},
+    {&__pyx_n_s_bresenham_3D_lines, __pyx_k_bresenham_3D_lines, sizeof(__pyx_k_bresenham_3D_lines), 0, 0, 1, 1},
     {&__pyx_n_s_c, __pyx_k_c, sizeof(__pyx_k_c), 0, 0, 1, 1},
     {&__pyx_n_u_c, __pyx_k_c, sizeof(__pyx_k_c), 0, 1, 0, 1},
     {&__pyx_n_s_class, __pyx_k_class, sizeof(__pyx_k_class), 0, 0, 1, 1},
@@ -24298,15 +22656,15 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_n_s_cline_in_traceback, __pyx_k_cline_in_traceback, sizeof(__pyx_k_cline_in_traceback), 0, 0, 1, 1},
     {&__pyx_n_s_collections, __pyx_k_collections, sizeof(__pyx_k_collections), 0, 0, 1, 1},
     {&__pyx_kp_s_collections_abc, __pyx_k_collections_abc, sizeof(__pyx_k_collections_abc), 0, 0, 1, 0},
+    {&__pyx_n_s_contact_voxel_1, __pyx_k_contact_voxel_1, sizeof(__pyx_k_contact_voxel_1), 0, 0, 1, 1},
+    {&__pyx_n_s_contact_voxel_2, __pyx_k_contact_voxel_2, sizeof(__pyx_k_contact_voxel_2), 0, 0, 1, 1},
+    {&__pyx_n_s_contact_voxels_list_of_lists, __pyx_k_contact_voxels_list_of_lists, sizeof(__pyx_k_contact_voxels_list_of_lists), 0, 0, 1, 1},
     {&__pyx_kp_s_contiguous_and_direct, __pyx_k_contiguous_and_direct, sizeof(__pyx_k_contiguous_and_direct), 0, 0, 1, 0},
     {&__pyx_kp_s_contiguous_and_indirect, __pyx_k_contiguous_and_indirect, sizeof(__pyx_k_contiguous_and_indirect), 0, 0, 1, 0},
     {&__pyx_n_s_count, __pyx_k_count, sizeof(__pyx_k_count), 0, 0, 1, 1},
-    {&__pyx_n_s_current_end, __pyx_k_current_end, sizeof(__pyx_k_current_end), 0, 0, 1, 1},
-    {&__pyx_n_s_current_start, __pyx_k_current_start, sizeof(__pyx_k_current_start), 0, 0, 1, 1},
-    {&__pyx_n_s_defaults, __pyx_k_defaults, sizeof(__pyx_k_defaults), 0, 0, 1, 1},
+    {&__pyx_n_s_current_pair_contact_sites, __pyx_k_current_pair_contact_sites, sizeof(__pyx_k_current_pair_contact_sites), 0, 0, 1, 1},
     {&__pyx_n_s_dict, __pyx_k_dict, sizeof(__pyx_k_dict), 0, 0, 1, 1},
     {&__pyx_kp_u_disable, __pyx_k_disable, sizeof(__pyx_k_disable), 0, 1, 0, 0},
-    {&__pyx_n_s_dtype, __pyx_k_dtype, sizeof(__pyx_k_dtype), 0, 0, 1, 1},
     {&__pyx_n_s_dtype_is_object, __pyx_k_dtype_is_object, sizeof(__pyx_k_dtype_is_object), 0, 0, 1, 1},
     {&__pyx_n_s_dx, __pyx_k_dx, sizeof(__pyx_k_dx), 0, 0, 1, 1},
     {&__pyx_n_s_dy, __pyx_k_dy, sizeof(__pyx_k_dy), 0, 0, 1, 1},
@@ -24316,18 +22674,18 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_n_s_ends_array, __pyx_k_ends_array, sizeof(__pyx_k_ends_array), 0, 0, 1, 1},
     {&__pyx_n_s_enumerate, __pyx_k_enumerate, sizeof(__pyx_k_enumerate), 0, 0, 1, 1},
     {&__pyx_n_s_error, __pyx_k_error, sizeof(__pyx_k_error), 0, 0, 1, 1},
-    {&__pyx_n_s_find_boundary, __pyx_k_find_boundary, sizeof(__pyx_k_find_boundary), 0, 0, 1, 1},
     {&__pyx_n_s_flags, __pyx_k_flags, sizeof(__pyx_k_flags), 0, 0, 1, 1},
     {&__pyx_n_s_format, __pyx_k_format, sizeof(__pyx_k_format), 0, 0, 1, 1},
     {&__pyx_n_s_fortran, __pyx_k_fortran, sizeof(__pyx_k_fortran), 0, 0, 1, 1},
     {&__pyx_n_u_fortran, __pyx_k_fortran, sizeof(__pyx_k_fortran), 0, 1, 0, 1},
-    {&__pyx_n_s_fused_sigindex, __pyx_k_fused_sigindex, sizeof(__pyx_k_fused_sigindex), 0, 0, 1, 1},
+    {&__pyx_n_s_found_contact_voxels, __pyx_k_found_contact_voxels, sizeof(__pyx_k_found_contact_voxels), 0, 0, 1, 1},
     {&__pyx_kp_u_gc, __pyx_k_gc, sizeof(__pyx_k_gc), 0, 1, 0, 0},
-    {&__pyx_n_s_get, __pyx_k_get, sizeof(__pyx_k_get), 0, 0, 1, 1},
     {&__pyx_n_s_getstate, __pyx_k_getstate, sizeof(__pyx_k_getstate), 0, 0, 1, 1},
     {&__pyx_kp_u_got, __pyx_k_got, sizeof(__pyx_k_got), 0, 1, 0, 0},
     {&__pyx_kp_u_got_differing_extents_in_dimensi, __pyx_k_got_differing_extents_in_dimensi, sizeof(__pyx_k_got_differing_extents_in_dimensi), 0, 1, 0, 0},
+    {&__pyx_n_s_i, __pyx_k_i, sizeof(__pyx_k_i), 0, 0, 1, 1},
     {&__pyx_n_s_id, __pyx_k_id, sizeof(__pyx_k_id), 0, 0, 1, 1},
+    {&__pyx_n_s_idx, __pyx_k_idx, sizeof(__pyx_k_idx), 0, 0, 1, 1},
     {&__pyx_n_s_import, __pyx_k_import, sizeof(__pyx_k_import), 0, 0, 1, 1},
     {&__pyx_n_s_index, __pyx_k_index, sizeof(__pyx_k_index), 0, 0, 1, 1},
     {&__pyx_n_s_initializing, __pyx_k_initializing, sizeof(__pyx_k_initializing), 0, 0, 1, 1},
@@ -24335,11 +22693,10 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_kp_u_isenabled, __pyx_k_isenabled, sizeof(__pyx_k_isenabled), 0, 1, 0, 0},
     {&__pyx_n_s_itemsize, __pyx_k_itemsize, sizeof(__pyx_k_itemsize), 0, 0, 1, 1},
     {&__pyx_kp_s_itemsize_0_for_cython_array, __pyx_k_itemsize_0_for_cython_array, sizeof(__pyx_k_itemsize_0_for_cython_array), 0, 0, 1, 0},
-    {&__pyx_n_s_kind, __pyx_k_kind, sizeof(__pyx_k_kind), 0, 0, 1, 1},
-    {&__pyx_n_s_kwargs, __pyx_k_kwargs, sizeof(__pyx_k_kwargs), 0, 0, 1, 1},
-    {&__pyx_n_s_listOfPoints, __pyx_k_listOfPoints, sizeof(__pyx_k_listOfPoints), 0, 0, 1, 1},
+    {&__pyx_n_s_j, __pyx_k_j, sizeof(__pyx_k_j), 0, 0, 1, 1},
     {&__pyx_n_s_main, __pyx_k_main, sizeof(__pyx_k_main), 0, 0, 1, 1},
     {&__pyx_n_s_mask, __pyx_k_mask, sizeof(__pyx_k_mask), 0, 0, 1, 1},
+    {&__pyx_n_s_max_num_voxels, __pyx_k_max_num_voxels, sizeof(__pyx_k_max_num_voxels), 0, 0, 1, 1},
     {&__pyx_n_s_memview, __pyx_k_memview, sizeof(__pyx_k_memview), 0, 0, 1, 1},
     {&__pyx_n_s_mode, __pyx_k_mode, sizeof(__pyx_k_mode), 0, 0, 1, 1},
     {&__pyx_n_s_name, __pyx_k_name, sizeof(__pyx_k_name), 0, 0, 1, 1},
@@ -24347,16 +22704,17 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_n_s_ndim, __pyx_k_ndim, sizeof(__pyx_k_ndim), 0, 0, 1, 1},
     {&__pyx_n_s_new, __pyx_k_new, sizeof(__pyx_k_new), 0, 0, 1, 1},
     {&__pyx_kp_s_no_default___reduce___due_to_non, __pyx_k_no_default___reduce___due_to_non, sizeof(__pyx_k_no_default___reduce___due_to_non), 0, 0, 1, 0},
-    {&__pyx_n_s_numpy, __pyx_k_numpy, sizeof(__pyx_k_numpy), 0, 0, 1, 1},
-    {&__pyx_n_s_nx, __pyx_k_nx, sizeof(__pyx_k_nx), 0, 0, 1, 1},
-    {&__pyx_n_s_ny, __pyx_k_ny, sizeof(__pyx_k_ny), 0, 0, 1, 1},
-    {&__pyx_n_s_nz, __pyx_k_nz, sizeof(__pyx_k_nz), 0, 0, 1, 1},
     {&__pyx_n_s_obj, __pyx_k_obj, sizeof(__pyx_k_obj), 0, 0, 1, 1},
+    {&__pyx_n_s_object_1_surface_voxel_coordinat, __pyx_k_object_1_surface_voxel_coordinat, sizeof(__pyx_k_object_1_surface_voxel_coordinat), 0, 0, 1, 1},
+    {&__pyx_n_s_object_2_surface_voxel_coordinat, __pyx_k_object_2_surface_voxel_coordinat, sizeof(__pyx_k_object_2_surface_voxel_coordinat), 0, 0, 1, 1},
     {&__pyx_n_s_output_list, __pyx_k_output_list, sizeof(__pyx_k_output_list), 0, 0, 1, 1},
+    {&__pyx_n_s_output_set, __pyx_k_output_set, sizeof(__pyx_k_output_set), 0, 0, 1, 1},
     {&__pyx_n_s_p1, __pyx_k_p1, sizeof(__pyx_k_p1), 0, 0, 1, 1},
     {&__pyx_n_s_p2, __pyx_k_p2, sizeof(__pyx_k_p2), 0, 0, 1, 1},
     {&__pyx_n_s_pack, __pyx_k_pack, sizeof(__pyx_k_pack), 0, 0, 1, 1},
     {&__pyx_n_s_pickle, __pyx_k_pickle, sizeof(__pyx_k_pickle), 0, 0, 1, 1},
+    {&__pyx_n_s_point, __pyx_k_point, sizeof(__pyx_k_point), 0, 0, 1, 1},
+    {&__pyx_n_s_points, __pyx_k_points, sizeof(__pyx_k_points), 0, 0, 1, 1},
     {&__pyx_n_s_pyx_PickleError, __pyx_k_pyx_PickleError, sizeof(__pyx_k_pyx_PickleError), 0, 0, 1, 1},
     {&__pyx_n_s_pyx_checksum, __pyx_k_pyx_checksum, sizeof(__pyx_k_pyx_checksum), 0, 0, 1, 1},
     {&__pyx_n_s_pyx_result, __pyx_k_pyx_result, sizeof(__pyx_k_pyx_result), 0, 0, 1, 1},
@@ -24369,15 +22727,12 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_n_s_reduce_cython, __pyx_k_reduce_cython, sizeof(__pyx_k_reduce_cython), 0, 0, 1, 1},
     {&__pyx_n_s_reduce_ex, __pyx_k_reduce_ex, sizeof(__pyx_k_reduce_ex), 0, 0, 1, 1},
     {&__pyx_n_s_register, __pyx_k_register, sizeof(__pyx_k_register), 0, 0, 1, 1},
-    {&__pyx_n_s_return, __pyx_k_return, sizeof(__pyx_k_return), 0, 0, 1, 1},
-    {&__pyx_n_s_s, __pyx_k_s, sizeof(__pyx_k_s), 0, 0, 1, 1},
+    {&__pyx_n_s_rows, __pyx_k_rows, sizeof(__pyx_k_rows), 0, 0, 1, 1},
     {&__pyx_n_s_setstate, __pyx_k_setstate, sizeof(__pyx_k_setstate), 0, 0, 1, 1},
     {&__pyx_n_s_setstate_cython, __pyx_k_setstate_cython, sizeof(__pyx_k_setstate_cython), 0, 0, 1, 1},
     {&__pyx_n_s_shape, __pyx_k_shape, sizeof(__pyx_k_shape), 0, 0, 1, 1},
-    {&__pyx_n_s_signatures, __pyx_k_signatures, sizeof(__pyx_k_signatures), 0, 0, 1, 1},
     {&__pyx_n_s_size, __pyx_k_size, sizeof(__pyx_k_size), 0, 0, 1, 1},
     {&__pyx_n_s_spec, __pyx_k_spec, sizeof(__pyx_k_spec), 0, 0, 1, 1},
-    {&__pyx_n_s_split, __pyx_k_split, sizeof(__pyx_k_split), 0, 0, 1, 1},
     {&__pyx_n_s_start, __pyx_k_start, sizeof(__pyx_k_start), 0, 0, 1, 1},
     {&__pyx_n_s_starts_array, __pyx_k_starts_array, sizeof(__pyx_k_starts_array), 0, 0, 1, 1},
     {&__pyx_n_s_step, __pyx_k_step, sizeof(__pyx_k_step), 0, 0, 1, 1},
@@ -24386,24 +22741,16 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_kp_s_strided_and_direct_or_indirect, __pyx_k_strided_and_direct_or_indirect, sizeof(__pyx_k_strided_and_direct_or_indirect), 0, 0, 1, 0},
     {&__pyx_kp_s_strided_and_indirect, __pyx_k_strided_and_indirect, sizeof(__pyx_k_strided_and_indirect), 0, 0, 1, 0},
     {&__pyx_kp_s_stringsource, __pyx_k_stringsource, sizeof(__pyx_k_stringsource), 0, 0, 1, 0},
-    {&__pyx_n_s_strip, __pyx_k_strip, sizeof(__pyx_k_strip), 0, 0, 1, 1},
     {&__pyx_n_s_struct, __pyx_k_struct, sizeof(__pyx_k_struct), 0, 0, 1, 1},
-    {&__pyx_n_s_surface_voxels, __pyx_k_surface_voxels, sizeof(__pyx_k_surface_voxels), 0, 0, 1, 1},
+    {&__pyx_n_s_sublist, __pyx_k_sublist, sizeof(__pyx_k_sublist), 0, 0, 1, 1},
     {&__pyx_n_s_sys, __pyx_k_sys, sizeof(__pyx_k_sys), 0, 0, 1, 1},
     {&__pyx_n_s_test, __pyx_k_test, sizeof(__pyx_k_test), 0, 0, 1, 1},
     {&__pyx_n_s_typing, __pyx_k_typing, sizeof(__pyx_k_typing), 0, 0, 1, 1},
     {&__pyx_kp_s_unable_to_allocate_array_data, __pyx_k_unable_to_allocate_array_data, sizeof(__pyx_k_unable_to_allocate_array_data), 0, 0, 1, 0},
     {&__pyx_kp_s_unable_to_allocate_shape_and_str, __pyx_k_unable_to_allocate_shape_and_str, sizeof(__pyx_k_unable_to_allocate_shape_and_str), 0, 0, 1, 0},
     {&__pyx_n_s_unpack, __pyx_k_unpack, sizeof(__pyx_k_unpack), 0, 0, 1, 1},
-    {&__pyx_kp_s_unsigned_char, __pyx_k_unsigned_char, sizeof(__pyx_k_unsigned_char), 0, 0, 1, 0},
-    {&__pyx_kp_s_unsigned_int, __pyx_k_unsigned_int, sizeof(__pyx_k_unsigned_int), 0, 0, 1, 0},
-    {&__pyx_kp_s_unsigned_long_long, __pyx_k_unsigned_long_long, sizeof(__pyx_k_unsigned_long_long), 0, 0, 1, 0},
-    {&__pyx_kp_s_unsigned_short, __pyx_k_unsigned_short, sizeof(__pyx_k_unsigned_short), 0, 0, 1, 0},
     {&__pyx_n_s_update, __pyx_k_update, sizeof(__pyx_k_update), 0, 0, 1, 1},
-    {&__pyx_n_s_values, __pyx_k_values, sizeof(__pyx_k_values), 0, 0, 1, 1},
     {&__pyx_n_s_version_info, __pyx_k_version_info, sizeof(__pyx_k_version_info), 0, 0, 1, 1},
-    {&__pyx_n_s_volume, __pyx_k_volume, sizeof(__pyx_k_volume), 0, 0, 1, 1},
-    {&__pyx_n_s_voxel_value, __pyx_k_voxel_value, sizeof(__pyx_k_voxel_value), 0, 0, 1, 1},
     {&__pyx_n_s_x, __pyx_k_x, sizeof(__pyx_k_x), 0, 0, 1, 1},
     {&__pyx_n_s_x1, __pyx_k_x1, sizeof(__pyx_k_x1), 0, 0, 1, 1},
     {&__pyx_n_s_x2, __pyx_k_x2, sizeof(__pyx_k_x2), 0, 0, 1, 1},
@@ -24415,7 +22762,6 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
     {&__pyx_n_s_z, __pyx_k_z, sizeof(__pyx_k_z), 0, 0, 1, 1},
     {&__pyx_n_s_z1, __pyx_k_z1, sizeof(__pyx_k_z1), 0, 0, 1, 1},
     {&__pyx_n_s_z2, __pyx_k_z2, sizeof(__pyx_k_z2), 0, 0, 1, 1},
-    {&__pyx_n_s_zip, __pyx_k_zip, sizeof(__pyx_k_zip), 0, 0, 1, 1},
     {&__pyx_n_s_zs, __pyx_k_zs, sizeof(__pyx_k_zs), 0, 0, 1, 1},
     {0, 0, 0, 0, 0, 0, 0}
   };
@@ -24423,13 +22769,12 @@ static int __Pyx_CreateStringTabAndInitStrings(void) {
 }
 /* #### Code section: cached_builtins ### */
 static CYTHON_SMALL_CODE int __Pyx_InitCachedBuiltins(void) {
-  __pyx_builtin_zip = __Pyx_GetBuiltinName(__pyx_n_s_zip); if (!__pyx_builtin_zip) __PYX_ERR(0, 89, __pyx_L1_error)
-  __pyx_builtin_TypeError = __Pyx_GetBuiltinName(__pyx_n_s_TypeError); if (!__pyx_builtin_TypeError) __PYX_ERR(0, 103, __pyx_L1_error)
-  __pyx_builtin_ValueError = __Pyx_GetBuiltinName(__pyx_n_s_ValueError); if (!__pyx_builtin_ValueError) __PYX_ERR(0, 103, __pyx_L1_error)
-  __pyx_builtin_range = __Pyx_GetBuiltinName(__pyx_n_s_range); if (!__pyx_builtin_range) __PYX_ERR(0, 113, __pyx_L1_error)
+  __pyx_builtin_range = __Pyx_GetBuiltinName(__pyx_n_s_range); if (!__pyx_builtin_range) __PYX_ERR(0, 180, __pyx_L1_error)
+  __pyx_builtin_enumerate = __Pyx_GetBuiltinName(__pyx_n_s_enumerate); if (!__pyx_builtin_enumerate) __PYX_ERR(0, 203, __pyx_L1_error)
   __pyx_builtin___import__ = __Pyx_GetBuiltinName(__pyx_n_s_import); if (!__pyx_builtin___import__) __PYX_ERR(1, 100, __pyx_L1_error)
+  __pyx_builtin_ValueError = __Pyx_GetBuiltinName(__pyx_n_s_ValueError); if (!__pyx_builtin_ValueError) __PYX_ERR(1, 141, __pyx_L1_error)
   __pyx_builtin_MemoryError = __Pyx_GetBuiltinName(__pyx_n_s_MemoryError); if (!__pyx_builtin_MemoryError) __PYX_ERR(1, 156, __pyx_L1_error)
-  __pyx_builtin_enumerate = __Pyx_GetBuiltinName(__pyx_n_s_enumerate); if (!__pyx_builtin_enumerate) __PYX_ERR(1, 159, __pyx_L1_error)
+  __pyx_builtin_TypeError = __Pyx_GetBuiltinName(__pyx_n_s_TypeError); if (!__pyx_builtin_TypeError) __PYX_ERR(1, 2, __pyx_L1_error)
   __pyx_builtin_AssertionError = __Pyx_GetBuiltinName(__pyx_n_s_AssertionError); if (!__pyx_builtin_AssertionError) __PYX_ERR(1, 373, __pyx_L1_error)
   __pyx_builtin_Ellipsis = __Pyx_GetBuiltinName(__pyx_n_s_Ellipsis); if (!__pyx_builtin_Ellipsis) __PYX_ERR(1, 408, __pyx_L1_error)
   __pyx_builtin_id = __Pyx_GetBuiltinName(__pyx_n_s_id); if (!__pyx_builtin_id) __PYX_ERR(1, 618, __pyx_L1_error)
@@ -24480,20 +22825,6 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
   __Pyx_GOTREF(__pyx_tuple__8);
   __Pyx_GIVEREF(__pyx_tuple__8);
 
-  /* "bresenham3D.pyx":103
- *     unsigned long long
- * 
- * def find_boundary(             # <<<<<<<<<<<<<<
- *     uint_t[:, :, :] volume, unsigned char[:,:,:] surface_voxels
- * ):
- */
-  __pyx_tuple__12 = PyTuple_Pack(1, __pyx_kp_s_No_matching_signature_found); if (unlikely(!__pyx_tuple__12)) __PYX_ERR(0, 103, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__12);
-  __Pyx_GIVEREF(__pyx_tuple__12);
-  __pyx_tuple__13 = PyTuple_Pack(1, __pyx_kp_s_Function_call_with_ambiguous_arg); if (unlikely(!__pyx_tuple__13)) __PYX_ERR(0, 103, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__13);
-  __Pyx_GIVEREF(__pyx_tuple__13);
-
   /* "View.MemoryView":100
  * cdef object __pyx_collections_abc_Sequence "__pyx_collections_abc_Sequence"
  * try:
@@ -24501,12 +22832,12 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
  *         __pyx_collections_abc_Sequence = __import__("collections.abc").abc.Sequence
  *     else:
  */
-  __pyx_tuple__14 = PyTuple_Pack(1, __pyx_n_s_sys); if (unlikely(!__pyx_tuple__14)) __PYX_ERR(1, 100, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__14);
-  __Pyx_GIVEREF(__pyx_tuple__14);
-  __pyx_tuple__15 = PyTuple_Pack(2, __pyx_int_3, __pyx_int_3); if (unlikely(!__pyx_tuple__15)) __PYX_ERR(1, 100, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__15);
-  __Pyx_GIVEREF(__pyx_tuple__15);
+  __pyx_tuple__11 = PyTuple_Pack(1, __pyx_n_s_sys); if (unlikely(!__pyx_tuple__11)) __PYX_ERR(1, 100, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__11);
+  __Pyx_GIVEREF(__pyx_tuple__11);
+  __pyx_tuple__12 = PyTuple_Pack(2, __pyx_int_3, __pyx_int_3); if (unlikely(!__pyx_tuple__12)) __PYX_ERR(1, 100, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__12);
+  __Pyx_GIVEREF(__pyx_tuple__12);
 
   /* "View.MemoryView":101
  * try:
@@ -24515,9 +22846,9 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
  *     else:
  *         __pyx_collections_abc_Sequence = __import__("collections").Sequence
  */
-  __pyx_tuple__16 = PyTuple_Pack(1, __pyx_kp_s_collections_abc); if (unlikely(!__pyx_tuple__16)) __PYX_ERR(1, 101, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__16);
-  __Pyx_GIVEREF(__pyx_tuple__16);
+  __pyx_tuple__13 = PyTuple_Pack(1, __pyx_kp_s_collections_abc); if (unlikely(!__pyx_tuple__13)) __PYX_ERR(1, 101, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__13);
+  __Pyx_GIVEREF(__pyx_tuple__13);
 
   /* "View.MemoryView":103
  *         __pyx_collections_abc_Sequence = __import__("collections.abc").abc.Sequence
@@ -24526,9 +22857,9 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
  * except:
  * 
  */
-  __pyx_tuple__17 = PyTuple_Pack(1, __pyx_n_s_collections); if (unlikely(!__pyx_tuple__17)) __PYX_ERR(1, 103, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__17);
-  __Pyx_GIVEREF(__pyx_tuple__17);
+  __pyx_tuple__14 = PyTuple_Pack(1, __pyx_n_s_collections); if (unlikely(!__pyx_tuple__14)) __PYX_ERR(1, 103, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__14);
+  __Pyx_GIVEREF(__pyx_tuple__14);
 
   /* "View.MemoryView":309
  *         return self.name
@@ -24537,9 +22868,9 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
  * cdef strided = Enum("<strided and direct>") # default
  * cdef indirect = Enum("<strided and indirect>")
  */
-  __pyx_tuple__18 = PyTuple_Pack(1, __pyx_kp_s_strided_and_direct_or_indirect); if (unlikely(!__pyx_tuple__18)) __PYX_ERR(1, 309, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__18);
-  __Pyx_GIVEREF(__pyx_tuple__18);
+  __pyx_tuple__15 = PyTuple_Pack(1, __pyx_kp_s_strided_and_direct_or_indirect); if (unlikely(!__pyx_tuple__15)) __PYX_ERR(1, 309, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__15);
+  __Pyx_GIVEREF(__pyx_tuple__15);
 
   /* "View.MemoryView":310
  * 
@@ -24548,9 +22879,9 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
  * cdef indirect = Enum("<strided and indirect>")
  * 
  */
-  __pyx_tuple__19 = PyTuple_Pack(1, __pyx_kp_s_strided_and_direct); if (unlikely(!__pyx_tuple__19)) __PYX_ERR(1, 310, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__19);
-  __Pyx_GIVEREF(__pyx_tuple__19);
+  __pyx_tuple__16 = PyTuple_Pack(1, __pyx_kp_s_strided_and_direct); if (unlikely(!__pyx_tuple__16)) __PYX_ERR(1, 310, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__16);
+  __Pyx_GIVEREF(__pyx_tuple__16);
 
   /* "View.MemoryView":311
  * cdef generic = Enum("<strided and direct or indirect>")
@@ -24559,9 +22890,9 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
  * 
  * 
  */
-  __pyx_tuple__20 = PyTuple_Pack(1, __pyx_kp_s_strided_and_indirect); if (unlikely(!__pyx_tuple__20)) __PYX_ERR(1, 311, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__20);
-  __Pyx_GIVEREF(__pyx_tuple__20);
+  __pyx_tuple__17 = PyTuple_Pack(1, __pyx_kp_s_strided_and_indirect); if (unlikely(!__pyx_tuple__17)) __PYX_ERR(1, 311, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__17);
+  __Pyx_GIVEREF(__pyx_tuple__17);
 
   /* "View.MemoryView":314
  * 
@@ -24570,9 +22901,9 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
  * cdef indirect_contiguous = Enum("<contiguous and indirect>")
  * 
  */
-  __pyx_tuple__21 = PyTuple_Pack(1, __pyx_kp_s_contiguous_and_direct); if (unlikely(!__pyx_tuple__21)) __PYX_ERR(1, 314, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__21);
-  __Pyx_GIVEREF(__pyx_tuple__21);
+  __pyx_tuple__18 = PyTuple_Pack(1, __pyx_kp_s_contiguous_and_direct); if (unlikely(!__pyx_tuple__18)) __PYX_ERR(1, 314, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__18);
+  __Pyx_GIVEREF(__pyx_tuple__18);
 
   /* "View.MemoryView":315
  * 
@@ -24581,55 +22912,55 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
  * 
  * 
  */
-  __pyx_tuple__22 = PyTuple_Pack(1, __pyx_kp_s_contiguous_and_indirect); if (unlikely(!__pyx_tuple__22)) __PYX_ERR(1, 315, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__22);
-  __Pyx_GIVEREF(__pyx_tuple__22);
+  __pyx_tuple__19 = PyTuple_Pack(1, __pyx_kp_s_contiguous_and_indirect); if (unlikely(!__pyx_tuple__19)) __PYX_ERR(1, 315, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__19);
+  __Pyx_GIVEREF(__pyx_tuple__19);
 
   /* "(tree fragment)":1
  * def __pyx_unpickle_Enum(__pyx_type, long __pyx_checksum, __pyx_state):             # <<<<<<<<<<<<<<
  *     cdef object __pyx_PickleError
  *     cdef object __pyx_result
  */
-  __pyx_tuple__23 = PyTuple_Pack(5, __pyx_n_s_pyx_type, __pyx_n_s_pyx_checksum, __pyx_n_s_pyx_state, __pyx_n_s_pyx_PickleError, __pyx_n_s_pyx_result); if (unlikely(!__pyx_tuple__23)) __PYX_ERR(1, 1, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__23);
-  __Pyx_GIVEREF(__pyx_tuple__23);
-  __pyx_codeobj__24 = (PyObject*)__Pyx_PyCode_New(3, 0, 0, 5, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__23, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_stringsource, __pyx_n_s_pyx_unpickle_Enum, 1, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__24)) __PYX_ERR(1, 1, __pyx_L1_error)
+  __pyx_tuple__20 = PyTuple_Pack(5, __pyx_n_s_pyx_type, __pyx_n_s_pyx_checksum, __pyx_n_s_pyx_state, __pyx_n_s_pyx_PickleError, __pyx_n_s_pyx_result); if (unlikely(!__pyx_tuple__20)) __PYX_ERR(1, 1, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__20);
+  __Pyx_GIVEREF(__pyx_tuple__20);
+  __pyx_codeobj__21 = (PyObject*)__Pyx_PyCode_New(3, 0, 0, 5, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__20, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_stringsource, __pyx_n_s_pyx_unpickle_Enum, 1, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__21)) __PYX_ERR(1, 1, __pyx_L1_error)
 
   /* "bresenham3D.pyx":14
  *         return True
  * 
  * def bresenham3DWithMaskSingle(             # <<<<<<<<<<<<<<
- *     int x1, int y1, int z1, int x2, int y2, int z2, unsigned char[:,:,:] mask=None
- * ) -> List[Tuple[int, int, int]]:
+ *     int x1, int y1, int z1, int x2, int y2, int z2,
+ *     list points,
  */
-  __pyx_tuple__25 = PyTuple_Pack(16, __pyx_n_s_x1, __pyx_n_s_y1, __pyx_n_s_z1, __pyx_n_s_x2, __pyx_n_s_y2, __pyx_n_s_z2, __pyx_n_s_mask, __pyx_n_s_listOfPoints, __pyx_n_s_dx, __pyx_n_s_dy, __pyx_n_s_dz, __pyx_n_s_xs, __pyx_n_s_ys, __pyx_n_s_zs, __pyx_n_s_p1, __pyx_n_s_p2); if (unlikely(!__pyx_tuple__25)) __PYX_ERR(0, 14, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__25);
-  __Pyx_GIVEREF(__pyx_tuple__25);
-  __pyx_codeobj__26 = (PyObject*)__Pyx_PyCode_New(7, 0, 0, 16, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__25, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_bresenham3D_pyx, __pyx_n_s_bresenham3DWithMaskSingle, 14, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__26)) __PYX_ERR(0, 14, __pyx_L1_error)
+  __pyx_tuple__22 = PyTuple_Pack(17, __pyx_n_s_x1, __pyx_n_s_y1, __pyx_n_s_z1, __pyx_n_s_x2, __pyx_n_s_y2, __pyx_n_s_z2, __pyx_n_s_points, __pyx_n_s_mask, __pyx_n_s_idx, __pyx_n_s_dx, __pyx_n_s_dy, __pyx_n_s_dz, __pyx_n_s_xs, __pyx_n_s_ys, __pyx_n_s_zs, __pyx_n_s_p1, __pyx_n_s_p2); if (unlikely(!__pyx_tuple__22)) __PYX_ERR(0, 14, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__22);
+  __Pyx_GIVEREF(__pyx_tuple__22);
+  __pyx_codeobj__23 = (PyObject*)__Pyx_PyCode_New(8, 0, 0, 17, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__22, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_bresenham3D_pyx, __pyx_n_s_bresenham3DWithMaskSingle, 14, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__23)) __PYX_ERR(0, 14, __pyx_L1_error)
 
-  /* "bresenham3D.pyx":85
- *     return listOfPoints
+  /* "bresenham3D.pyx":172
+ *     return idx
  * 
  * def bresenham3DWithMask(             # <<<<<<<<<<<<<<
  *     int[:, :] starts_array, int[:, :] ends_array, unsigned char[:,:,:] mask = None
- * ) -> List[Tuple[int, int, int]]:
- */
-  __pyx_tuple__27 = PyTuple_Pack(6, __pyx_n_s_starts_array, __pyx_n_s_ends_array, __pyx_n_s_mask, __pyx_n_s_output_list, __pyx_n_s_current_start, __pyx_n_s_current_end); if (unlikely(!__pyx_tuple__27)) __PYX_ERR(0, 85, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__27);
-  __Pyx_GIVEREF(__pyx_tuple__27);
-  __pyx_codeobj__28 = (PyObject*)__Pyx_PyCode_New(3, 0, 0, 6, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__27, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_bresenham3D_pyx, __pyx_n_s_bresenham3DWithMask, 85, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__28)) __PYX_ERR(0, 85, __pyx_L1_error)
-
-  /* "bresenham3D.pyx":103
- *     unsigned long long
- * 
- * def find_boundary(             # <<<<<<<<<<<<<<
- *     uint_t[:, :, :] volume, unsigned char[:,:,:] surface_voxels
  * ):
  */
-  __pyx_tuple__29 = PyTuple_Pack(9, __pyx_n_s_volume, __pyx_n_s_surface_voxels, __pyx_n_s_x, __pyx_n_s_y, __pyx_n_s_z, __pyx_n_s_nx, __pyx_n_s_ny, __pyx_n_s_nz, __pyx_n_s_voxel_value); if (unlikely(!__pyx_tuple__29)) __PYX_ERR(0, 103, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__29);
-  __Pyx_GIVEREF(__pyx_tuple__29);
-  __pyx_codeobj__30 = (PyObject*)__Pyx_PyCode_New(2, 0, 0, 9, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__29, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_bresenham3D_pyx, __pyx_n_s_find_boundary, 103, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__30)) __PYX_ERR(0, 103, __pyx_L1_error)
+  __pyx_tuple__24 = PyTuple_Pack(9, __pyx_n_s_starts_array, __pyx_n_s_ends_array, __pyx_n_s_mask, __pyx_n_s_output_list, __pyx_n_s_rows, __pyx_n_s_output_set, __pyx_n_s_points, __pyx_n_s_i, __pyx_n_s_idx); if (unlikely(!__pyx_tuple__24)) __PYX_ERR(0, 172, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__24);
+  __Pyx_GIVEREF(__pyx_tuple__24);
+  __pyx_codeobj__25 = (PyObject*)__Pyx_PyCode_New(3, 0, 0, 9, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__24, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_bresenham3D_pyx, __pyx_n_s_bresenham3DWithMask, 172, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__25)) __PYX_ERR(0, 172, __pyx_L1_error)
+
+  /* "bresenham3D.pyx":191
+ *     return output_list
+ * 
+ * def bresenham_3D_lines(list contact_voxels_list_of_lists,             # <<<<<<<<<<<<<<
+ *     long  [:,:] object_1_surface_voxel_coordinates,
+ *     long  [:,:] object_2_surface_voxel_coordinates,
+ */
+  __pyx_tuple__27 = PyTuple_Pack(20, __pyx_n_s_contact_voxels_list_of_lists, __pyx_n_s_object_1_surface_voxel_coordinat, __pyx_n_s_object_2_surface_voxel_coordinat, __pyx_n_s_current_pair_contact_sites, __pyx_n_s_max_num_voxels, __pyx_n_s_mask, __pyx_n_s_all_valid_voxels, __pyx_n_s_points, __pyx_n_s_i, __pyx_n_s_j, __pyx_n_s_x, __pyx_n_s_y, __pyx_n_s_z, __pyx_n_s_sublist, __pyx_n_s_point, __pyx_n_s_found_contact_voxels, __pyx_n_s_contact_voxel_1, __pyx_n_s_contact_voxel_2, __pyx_n_s_idx, __pyx_n_s__26); if (unlikely(!__pyx_tuple__27)) __PYX_ERR(0, 191, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__27);
+  __Pyx_GIVEREF(__pyx_tuple__27);
+  __pyx_codeobj__28 = (PyObject*)__Pyx_PyCode_New(6, 0, 0, 20, 0, CO_OPTIMIZED|CO_NEWLOCALS, __pyx_empty_bytes, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_tuple__27, __pyx_empty_tuple, __pyx_empty_tuple, __pyx_kp_s_bresenham3D_pyx, __pyx_n_s_bresenham_3D_lines, 191, __pyx_empty_bytes); if (unlikely(!__pyx_codeobj__28)) __PYX_ERR(0, 191, __pyx_L1_error)
   __Pyx_RefNannyFinishContext();
   return 0;
   __pyx_L1_error:;
@@ -24639,14 +22970,11 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
 /* #### Code section: init_constants ### */
 
 static CYTHON_SMALL_CODE int __Pyx_InitConstants(void) {
-  __pyx_umethod_PyDict_Type_get.type = (PyObject*)&PyDict_Type;
-  __pyx_umethod_PyDict_Type_get.method_name = &__pyx_n_s_get;
-  __pyx_umethod_PyDict_Type_values.type = (PyObject*)&PyDict_Type;
-  __pyx_umethod_PyDict_Type_values.method_name = &__pyx_n_s_values;
+  __pyx_umethod_PySet_Type_update.type = (PyObject*)&PySet_Type;
+  __pyx_umethod_PySet_Type_update.method_name = &__pyx_n_s_update;
   if (__Pyx_CreateStringTabAndInitStrings() < 0) __PYX_ERR(0, 1, __pyx_L1_error);
   __pyx_int_0 = PyInt_FromLong(0); if (unlikely(!__pyx_int_0)) __PYX_ERR(0, 1, __pyx_L1_error)
   __pyx_int_1 = PyInt_FromLong(1); if (unlikely(!__pyx_int_1)) __PYX_ERR(0, 1, __pyx_L1_error)
-  __pyx_int_2 = PyInt_FromLong(2); if (unlikely(!__pyx_int_2)) __PYX_ERR(0, 1, __pyx_L1_error)
   __pyx_int_3 = PyInt_FromLong(3); if (unlikely(!__pyx_int_3)) __PYX_ERR(0, 1, __pyx_L1_error)
   __pyx_int_112105877 = PyInt_FromLong(112105877L); if (unlikely(!__pyx_int_112105877)) __PYX_ERR(0, 1, __pyx_L1_error)
   __pyx_int_136983863 = PyInt_FromLong(136983863L); if (unlikely(!__pyx_int_136983863)) __PYX_ERR(0, 1, __pyx_L1_error)
@@ -25224,12 +23552,12 @@ if (!__Pyx_RefNanny) {
  *         __pyx_collections_abc_Sequence = __import__("collections.abc").abc.Sequence
  *     else:
  */
-      __pyx_t_4 = __Pyx_PyObject_Call(__pyx_builtin___import__, __pyx_tuple__14, NULL); if (unlikely(!__pyx_t_4)) __PYX_ERR(1, 100, __pyx_L2_error)
+      __pyx_t_4 = __Pyx_PyObject_Call(__pyx_builtin___import__, __pyx_tuple__11, NULL); if (unlikely(!__pyx_t_4)) __PYX_ERR(1, 100, __pyx_L2_error)
       __Pyx_GOTREF(__pyx_t_4);
       __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_n_s_version_info); if (unlikely(!__pyx_t_5)) __PYX_ERR(1, 100, __pyx_L2_error)
       __Pyx_GOTREF(__pyx_t_5);
       __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-      __pyx_t_4 = PyObject_RichCompare(__pyx_t_5, __pyx_tuple__15, Py_GE); __Pyx_XGOTREF(__pyx_t_4); if (unlikely(!__pyx_t_4)) __PYX_ERR(1, 100, __pyx_L2_error)
+      __pyx_t_4 = PyObject_RichCompare(__pyx_t_5, __pyx_tuple__12, Py_GE); __Pyx_XGOTREF(__pyx_t_4); if (unlikely(!__pyx_t_4)) __PYX_ERR(1, 100, __pyx_L2_error)
       __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
       __pyx_t_6 = __Pyx_PyObject_IsTrue(__pyx_t_4); if (unlikely((__pyx_t_6 < 0))) __PYX_ERR(1, 100, __pyx_L2_error)
       __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
@@ -25242,7 +23570,7 @@ if (!__Pyx_RefNanny) {
  *     else:
  *         __pyx_collections_abc_Sequence = __import__("collections").Sequence
  */
-        __pyx_t_4 = __Pyx_PyObject_Call(__pyx_builtin___import__, __pyx_tuple__16, NULL); if (unlikely(!__pyx_t_4)) __PYX_ERR(1, 101, __pyx_L2_error)
+        __pyx_t_4 = __Pyx_PyObject_Call(__pyx_builtin___import__, __pyx_tuple__13, NULL); if (unlikely(!__pyx_t_4)) __PYX_ERR(1, 101, __pyx_L2_error)
         __Pyx_GOTREF(__pyx_t_4);
         __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_n_s_abc); if (unlikely(!__pyx_t_5)) __PYX_ERR(1, 101, __pyx_L2_error)
         __Pyx_GOTREF(__pyx_t_5);
@@ -25273,7 +23601,7 @@ if (!__Pyx_RefNanny) {
  * 
  */
       /*else*/ {
-        __pyx_t_4 = __Pyx_PyObject_Call(__pyx_builtin___import__, __pyx_tuple__17, NULL); if (unlikely(!__pyx_t_4)) __PYX_ERR(1, 103, __pyx_L2_error)
+        __pyx_t_4 = __Pyx_PyObject_Call(__pyx_builtin___import__, __pyx_tuple__14, NULL); if (unlikely(!__pyx_t_4)) __PYX_ERR(1, 103, __pyx_L2_error)
         __Pyx_GOTREF(__pyx_t_4);
         __pyx_t_5 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_n_s_Sequence); if (unlikely(!__pyx_t_5)) __PYX_ERR(1, 103, __pyx_L2_error)
         __Pyx_GOTREF(__pyx_t_5);
@@ -25438,7 +23766,7 @@ if (!__Pyx_RefNanny) {
  * cdef strided = Enum("<strided and direct>") # default
  * cdef indirect = Enum("<strided and indirect>")
  */
-  __pyx_t_7 = __Pyx_PyObject_Call(((PyObject *)__pyx_MemviewEnum_type), __pyx_tuple__18, NULL); if (unlikely(!__pyx_t_7)) __PYX_ERR(1, 309, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_Call(((PyObject *)__pyx_MemviewEnum_type), __pyx_tuple__15, NULL); if (unlikely(!__pyx_t_7)) __PYX_ERR(1, 309, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_XGOTREF(generic);
   __Pyx_DECREF_SET(generic, __pyx_t_7);
@@ -25452,7 +23780,7 @@ if (!__Pyx_RefNanny) {
  * cdef indirect = Enum("<strided and indirect>")
  * 
  */
-  __pyx_t_7 = __Pyx_PyObject_Call(((PyObject *)__pyx_MemviewEnum_type), __pyx_tuple__19, NULL); if (unlikely(!__pyx_t_7)) __PYX_ERR(1, 310, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_Call(((PyObject *)__pyx_MemviewEnum_type), __pyx_tuple__16, NULL); if (unlikely(!__pyx_t_7)) __PYX_ERR(1, 310, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_XGOTREF(strided);
   __Pyx_DECREF_SET(strided, __pyx_t_7);
@@ -25466,7 +23794,7 @@ if (!__Pyx_RefNanny) {
  * 
  * 
  */
-  __pyx_t_7 = __Pyx_PyObject_Call(((PyObject *)__pyx_MemviewEnum_type), __pyx_tuple__20, NULL); if (unlikely(!__pyx_t_7)) __PYX_ERR(1, 311, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_Call(((PyObject *)__pyx_MemviewEnum_type), __pyx_tuple__17, NULL); if (unlikely(!__pyx_t_7)) __PYX_ERR(1, 311, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_XGOTREF(indirect);
   __Pyx_DECREF_SET(indirect, __pyx_t_7);
@@ -25480,7 +23808,7 @@ if (!__Pyx_RefNanny) {
  * cdef indirect_contiguous = Enum("<contiguous and indirect>")
  * 
  */
-  __pyx_t_7 = __Pyx_PyObject_Call(((PyObject *)__pyx_MemviewEnum_type), __pyx_tuple__21, NULL); if (unlikely(!__pyx_t_7)) __PYX_ERR(1, 314, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_Call(((PyObject *)__pyx_MemviewEnum_type), __pyx_tuple__18, NULL); if (unlikely(!__pyx_t_7)) __PYX_ERR(1, 314, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_XGOTREF(contiguous);
   __Pyx_DECREF_SET(contiguous, __pyx_t_7);
@@ -25494,7 +23822,7 @@ if (!__Pyx_RefNanny) {
  * 
  * 
  */
-  __pyx_t_7 = __Pyx_PyObject_Call(((PyObject *)__pyx_MemviewEnum_type), __pyx_tuple__22, NULL); if (unlikely(!__pyx_t_7)) __PYX_ERR(1, 315, __pyx_L1_error)
+  __pyx_t_7 = __Pyx_PyObject_Call(((PyObject *)__pyx_MemviewEnum_type), __pyx_tuple__19, NULL); if (unlikely(!__pyx_t_7)) __PYX_ERR(1, 315, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
   __Pyx_XGOTREF(indirect_contiguous);
   __Pyx_DECREF_SET(indirect_contiguous, __pyx_t_7);
@@ -25719,7 +24047,7 @@ if (!__Pyx_RefNanny) {
  * from libc.stdlib cimport abs
  * from typing import List, Tuple             # <<<<<<<<<<<<<<
  * 
- * cdef inline bint append_if_not_masked(int x, int y, int z, list points, unsigned char[:,:,:] mask=None):
+ * cdef inline bint append_if_not_masked(int x, int y, int z, int idx, list points, unsigned char[:,:,:] mask=None):
  */
   __pyx_t_7 = PyList_New(2); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 5, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_7);
@@ -25745,7 +24073,7 @@ if (!__Pyx_RefNanny) {
   /* "bresenham3D.pyx":7
  * from typing import List, Tuple
  * 
- * cdef inline bint append_if_not_masked(int x, int y, int z, list points, unsigned char[:,:,:] mask=None):             # <<<<<<<<<<<<<<
+ * cdef inline bint append_if_not_masked(int x, int y, int z, int idx, list points, unsigned char[:,:,:] mask=None):             # <<<<<<<<<<<<<<
  *     if mask is not None and mask[x,y,z]:
  *         return False
  */
@@ -25758,117 +24086,87 @@ if (!__Pyx_RefNanny) {
  *         return True
  * 
  * def bresenham3DWithMaskSingle(             # <<<<<<<<<<<<<<
- *     int x1, int y1, int z1, int x2, int y2, int z2, unsigned char[:,:,:] mask=None
- * ) -> List[Tuple[int, int, int]]:
+ *     int x1, int y1, int z1, int x2, int y2, int z2,
+ *     list points,
  */
-  __pyx_t_4 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 14, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_CyFunction_New(&__pyx_mdef_11bresenham3D_1bresenham3DWithMaskSingle, 0, __pyx_n_s_bresenham3DWithMaskSingle, NULL, __pyx_n_s_bresenham3D, __pyx_d, ((PyObject *)__pyx_codeobj__23)); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 14, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
-  if (PyDict_SetItem(__pyx_t_4, __pyx_n_s_return, __pyx_kp_s_List_Tuple_int_int_int) < 0) __PYX_ERR(0, 14, __pyx_L1_error)
-  __pyx_t_7 = __Pyx_CyFunction_New(&__pyx_mdef_11bresenham3D_1bresenham3DWithMaskSingle, 0, __pyx_n_s_bresenham3DWithMaskSingle, NULL, __pyx_n_s_bresenham3D, __pyx_d, ((PyObject *)__pyx_codeobj__26)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 14, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  if (!__Pyx_CyFunction_InitDefaults(__pyx_t_7, sizeof(__pyx_defaults), 0)) __PYX_ERR(0, 14, __pyx_L1_error)
+  if (!__Pyx_CyFunction_InitDefaults(__pyx_t_4, sizeof(__pyx_defaults), 0)) __PYX_ERR(0, 14, __pyx_L1_error)
 
-  /* "bresenham3D.pyx":15
- * 
- * def bresenham3DWithMaskSingle(
- *     int x1, int y1, int z1, int x2, int y2, int z2, unsigned char[:,:,:] mask=None             # <<<<<<<<<<<<<<
- * ) -> List[Tuple[int, int, int]]:
+  /* "bresenham3D.pyx":17
+ *     int x1, int y1, int z1, int x2, int y2, int z2,
+ *     list points,
+ *     unsigned char[:,:,:] mask=None             # <<<<<<<<<<<<<<
+ * ):
  * 
  */
-  __pyx_t_9 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(Py_None, PyBUF_WRITABLE); if (unlikely(!__pyx_t_9.memview)) __PYX_ERR(0, 15, __pyx_L1_error)
-  __Pyx_CyFunction_Defaults(__pyx_defaults, __pyx_t_7)->__pyx_arg_mask = __pyx_t_9;
+  __pyx_t_9 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(Py_None, PyBUF_WRITABLE); if (unlikely(!__pyx_t_9.memview)) __PYX_ERR(0, 17, __pyx_L1_error)
+  __Pyx_CyFunction_Defaults(__pyx_defaults, __pyx_t_4)->__pyx_arg_mask = __pyx_t_9;
   __pyx_t_9.memview = NULL;
   __pyx_t_9.data = NULL;
-  __Pyx_CyFunction_SetDefaultsGetter(__pyx_t_7, __pyx_pf_11bresenham3D_16__defaults__);
-  __Pyx_CyFunction_SetAnnotationsDict(__pyx_t_7, __pyx_t_4);
+  __Pyx_CyFunction_SetDefaultsGetter(__pyx_t_4, __pyx_pf_11bresenham3D_6__defaults__);
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_bresenham3DWithMaskSingle, __pyx_t_4) < 0) __PYX_ERR(0, 14, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_bresenham3DWithMaskSingle, __pyx_t_7) < 0) __PYX_ERR(0, 14, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
 
-  /* "bresenham3D.pyx":85
- *     return listOfPoints
+  /* "bresenham3D.pyx":96
+ *     int x1, int y1, int z1, int x2, int y2, int z2,
+ *     list points,
+ *     unsigned char[:,:,:] mask=None             # <<<<<<<<<<<<<<
+ * ):
+ * 
+ */
+  __pyx_t_9 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(Py_None, PyBUF_WRITABLE); if (unlikely(!__pyx_t_9.memview)) __PYX_ERR(0, 96, __pyx_L1_error)
+  __pyx_k__10 = __pyx_t_9;
+  __pyx_t_9.memview = NULL;
+  __pyx_t_9.data = NULL;
+
+  /* "bresenham3D.pyx":172
+ *     return idx
  * 
  * def bresenham3DWithMask(             # <<<<<<<<<<<<<<
  *     int[:, :] starts_array, int[:, :] ends_array, unsigned char[:,:,:] mask = None
- * ) -> List[Tuple[int, int, int]]:
+ * ):
  */
-  __pyx_t_7 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 85, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  if (PyDict_SetItem(__pyx_t_7, __pyx_n_s_return, __pyx_kp_s_List_Tuple_int_int_int) < 0) __PYX_ERR(0, 85, __pyx_L1_error)
-  __pyx_t_4 = __Pyx_CyFunction_New(&__pyx_mdef_11bresenham3D_3bresenham3DWithMask, 0, __pyx_n_s_bresenham3DWithMask, NULL, __pyx_n_s_bresenham3D, __pyx_d, ((PyObject *)__pyx_codeobj__28)); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 85, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_CyFunction_New(&__pyx_mdef_11bresenham3D_3bresenham3DWithMask, 0, __pyx_n_s_bresenham3DWithMask, NULL, __pyx_n_s_bresenham3D, __pyx_d, ((PyObject *)__pyx_codeobj__25)); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 172, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
-  if (!__Pyx_CyFunction_InitDefaults(__pyx_t_4, sizeof(__pyx_defaults1), 0)) __PYX_ERR(0, 85, __pyx_L1_error)
+  if (!__Pyx_CyFunction_InitDefaults(__pyx_t_4, sizeof(__pyx_defaults1), 0)) __PYX_ERR(0, 172, __pyx_L1_error)
 
-  /* "bresenham3D.pyx":86
+  /* "bresenham3D.pyx":173
  * 
  * def bresenham3DWithMask(
  *     int[:, :] starts_array, int[:, :] ends_array, unsigned char[:,:,:] mask = None             # <<<<<<<<<<<<<<
- * ) -> List[Tuple[int, int, int]]:
+ * ):
  *     cdef list output_list = []
  */
-  __pyx_t_9 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(Py_None, PyBUF_WRITABLE); if (unlikely(!__pyx_t_9.memview)) __PYX_ERR(0, 86, __pyx_L1_error)
+  __pyx_t_9 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(Py_None, PyBUF_WRITABLE); if (unlikely(!__pyx_t_9.memview)) __PYX_ERR(0, 173, __pyx_L1_error)
   __Pyx_CyFunction_Defaults(__pyx_defaults1, __pyx_t_4)->__pyx_arg_mask = __pyx_t_9;
   __pyx_t_9.memview = NULL;
   __pyx_t_9.data = NULL;
-  __Pyx_CyFunction_SetDefaultsGetter(__pyx_t_4, __pyx_pf_11bresenham3D_18__defaults__);
-  __Pyx_CyFunction_SetAnnotationsDict(__pyx_t_4, __pyx_t_7);
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_bresenham3DWithMask, __pyx_t_4) < 0) __PYX_ERR(0, 85, __pyx_L1_error)
+  __Pyx_CyFunction_SetDefaultsGetter(__pyx_t_4, __pyx_pf_11bresenham3D_8__defaults__);
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_bresenham3DWithMask, __pyx_t_4) < 0) __PYX_ERR(0, 172, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
 
-  /* "bresenham3D.pyx":103
- *     unsigned long long
+  /* "bresenham3D.pyx":191
+ *     return output_list
  * 
- * def find_boundary(             # <<<<<<<<<<<<<<
- *     uint_t[:, :, :] volume, unsigned char[:,:,:] surface_voxels
- * ):
+ * def bresenham_3D_lines(list contact_voxels_list_of_lists,             # <<<<<<<<<<<<<<
+ *     long  [:,:] object_1_surface_voxel_coordinates,
+ *     long  [:,:] object_2_surface_voxel_coordinates,
  */
-  __pyx_t_4 = __Pyx_PyDict_NewPresized(4); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 103, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_CyFunction_New(&__pyx_mdef_11bresenham3D_5bresenham_3D_lines, 0, __pyx_n_s_bresenham_3D_lines, NULL, __pyx_n_s_bresenham3D, __pyx_d, ((PyObject *)__pyx_codeobj__28)); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 191, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
-  __pyx_t_7 = __pyx_FusedFunction_New(&__pyx_fuse_0__pyx_mdef_11bresenham3D_7find_boundary, 0, __pyx_n_s_find_boundary, NULL, __pyx_n_s_bresenham3D, __pyx_d, ((PyObject *)__pyx_codeobj__30)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 103, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __Pyx_CyFunction_SetDefaultsTuple(__pyx_t_7, __pyx_empty_tuple);
-  if (PyDict_SetItem(__pyx_t_4, __pyx_kp_s_unsigned_char, __pyx_t_7) < 0) __PYX_ERR(0, 103, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __pyx_t_7 = __pyx_FusedFunction_New(&__pyx_fuse_1__pyx_mdef_11bresenham3D_9find_boundary, 0, __pyx_n_s_find_boundary, NULL, __pyx_n_s_bresenham3D, __pyx_d, ((PyObject *)__pyx_codeobj__30)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 103, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __Pyx_CyFunction_SetDefaultsTuple(__pyx_t_7, __pyx_empty_tuple);
-  if (PyDict_SetItem(__pyx_t_4, __pyx_kp_s_unsigned_short, __pyx_t_7) < 0) __PYX_ERR(0, 103, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __pyx_t_7 = __pyx_FusedFunction_New(&__pyx_fuse_2__pyx_mdef_11bresenham3D_11find_boundary, 0, __pyx_n_s_find_boundary, NULL, __pyx_n_s_bresenham3D, __pyx_d, ((PyObject *)__pyx_codeobj__30)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 103, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __Pyx_CyFunction_SetDefaultsTuple(__pyx_t_7, __pyx_empty_tuple);
-  if (PyDict_SetItem(__pyx_t_4, __pyx_kp_s_unsigned_int, __pyx_t_7) < 0) __PYX_ERR(0, 103, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __pyx_t_7 = __pyx_FusedFunction_New(&__pyx_fuse_3__pyx_mdef_11bresenham3D_13find_boundary, 0, __pyx_n_s_find_boundary, NULL, __pyx_n_s_bresenham3D, __pyx_d, ((PyObject *)__pyx_codeobj__30)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 103, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  __Pyx_CyFunction_SetDefaultsTuple(__pyx_t_7, __pyx_empty_tuple);
-  if (PyDict_SetItem(__pyx_t_4, __pyx_kp_s_unsigned_long_long, __pyx_t_7) < 0) __PYX_ERR(0, 103, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
-  __pyx_t_7 = __pyx_FusedFunction_New(&__pyx_mdef_11bresenham3D_5find_boundary, 0, __pyx_n_s_find_boundary, NULL, __pyx_n_s_bresenham3D, __pyx_d, ((PyObject *)__pyx_codeobj__30)); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 103, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  if (!__Pyx_CyFunction_InitDefaults(__pyx_t_7, sizeof(__pyx_defaults2), 1)) __PYX_ERR(0, 103, __pyx_L1_error)
-  __pyx_t_5 = __Pyx_PyDict_NewPresized(0); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 103, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_5);
-  __Pyx_CyFunction_Defaults(__pyx_defaults2, __pyx_t_7)->__pyx_arg__fused_sigindex = __pyx_t_5;
-  __Pyx_GIVEREF(__pyx_t_5);
-  __pyx_t_5 = 0;
-  __Pyx_CyFunction_SetDefaultsTuple(__pyx_t_7, __pyx_empty_tuple);
-  ((__pyx_FusedFunctionObject *) __pyx_t_7)->__signatures__ = __pyx_t_4;
-  __Pyx_GIVEREF(__pyx_t_4);
-  __pyx_t_4 = 0;
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_find_boundary, __pyx_t_7) < 0) __PYX_ERR(0, 103, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_bresenham_3D_lines, __pyx_t_4) < 0) __PYX_ERR(0, 191, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
 
   /* "bresenham3D.pyx":1
  * # bresenham3d.pyx             # <<<<<<<<<<<<<<
  * 
  * from cpython cimport bool
  */
-  __pyx_t_7 = __Pyx_PyDict_NewPresized(0); if (unlikely(!__pyx_t_7)) __PYX_ERR(0, 1, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_t_7);
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_test, __pyx_t_7) < 0) __PYX_ERR(0, 1, __pyx_L1_error)
-  __Pyx_DECREF(__pyx_t_7); __pyx_t_7 = 0;
+  __pyx_t_4 = __Pyx_PyDict_NewPresized(0); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 1, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_4);
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_test, __pyx_t_4) < 0) __PYX_ERR(0, 1, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
 
   /*--- Wrapped vars code ---*/
 
@@ -28363,455 +26661,39 @@ static void __Pyx_RaiseBufferIndexError(int axis) {
      "Out of bounds on buffer access (axis %d)", axis);
 }
 
-/* IterFinish */
-static CYTHON_INLINE int __Pyx_IterFinish(void) {
-    PyObject* exc_type;
-    __Pyx_PyThreadState_declare
-    __Pyx_PyThreadState_assign
-    exc_type = __Pyx_PyErr_CurrentExceptionType();
-    if (unlikely(exc_type)) {
-        if (unlikely(!__Pyx_PyErr_GivenExceptionMatches(exc_type, PyExc_StopIteration)))
-            return -1;
-        __Pyx_PyErr_Clear();
-        return 0;
+/* SliceTupleAndList */
+#if CYTHON_COMPILING_IN_CPYTHON
+static CYTHON_INLINE void __Pyx_crop_slice(Py_ssize_t* _start, Py_ssize_t* _stop, Py_ssize_t* _length) {
+    Py_ssize_t start = *_start, stop = *_stop, length = *_length;
+    if (start < 0) {
+        start += length;
+        if (start < 0)
+            start = 0;
     }
-    return 0;
+    if (stop < 0)
+        stop += length;
+    else if (stop > length)
+        stop = length;
+    *_length = stop - start;
+    *_start = start;
+    *_stop = stop;
 }
-
-/* UnpackItemEndCheck */
-static int __Pyx_IternextUnpackEndCheck(PyObject *retval, Py_ssize_t expected) {
-    if (unlikely(retval)) {
-        Py_DECREF(retval);
-        __Pyx_RaiseTooManyValuesError(expected);
-        return -1;
+static CYTHON_INLINE PyObject* __Pyx_PyList_GetSlice(
+            PyObject* src, Py_ssize_t start, Py_ssize_t stop) {
+    Py_ssize_t length = PyList_GET_SIZE(src);
+    __Pyx_crop_slice(&start, &stop, &length);
+    if (length <= 0) {
+        return PyList_New(0);
     }
-    return __Pyx_IterFinish();
+    return __Pyx_PyList_FromArray(((PyListObject*)src)->ob_item + start, length);
 }
-
-/* DictGetItem */
-#if PY_MAJOR_VERSION >= 3 && !CYTHON_COMPILING_IN_PYPY
-static PyObject *__Pyx_PyDict_GetItem(PyObject *d, PyObject* key) {
-    PyObject *value;
-    value = PyDict_GetItemWithError(d, key);
-    if (unlikely(!value)) {
-        if (!PyErr_Occurred()) {
-            if (unlikely(PyTuple_Check(key))) {
-                PyObject* args = PyTuple_Pack(1, key);
-                if (likely(args)) {
-                    PyErr_SetObject(PyExc_KeyError, args);
-                    Py_DECREF(args);
-                }
-            } else {
-                PyErr_SetObject(PyExc_KeyError, key);
-            }
-        }
-        return NULL;
-    }
-    Py_INCREF(value);
-    return value;
+static CYTHON_INLINE PyObject* __Pyx_PyTuple_GetSlice(
+            PyObject* src, Py_ssize_t start, Py_ssize_t stop) {
+    Py_ssize_t length = PyTuple_GET_SIZE(src);
+    __Pyx_crop_slice(&start, &stop, &length);
+    return __Pyx_PyTuple_FromArray(((PyTupleObject*)src)->ob_item + start, length);
 }
 #endif
-
-/* UnicodeAsUCS4 */
-static CYTHON_INLINE Py_UCS4 __Pyx_PyUnicode_AsPy_UCS4(PyObject* x) {
-   Py_ssize_t length;
-   #if CYTHON_PEP393_ENABLED
-   length = PyUnicode_GET_LENGTH(x);
-   if (likely(length == 1)) {
-       return PyUnicode_READ_CHAR(x, 0);
-   }
-   #else
-   length = PyUnicode_GET_SIZE(x);
-   if (likely(length == 1)) {
-       return PyUnicode_AS_UNICODE(x)[0];
-   }
-   #if Py_UNICODE_SIZE == 2
-   else if (PyUnicode_GET_SIZE(x) == 2) {
-       Py_UCS4 high_val = PyUnicode_AS_UNICODE(x)[0];
-       if (high_val >= 0xD800 && high_val <= 0xDBFF) {
-           Py_UCS4 low_val = PyUnicode_AS_UNICODE(x)[1];
-           if (low_val >= 0xDC00 && low_val <= 0xDFFF) {
-               return 0x10000 + (((high_val & ((1<<10)-1)) << 10) | (low_val & ((1<<10)-1)));
-           }
-       }
-   }
-   #endif
-   #endif
-   PyErr_Format(PyExc_ValueError,
-                "only single character unicode strings can be converted to Py_UCS4, "
-                "got length %" CYTHON_FORMAT_SSIZE_T "d", length);
-   return (Py_UCS4)-1;
-}
-
-/* object_ord */
-static long __Pyx__PyObject_Ord(PyObject* c) {
-    Py_ssize_t size;
-    if (PyBytes_Check(c)) {
-        size = PyBytes_GET_SIZE(c);
-        if (likely(size == 1)) {
-            return (unsigned char) PyBytes_AS_STRING(c)[0];
-        }
-#if PY_MAJOR_VERSION < 3
-    } else if (PyUnicode_Check(c)) {
-        return (long)__Pyx_PyUnicode_AsPy_UCS4(c);
-#endif
-#if (!CYTHON_COMPILING_IN_PYPY) || (defined(PyByteArray_AS_STRING) && defined(PyByteArray_GET_SIZE))
-    } else if (PyByteArray_Check(c)) {
-        size = PyByteArray_GET_SIZE(c);
-        if (likely(size == 1)) {
-            return (unsigned char) PyByteArray_AS_STRING(c)[0];
-        }
-#endif
-    } else {
-        __Pyx_TypeName c_type_name = __Pyx_PyType_GetName(Py_TYPE(c));
-        PyErr_Format(PyExc_TypeError,
-            "ord() expected string of length 1, but " __Pyx_FMT_TYPENAME " found",
-            c_type_name);
-        __Pyx_DECREF_TypeName(c_type_name);
-        return (long)(Py_UCS4)-1;
-    }
-    PyErr_Format(PyExc_TypeError,
-        "ord() expected a character, but string of length %zd found", size);
-    return (long)(Py_UCS4)-1;
-}
-
-/* memoryview_get_from_buffer */
-#if !CYTHON_COMPILING_IN_LIMITED_API || CYTHON_LIMITED_API >= 0x030b0000
-#else
-static Py_ssize_t __Pyx_PyMemoryView_Get_itemsize(PyObject *obj) {
-    Py_ssize_t result;
-    PyObject *attr = PyObject_GetAttr(obj, __pyx_n_s_itemsize);
-    if (!attr) {
-        goto bad;
-    }
-    result = PyLong_AsSsize_t(attr);
-    Py_DECREF(attr);
-    return result;
-    bad:
-    Py_XDECREF(attr);
-    return -1;
-}
-#endif
-
-/* memoryview_get_from_buffer */
-#if !CYTHON_COMPILING_IN_LIMITED_API || CYTHON_LIMITED_API >= 0x030b0000
-#else
-static int __Pyx_PyMemoryView_Get_ndim(PyObject *obj) {
-    int result;
-    PyObject *attr = PyObject_GetAttr(obj, __pyx_n_s_ndim);
-    if (!attr) {
-        goto bad;
-    }
-    result = PyLong_AsLong(attr);
-    Py_DECREF(attr);
-    return result;
-    bad:
-    Py_XDECREF(attr);
-    return -1;
-}
-#endif
-
-/* PyObjectCallNoArg */
-static CYTHON_INLINE PyObject* __Pyx_PyObject_CallNoArg(PyObject *func) {
-    PyObject *arg[2] = {NULL, NULL};
-    return __Pyx_PyObject_FastCall(func, arg + 1, 0 | __Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET);
-}
-
-/* PyObjectGetMethod */
-static int __Pyx_PyObject_GetMethod(PyObject *obj, PyObject *name, PyObject **method) {
-    PyObject *attr;
-#if CYTHON_UNPACK_METHODS && CYTHON_COMPILING_IN_CPYTHON && CYTHON_USE_PYTYPE_LOOKUP
-    __Pyx_TypeName type_name;
-    PyTypeObject *tp = Py_TYPE(obj);
-    PyObject *descr;
-    descrgetfunc f = NULL;
-    PyObject **dictptr, *dict;
-    int meth_found = 0;
-    assert (*method == NULL);
-    if (unlikely(tp->tp_getattro != PyObject_GenericGetAttr)) {
-        attr = __Pyx_PyObject_GetAttrStr(obj, name);
-        goto try_unpack;
-    }
-    if (unlikely(tp->tp_dict == NULL) && unlikely(PyType_Ready(tp) < 0)) {
-        return 0;
-    }
-    descr = _PyType_Lookup(tp, name);
-    if (likely(descr != NULL)) {
-        Py_INCREF(descr);
-#if defined(Py_TPFLAGS_METHOD_DESCRIPTOR) && Py_TPFLAGS_METHOD_DESCRIPTOR
-        if (__Pyx_PyType_HasFeature(Py_TYPE(descr), Py_TPFLAGS_METHOD_DESCRIPTOR))
-#elif PY_MAJOR_VERSION >= 3
-        #ifdef __Pyx_CyFunction_USED
-        if (likely(PyFunction_Check(descr) || __Pyx_IS_TYPE(descr, &PyMethodDescr_Type) || __Pyx_CyFunction_Check(descr)))
-        #else
-        if (likely(PyFunction_Check(descr) || __Pyx_IS_TYPE(descr, &PyMethodDescr_Type)))
-        #endif
-#else
-        #ifdef __Pyx_CyFunction_USED
-        if (likely(PyFunction_Check(descr) || __Pyx_CyFunction_Check(descr)))
-        #else
-        if (likely(PyFunction_Check(descr)))
-        #endif
-#endif
-        {
-            meth_found = 1;
-        } else {
-            f = Py_TYPE(descr)->tp_descr_get;
-            if (f != NULL && PyDescr_IsData(descr)) {
-                attr = f(descr, obj, (PyObject *)Py_TYPE(obj));
-                Py_DECREF(descr);
-                goto try_unpack;
-            }
-        }
-    }
-    dictptr = _PyObject_GetDictPtr(obj);
-    if (dictptr != NULL && (dict = *dictptr) != NULL) {
-        Py_INCREF(dict);
-        attr = __Pyx_PyDict_GetItemStr(dict, name);
-        if (attr != NULL) {
-            Py_INCREF(attr);
-            Py_DECREF(dict);
-            Py_XDECREF(descr);
-            goto try_unpack;
-        }
-        Py_DECREF(dict);
-    }
-    if (meth_found) {
-        *method = descr;
-        return 1;
-    }
-    if (f != NULL) {
-        attr = f(descr, obj, (PyObject *)Py_TYPE(obj));
-        Py_DECREF(descr);
-        goto try_unpack;
-    }
-    if (likely(descr != NULL)) {
-        *method = descr;
-        return 0;
-    }
-    type_name = __Pyx_PyType_GetName(tp);
-    PyErr_Format(PyExc_AttributeError,
-#if PY_MAJOR_VERSION >= 3
-                 "'" __Pyx_FMT_TYPENAME "' object has no attribute '%U'",
-                 type_name, name);
-#else
-                 "'" __Pyx_FMT_TYPENAME "' object has no attribute '%.400s'",
-                 type_name, PyString_AS_STRING(name));
-#endif
-    __Pyx_DECREF_TypeName(type_name);
-    return 0;
-#else
-    attr = __Pyx_PyObject_GetAttrStr(obj, name);
-    goto try_unpack;
-#endif
-try_unpack:
-#if CYTHON_UNPACK_METHODS
-    if (likely(attr) && PyMethod_Check(attr) && likely(PyMethod_GET_SELF(attr) == obj)) {
-        PyObject *function = PyMethod_GET_FUNCTION(attr);
-        Py_INCREF(function);
-        Py_DECREF(attr);
-        *method = function;
-        return 1;
-    }
-#endif
-    *method = attr;
-    return 0;
-}
-
-/* PyObjectCallMethod0 */
-static PyObject* __Pyx_PyObject_CallMethod0(PyObject* obj, PyObject* method_name) {
-    PyObject *method = NULL, *result = NULL;
-    int is_method = __Pyx_PyObject_GetMethod(obj, method_name, &method);
-    if (likely(is_method)) {
-        result = __Pyx_PyObject_CallOneArg(method, obj);
-        Py_DECREF(method);
-        return result;
-    }
-    if (unlikely(!method)) goto bad;
-    result = __Pyx_PyObject_CallNoArg(method);
-    Py_DECREF(method);
-bad:
-    return result;
-}
-
-/* UnpackTupleError */
-static void __Pyx_UnpackTupleError(PyObject *t, Py_ssize_t index) {
-    if (t == Py_None) {
-      __Pyx_RaiseNoneNotIterableError();
-    } else if (PyTuple_GET_SIZE(t) < index) {
-      __Pyx_RaiseNeedMoreValuesError(PyTuple_GET_SIZE(t));
-    } else {
-      __Pyx_RaiseTooManyValuesError(index);
-    }
-}
-
-/* UnpackTuple2 */
-static CYTHON_INLINE int __Pyx_unpack_tuple2_exact(
-        PyObject* tuple, PyObject** pvalue1, PyObject** pvalue2, int decref_tuple) {
-    PyObject *value1 = NULL, *value2 = NULL;
-#if CYTHON_COMPILING_IN_PYPY
-    value1 = PySequence_ITEM(tuple, 0);  if (unlikely(!value1)) goto bad;
-    value2 = PySequence_ITEM(tuple, 1);  if (unlikely(!value2)) goto bad;
-#else
-    value1 = PyTuple_GET_ITEM(tuple, 0);  Py_INCREF(value1);
-    value2 = PyTuple_GET_ITEM(tuple, 1);  Py_INCREF(value2);
-#endif
-    if (decref_tuple) {
-        Py_DECREF(tuple);
-    }
-    *pvalue1 = value1;
-    *pvalue2 = value2;
-    return 0;
-#if CYTHON_COMPILING_IN_PYPY
-bad:
-    Py_XDECREF(value1);
-    Py_XDECREF(value2);
-    if (decref_tuple) { Py_XDECREF(tuple); }
-    return -1;
-#endif
-}
-static int __Pyx_unpack_tuple2_generic(PyObject* tuple, PyObject** pvalue1, PyObject** pvalue2,
-                                       int has_known_size, int decref_tuple) {
-    Py_ssize_t index;
-    PyObject *value1 = NULL, *value2 = NULL, *iter = NULL;
-    iternextfunc iternext;
-    iter = PyObject_GetIter(tuple);
-    if (unlikely(!iter)) goto bad;
-    if (decref_tuple) { Py_DECREF(tuple); tuple = NULL; }
-    iternext = __Pyx_PyObject_GetIterNextFunc(iter);
-    value1 = iternext(iter); if (unlikely(!value1)) { index = 0; goto unpacking_failed; }
-    value2 = iternext(iter); if (unlikely(!value2)) { index = 1; goto unpacking_failed; }
-    if (!has_known_size && unlikely(__Pyx_IternextUnpackEndCheck(iternext(iter), 2))) goto bad;
-    Py_DECREF(iter);
-    *pvalue1 = value1;
-    *pvalue2 = value2;
-    return 0;
-unpacking_failed:
-    if (!has_known_size && __Pyx_IterFinish() == 0)
-        __Pyx_RaiseNeedMoreValuesError(index);
-bad:
-    Py_XDECREF(iter);
-    Py_XDECREF(value1);
-    Py_XDECREF(value2);
-    if (decref_tuple) { Py_XDECREF(tuple); }
-    return -1;
-}
-
-/* dict_iter */
-#if CYTHON_COMPILING_IN_PYPY && PY_MAJOR_VERSION >= 3
-#include <string.h>
-#endif
-static CYTHON_INLINE PyObject* __Pyx_dict_iterator(PyObject* iterable, int is_dict, PyObject* method_name,
-                                                   Py_ssize_t* p_orig_length, int* p_source_is_dict) {
-    is_dict = is_dict || likely(PyDict_CheckExact(iterable));
-    *p_source_is_dict = is_dict;
-    if (is_dict) {
-#if !CYTHON_COMPILING_IN_PYPY
-        *p_orig_length = PyDict_Size(iterable);
-        Py_INCREF(iterable);
-        return iterable;
-#elif PY_MAJOR_VERSION >= 3
-        static PyObject *py_items = NULL, *py_keys = NULL, *py_values = NULL;
-        PyObject **pp = NULL;
-        if (method_name) {
-            const char *name = PyUnicode_AsUTF8(method_name);
-            if (strcmp(name, "iteritems") == 0) pp = &py_items;
-            else if (strcmp(name, "iterkeys") == 0) pp = &py_keys;
-            else if (strcmp(name, "itervalues") == 0) pp = &py_values;
-            if (pp) {
-                if (!*pp) {
-                    *pp = PyUnicode_FromString(name + 4);
-                    if (!*pp)
-                        return NULL;
-                }
-                method_name = *pp;
-            }
-        }
-#endif
-    }
-    *p_orig_length = 0;
-    if (method_name) {
-        PyObject* iter;
-        iterable = __Pyx_PyObject_CallMethod0(iterable, method_name);
-        if (!iterable)
-            return NULL;
-#if !CYTHON_COMPILING_IN_PYPY
-        if (PyTuple_CheckExact(iterable) || PyList_CheckExact(iterable))
-            return iterable;
-#endif
-        iter = PyObject_GetIter(iterable);
-        Py_DECREF(iterable);
-        return iter;
-    }
-    return PyObject_GetIter(iterable);
-}
-static CYTHON_INLINE int __Pyx_dict_iter_next(
-        PyObject* iter_obj, CYTHON_NCP_UNUSED Py_ssize_t orig_length, CYTHON_NCP_UNUSED Py_ssize_t* ppos,
-        PyObject** pkey, PyObject** pvalue, PyObject** pitem, int source_is_dict) {
-    PyObject* next_item;
-#if !CYTHON_COMPILING_IN_PYPY
-    if (source_is_dict) {
-        PyObject *key, *value;
-        if (unlikely(orig_length != PyDict_Size(iter_obj))) {
-            PyErr_SetString(PyExc_RuntimeError, "dictionary changed size during iteration");
-            return -1;
-        }
-        if (unlikely(!PyDict_Next(iter_obj, ppos, &key, &value))) {
-            return 0;
-        }
-        if (pitem) {
-            PyObject* tuple = PyTuple_New(2);
-            if (unlikely(!tuple)) {
-                return -1;
-            }
-            Py_INCREF(key);
-            Py_INCREF(value);
-            PyTuple_SET_ITEM(tuple, 0, key);
-            PyTuple_SET_ITEM(tuple, 1, value);
-            *pitem = tuple;
-        } else {
-            if (pkey) {
-                Py_INCREF(key);
-                *pkey = key;
-            }
-            if (pvalue) {
-                Py_INCREF(value);
-                *pvalue = value;
-            }
-        }
-        return 1;
-    } else if (PyTuple_CheckExact(iter_obj)) {
-        Py_ssize_t pos = *ppos;
-        if (unlikely(pos >= PyTuple_GET_SIZE(iter_obj))) return 0;
-        *ppos = pos + 1;
-        next_item = PyTuple_GET_ITEM(iter_obj, pos);
-        Py_INCREF(next_item);
-    } else if (PyList_CheckExact(iter_obj)) {
-        Py_ssize_t pos = *ppos;
-        if (unlikely(pos >= PyList_GET_SIZE(iter_obj))) return 0;
-        *ppos = pos + 1;
-        next_item = PyList_GET_ITEM(iter_obj, pos);
-        Py_INCREF(next_item);
-    } else
-#endif
-    {
-        next_item = PyIter_Next(iter_obj);
-        if (unlikely(!next_item)) {
-            return __Pyx_IterFinish();
-        }
-    }
-    if (pitem) {
-        *pitem = next_item;
-    } else if (pkey && pvalue) {
-        if (__Pyx_unpack_tuple2(next_item, pkey, pvalue, source_is_dict, source_is_dict, 1))
-            return -1;
-    } else if (pkey) {
-        *pkey = next_item;
-    } else {
-        *pvalue = next_item;
-    }
-    return 1;
-}
 
 /* UnpackUnboundCMethod */
 static PyObject *__Pyx_SelflessCall(PyObject *method, PyObject *args, PyObject *kwargs) {
@@ -28875,33 +26757,6 @@ static int __Pyx_TryUnpackUnboundCMethod(__Pyx_CachedCFunction* target) {
     return 0;
 }
 
-/* CallUnboundCMethod0 */
-static PyObject* __Pyx__CallUnboundCMethod0(__Pyx_CachedCFunction* cfunc, PyObject* self) {
-    PyObject *args, *result = NULL;
-    if (unlikely(!cfunc->method) && unlikely(__Pyx_TryUnpackUnboundCMethod(cfunc) < 0)) return NULL;
-#if CYTHON_ASSUME_SAFE_MACROS
-    args = PyTuple_New(1);
-    if (unlikely(!args)) goto bad;
-    Py_INCREF(self);
-    PyTuple_SET_ITEM(args, 0, self);
-#else
-    args = PyTuple_Pack(1, self);
-    if (unlikely(!args)) goto bad;
-#endif
-    result = __Pyx_PyObject_Call(cfunc->method, args, NULL);
-    Py_DECREF(args);
-bad:
-    return result;
-}
-
-/* py_dict_values */
-static CYTHON_INLINE PyObject* __Pyx_PyDict_Values(PyObject* d) {
-    if (PY_MAJOR_VERSION >= 3)
-        return __Pyx_CallUnboundCMethod0(&__pyx_umethod_PyDict_Type_values, d);
-    else
-        return PyDict_Values(d);
-}
-
 /* CallUnboundCMethod1 */
 #if CYTHON_COMPILING_IN_CPYTHON
 static CYTHON_INLINE PyObject* __Pyx_CallUnboundCMethod1(__Pyx_CachedCFunction* cfunc, PyObject* self, PyObject* arg) {
@@ -28954,90 +26809,80 @@ bad:
     return result;
 }
 
-/* CallUnboundCMethod2 */
-#if CYTHON_COMPILING_IN_CPYTHON && PY_VERSION_HEX >= 0x030600B1
-static CYTHON_INLINE PyObject *__Pyx_CallUnboundCMethod2(__Pyx_CachedCFunction *cfunc, PyObject *self, PyObject *arg1, PyObject *arg2) {
-    if (likely(cfunc->func)) {
-        PyObject *args[2] = {arg1, arg2};
-        if (cfunc->flag == METH_FASTCALL) {
-            #if PY_VERSION_HEX >= 0x030700A0
-            return (*(__Pyx_PyCFunctionFast)(void*)(PyCFunction)cfunc->func)(self, args, 2);
-            #else
-            return (*(__Pyx_PyCFunctionFastWithKeywords)(void*)(PyCFunction)cfunc->func)(self, args, 2, NULL);
-            #endif
-        }
-        #if PY_VERSION_HEX >= 0x030700A0
-        if (cfunc->flag == (METH_FASTCALL | METH_KEYWORDS))
-            return (*(__Pyx_PyCFunctionFastWithKeywords)(void*)(PyCFunction)cfunc->func)(self, args, 2, NULL);
-        #endif
+/* IterFinish */
+static CYTHON_INLINE int __Pyx_IterFinish(void) {
+    PyObject* exc_type;
+    __Pyx_PyThreadState_declare
+    __Pyx_PyThreadState_assign
+    exc_type = __Pyx_PyErr_CurrentExceptionType();
+    if (unlikely(exc_type)) {
+        if (unlikely(!__Pyx_PyErr_GivenExceptionMatches(exc_type, PyExc_StopIteration)))
+            return -1;
+        __Pyx_PyErr_Clear();
+        return 0;
     }
-    return __Pyx__CallUnboundCMethod2(cfunc, self, arg1, arg2);
-}
-#endif
-static PyObject* __Pyx__CallUnboundCMethod2(__Pyx_CachedCFunction* cfunc, PyObject* self, PyObject* arg1, PyObject* arg2){
-    PyObject *args, *result = NULL;
-    if (unlikely(!cfunc->func && !cfunc->method) && unlikely(__Pyx_TryUnpackUnboundCMethod(cfunc) < 0)) return NULL;
-#if CYTHON_COMPILING_IN_CPYTHON
-    if (cfunc->func && (cfunc->flag & METH_VARARGS)) {
-        args = PyTuple_New(2);
-        if (unlikely(!args)) goto bad;
-        Py_INCREF(arg1);
-        PyTuple_SET_ITEM(args, 0, arg1);
-        Py_INCREF(arg2);
-        PyTuple_SET_ITEM(args, 1, arg2);
-        if (cfunc->flag & METH_KEYWORDS)
-            result = (*(PyCFunctionWithKeywords)(void*)(PyCFunction)cfunc->func)(self, args, NULL);
-        else
-            result = (*cfunc->func)(self, args);
-    } else {
-        args = PyTuple_New(3);
-        if (unlikely(!args)) goto bad;
-        Py_INCREF(self);
-        PyTuple_SET_ITEM(args, 0, self);
-        Py_INCREF(arg1);
-        PyTuple_SET_ITEM(args, 1, arg1);
-        Py_INCREF(arg2);
-        PyTuple_SET_ITEM(args, 2, arg2);
-        result = __Pyx_PyObject_Call(cfunc->method, args, NULL);
-    }
-#else
-    args = PyTuple_Pack(3, self, arg1, arg2);
-    if (unlikely(!args)) goto bad;
-    result = __Pyx_PyObject_Call(cfunc->method, args, NULL);
-#endif
-bad:
-    Py_XDECREF(args);
-    return result;
+    return 0;
 }
 
-/* dict_getitem_default */
-static PyObject* __Pyx_PyDict_GetItemDefault(PyObject* d, PyObject* key, PyObject* default_value) {
-    PyObject* value;
-#if PY_MAJOR_VERSION >= 3 && (!CYTHON_COMPILING_IN_PYPY || PYPY_VERSION_NUM >= 0x07020000)
-    value = PyDict_GetItemWithError(d, key);
-    if (unlikely(!value)) {
-        if (unlikely(PyErr_Occurred()))
-            return NULL;
-        value = default_value;
+/* set_iter */
+static CYTHON_INLINE PyObject* __Pyx_set_iterator(PyObject* iterable, int is_set,
+                                                  Py_ssize_t* p_orig_length, int* p_source_is_set) {
+#if CYTHON_COMPILING_IN_CPYTHON && PY_VERSION_HEX < 0x030d0000
+    is_set = is_set || likely(PySet_CheckExact(iterable) || PyFrozenSet_CheckExact(iterable));
+    *p_source_is_set = is_set;
+    if (likely(is_set)) {
+        *p_orig_length = PySet_Size(iterable);
+        Py_INCREF(iterable);
+        return iterable;
     }
-    Py_INCREF(value);
-    if ((1));
 #else
-    if (PyString_CheckExact(key) || PyUnicode_CheckExact(key) || PyInt_CheckExact(key)) {
-        value = PyDict_GetItem(d, key);
-        if (unlikely(!value)) {
-            value = default_value;
+    CYTHON_UNUSED_VAR(is_set);
+    *p_source_is_set = 0;
+#endif
+    *p_orig_length = 0;
+    return PyObject_GetIter(iterable);
+}
+static CYTHON_INLINE int __Pyx_set_iter_next(
+        PyObject* iter_obj, Py_ssize_t orig_length,
+        Py_ssize_t* ppos, PyObject **value,
+        int source_is_set) {
+    if (!CYTHON_COMPILING_IN_CPYTHON || PY_VERSION_HEX >= 0x030d0000 || unlikely(!source_is_set)) {
+        *value = PyIter_Next(iter_obj);
+        if (unlikely(!*value)) {
+            return __Pyx_IterFinish();
         }
-        Py_INCREF(value);
+        CYTHON_UNUSED_VAR(orig_length);
+        CYTHON_UNUSED_VAR(ppos);
+        return 1;
+    }
+#if CYTHON_COMPILING_IN_CPYTHON && PY_VERSION_HEX < 0x030d0000
+    if (unlikely(PySet_GET_SIZE(iter_obj) != orig_length)) {
+        PyErr_SetString(
+            PyExc_RuntimeError,
+            "set changed size during iteration");
+        return -1;
+    }
+    {
+        Py_hash_t hash;
+        int ret = _PySet_NextEntry(iter_obj, ppos, value, &hash);
+        assert (ret != -1);
+        if (likely(ret)) {
+            Py_INCREF(*value);
+            return 1;
+        }
     }
 #endif
-    else {
-        if (default_value == Py_None)
-            value = __Pyx_CallUnboundCMethod1(&__pyx_umethod_PyDict_Type_get, d, key);
-        else
-            value = __Pyx_CallUnboundCMethod2(&__pyx_umethod_PyDict_Type_get, d, key, default_value);
+    return 0;
+}
+
+/* UnpackItemEndCheck */
+static int __Pyx_IternextUnpackEndCheck(PyObject *retval, Py_ssize_t expected) {
+    if (unlikely(retval)) {
+        Py_DECREF(retval);
+        __Pyx_RaiseTooManyValuesError(expected);
+        return -1;
     }
-    return value;
+    return __Pyx_IterFinish();
 }
 
 /* PyObject_GenericGetAttrNoDict */
@@ -29164,6 +27009,129 @@ static int __Pyx_fix_up_extension_type_from_spec(PyType_Spec *spec, PyTypeObject
     return 0;
 }
 #endif
+
+/* PyObjectCallNoArg */
+static CYTHON_INLINE PyObject* __Pyx_PyObject_CallNoArg(PyObject *func) {
+    PyObject *arg[2] = {NULL, NULL};
+    return __Pyx_PyObject_FastCall(func, arg + 1, 0 | __Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET);
+}
+
+/* PyObjectGetMethod */
+static int __Pyx_PyObject_GetMethod(PyObject *obj, PyObject *name, PyObject **method) {
+    PyObject *attr;
+#if CYTHON_UNPACK_METHODS && CYTHON_COMPILING_IN_CPYTHON && CYTHON_USE_PYTYPE_LOOKUP
+    __Pyx_TypeName type_name;
+    PyTypeObject *tp = Py_TYPE(obj);
+    PyObject *descr;
+    descrgetfunc f = NULL;
+    PyObject **dictptr, *dict;
+    int meth_found = 0;
+    assert (*method == NULL);
+    if (unlikely(tp->tp_getattro != PyObject_GenericGetAttr)) {
+        attr = __Pyx_PyObject_GetAttrStr(obj, name);
+        goto try_unpack;
+    }
+    if (unlikely(tp->tp_dict == NULL) && unlikely(PyType_Ready(tp) < 0)) {
+        return 0;
+    }
+    descr = _PyType_Lookup(tp, name);
+    if (likely(descr != NULL)) {
+        Py_INCREF(descr);
+#if defined(Py_TPFLAGS_METHOD_DESCRIPTOR) && Py_TPFLAGS_METHOD_DESCRIPTOR
+        if (__Pyx_PyType_HasFeature(Py_TYPE(descr), Py_TPFLAGS_METHOD_DESCRIPTOR))
+#elif PY_MAJOR_VERSION >= 3
+        #ifdef __Pyx_CyFunction_USED
+        if (likely(PyFunction_Check(descr) || __Pyx_IS_TYPE(descr, &PyMethodDescr_Type) || __Pyx_CyFunction_Check(descr)))
+        #else
+        if (likely(PyFunction_Check(descr) || __Pyx_IS_TYPE(descr, &PyMethodDescr_Type)))
+        #endif
+#else
+        #ifdef __Pyx_CyFunction_USED
+        if (likely(PyFunction_Check(descr) || __Pyx_CyFunction_Check(descr)))
+        #else
+        if (likely(PyFunction_Check(descr)))
+        #endif
+#endif
+        {
+            meth_found = 1;
+        } else {
+            f = Py_TYPE(descr)->tp_descr_get;
+            if (f != NULL && PyDescr_IsData(descr)) {
+                attr = f(descr, obj, (PyObject *)Py_TYPE(obj));
+                Py_DECREF(descr);
+                goto try_unpack;
+            }
+        }
+    }
+    dictptr = _PyObject_GetDictPtr(obj);
+    if (dictptr != NULL && (dict = *dictptr) != NULL) {
+        Py_INCREF(dict);
+        attr = __Pyx_PyDict_GetItemStr(dict, name);
+        if (attr != NULL) {
+            Py_INCREF(attr);
+            Py_DECREF(dict);
+            Py_XDECREF(descr);
+            goto try_unpack;
+        }
+        Py_DECREF(dict);
+    }
+    if (meth_found) {
+        *method = descr;
+        return 1;
+    }
+    if (f != NULL) {
+        attr = f(descr, obj, (PyObject *)Py_TYPE(obj));
+        Py_DECREF(descr);
+        goto try_unpack;
+    }
+    if (likely(descr != NULL)) {
+        *method = descr;
+        return 0;
+    }
+    type_name = __Pyx_PyType_GetName(tp);
+    PyErr_Format(PyExc_AttributeError,
+#if PY_MAJOR_VERSION >= 3
+                 "'" __Pyx_FMT_TYPENAME "' object has no attribute '%U'",
+                 type_name, name);
+#else
+                 "'" __Pyx_FMT_TYPENAME "' object has no attribute '%.400s'",
+                 type_name, PyString_AS_STRING(name));
+#endif
+    __Pyx_DECREF_TypeName(type_name);
+    return 0;
+#else
+    attr = __Pyx_PyObject_GetAttrStr(obj, name);
+    goto try_unpack;
+#endif
+try_unpack:
+#if CYTHON_UNPACK_METHODS
+    if (likely(attr) && PyMethod_Check(attr) && likely(PyMethod_GET_SELF(attr) == obj)) {
+        PyObject *function = PyMethod_GET_FUNCTION(attr);
+        Py_INCREF(function);
+        Py_DECREF(attr);
+        *method = function;
+        return 1;
+    }
+#endif
+    *method = attr;
+    return 0;
+}
+
+/* PyObjectCallMethod0 */
+static PyObject* __Pyx_PyObject_CallMethod0(PyObject* obj, PyObject* method_name) {
+    PyObject *method = NULL, *result = NULL;
+    int is_method = __Pyx_PyObject_GetMethod(obj, method_name, &method);
+    if (likely(is_method)) {
+        result = __Pyx_PyObject_CallOneArg(method, obj);
+        Py_DECREF(method);
+        return result;
+    }
+    if (unlikely(!method)) goto bad;
+    result = __Pyx_PyObject_CallNoArg(method);
+    Py_DECREF(method);
+bad:
+    return result;
+}
 
 /* ValidateBasesTuple */
 #if CYTHON_COMPILING_IN_CPYTHON || CYTHON_COMPILING_IN_LIMITED_API || CYTHON_USE_TYPE_SPECS
@@ -30791,364 +28759,6 @@ static PyObject *__Pyx_CyFunction_New(PyMethodDef *ml, int flags, PyObject* qual
     return op;
 }
 
-/* FusedFunction */
-static PyObject *
-__pyx_FusedFunction_New(PyMethodDef *ml, int flags,
-                        PyObject *qualname, PyObject *closure,
-                        PyObject *module, PyObject *globals,
-                        PyObject *code)
-{
-    PyObject *op = __Pyx_CyFunction_Init(
-        PyObject_GC_New(__pyx_CyFunctionObject, __pyx_FusedFunctionType),
-        ml, flags, qualname, closure, module, globals, code
-    );
-    if (likely(op)) {
-        __pyx_FusedFunctionObject *fusedfunc = (__pyx_FusedFunctionObject *) op;
-        fusedfunc->__signatures__ = NULL;
-        fusedfunc->self = NULL;
-        PyObject_GC_Track(op);
-    }
-    return op;
-}
-static void
-__pyx_FusedFunction_dealloc(__pyx_FusedFunctionObject *self)
-{
-    PyObject_GC_UnTrack(self);
-    Py_CLEAR(self->self);
-    Py_CLEAR(self->__signatures__);
-    __Pyx__CyFunction_dealloc((__pyx_CyFunctionObject *) self);
-}
-static int
-__pyx_FusedFunction_traverse(__pyx_FusedFunctionObject *self,
-                             visitproc visit,
-                             void *arg)
-{
-    Py_VISIT(self->self);
-    Py_VISIT(self->__signatures__);
-    return __Pyx_CyFunction_traverse((__pyx_CyFunctionObject *) self, visit, arg);
-}
-static int
-__pyx_FusedFunction_clear(__pyx_FusedFunctionObject *self)
-{
-    Py_CLEAR(self->self);
-    Py_CLEAR(self->__signatures__);
-    return __Pyx_CyFunction_clear((__pyx_CyFunctionObject *) self);
-}
-static PyObject *
-__pyx_FusedFunction_descr_get(PyObject *self, PyObject *obj, PyObject *type)
-{
-    __pyx_FusedFunctionObject *func, *meth;
-    func = (__pyx_FusedFunctionObject *) self;
-    if (func->self || func->func.flags & __Pyx_CYFUNCTION_STATICMETHOD) {
-        Py_INCREF(self);
-        return self;
-    }
-    if (obj == Py_None)
-        obj = NULL;
-    if (func->func.flags & __Pyx_CYFUNCTION_CLASSMETHOD)
-        obj = type;
-    if (obj == NULL) {
-        Py_INCREF(self);
-        return self;
-    }
-    meth = (__pyx_FusedFunctionObject *) __pyx_FusedFunction_New(
-                    ((PyCFunctionObject *) func)->m_ml,
-                    ((__pyx_CyFunctionObject *) func)->flags,
-                    ((__pyx_CyFunctionObject *) func)->func_qualname,
-                    ((__pyx_CyFunctionObject *) func)->func_closure,
-                    ((PyCFunctionObject *) func)->m_module,
-                    ((__pyx_CyFunctionObject *) func)->func_globals,
-                    ((__pyx_CyFunctionObject *) func)->func_code);
-    if (unlikely(!meth))
-        return NULL;
-    if (func->func.defaults) {
-        PyObject **pydefaults;
-        int i;
-        if (unlikely(!__Pyx_CyFunction_InitDefaults(
-                (PyObject*)meth,
-                func->func.defaults_size,
-                func->func.defaults_pyobjects))) {
-            Py_XDECREF((PyObject*)meth);
-            return NULL;
-        }
-        memcpy(meth->func.defaults, func->func.defaults, func->func.defaults_size);
-        pydefaults = __Pyx_CyFunction_Defaults(PyObject *, meth);
-        for (i = 0; i < meth->func.defaults_pyobjects; i++)
-            Py_XINCREF(pydefaults[i]);
-    }
-    __Pyx_CyFunction_SetClassObj(meth, __Pyx_CyFunction_GetClassObj(func));
-    Py_XINCREF(func->__signatures__);
-    meth->__signatures__ = func->__signatures__;
-    Py_XINCREF(func->func.defaults_tuple);
-    meth->func.defaults_tuple = func->func.defaults_tuple;
-    Py_XINCREF(obj);
-    meth->self = obj;
-    return (PyObject *) meth;
-}
-static PyObject *
-_obj_to_string(PyObject *obj)
-{
-    if (PyUnicode_CheckExact(obj))
-        return __Pyx_NewRef(obj);
-#if PY_MAJOR_VERSION == 2
-    else if (PyString_Check(obj))
-        return PyUnicode_FromEncodedObject(obj, NULL, "strict");
-#endif
-    else if (PyType_Check(obj))
-        return PyObject_GetAttr(obj, __pyx_n_s_name_2);
-    else
-        return PyObject_Unicode(obj);
-}
-static PyObject *
-__pyx_FusedFunction_getitem(__pyx_FusedFunctionObject *self, PyObject *idx)
-{
-    PyObject *signature = NULL;
-    PyObject *unbound_result_func;
-    PyObject *result_func = NULL;
-    if (unlikely(self->__signatures__ == NULL)) {
-        PyErr_SetString(PyExc_TypeError, "Function is not fused");
-        return NULL;
-    }
-    if (PyTuple_Check(idx)) {
-        Py_ssize_t n = PyTuple_GET_SIZE(idx);
-        PyObject *list = PyList_New(n);
-        int i;
-        if (unlikely(!list))
-            return NULL;
-        for (i = 0; i < n; i++) {
-            PyObject *string;
-#if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
-            PyObject *item = PyTuple_GET_ITEM(idx, i);
-#else
-            PyObject *item = PySequence_ITEM(idx, i);  if (unlikely(!item)) goto __pyx_err;
-#endif
-            string = _obj_to_string(item);
-#if !(CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS)
-            Py_DECREF(item);
-#endif
-            if (unlikely(!string)) goto __pyx_err;
-            PyList_SET_ITEM(list, i, string);
-        }
-        signature = PyUnicode_Join(__pyx_kp_u__11, list);
-__pyx_err:;
-        Py_DECREF(list);
-    } else {
-        signature = _obj_to_string(idx);
-    }
-    if (unlikely(!signature))
-        return NULL;
-    unbound_result_func = PyObject_GetItem(self->__signatures__, signature);
-    if (likely(unbound_result_func)) {
-        if (self->self) {
-            __pyx_FusedFunctionObject *unbound = (__pyx_FusedFunctionObject *) unbound_result_func;
-            __Pyx_CyFunction_SetClassObj(unbound, __Pyx_CyFunction_GetClassObj(self));
-            result_func = __pyx_FusedFunction_descr_get(unbound_result_func,
-                                                        self->self, self->self);
-        } else {
-            result_func = unbound_result_func;
-            Py_INCREF(result_func);
-        }
-    }
-    Py_DECREF(signature);
-    Py_XDECREF(unbound_result_func);
-    return result_func;
-}
-static PyObject *
-__pyx_FusedFunction_callfunction(PyObject *func, PyObject *args, PyObject *kw)
-{
-     __pyx_CyFunctionObject *cyfunc = (__pyx_CyFunctionObject *) func;
-    int static_specialized = (cyfunc->flags & __Pyx_CYFUNCTION_STATICMETHOD &&
-                              !((__pyx_FusedFunctionObject *) func)->__signatures__);
-    if ((cyfunc->flags & __Pyx_CYFUNCTION_CCLASS) && !static_specialized) {
-        return __Pyx_CyFunction_CallAsMethod(func, args, kw);
-    } else {
-        return __Pyx_CyFunction_Call(func, args, kw);
-    }
-}
-static PyObject *
-__pyx_FusedFunction_call(PyObject *func, PyObject *args, PyObject *kw)
-{
-    __pyx_FusedFunctionObject *binding_func = (__pyx_FusedFunctionObject *) func;
-    Py_ssize_t argc = PyTuple_GET_SIZE(args);
-    PyObject *new_args = NULL;
-    __pyx_FusedFunctionObject *new_func = NULL;
-    PyObject *result = NULL;
-    int is_staticmethod = binding_func->func.flags & __Pyx_CYFUNCTION_STATICMETHOD;
-    if (binding_func->self) {
-        PyObject *self;
-        Py_ssize_t i;
-        new_args = PyTuple_New(argc + 1);
-        if (unlikely(!new_args))
-            return NULL;
-        self = binding_func->self;
-        Py_INCREF(self);
-        PyTuple_SET_ITEM(new_args, 0, self);
-        self = NULL;
-        for (i = 0; i < argc; i++) {
-#if CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
-            PyObject *item = PyTuple_GET_ITEM(args, i);
-            Py_INCREF(item);
-#else
-            PyObject *item = PySequence_ITEM(args, i);  if (unlikely(!item)) goto bad;
-#endif
-            PyTuple_SET_ITEM(new_args, i + 1, item);
-        }
-        args = new_args;
-    }
-    if (binding_func->__signatures__) {
-        PyObject *tup;
-        if (is_staticmethod && binding_func->func.flags & __Pyx_CYFUNCTION_CCLASS) {
-            tup = PyTuple_Pack(3, args,
-                               kw == NULL ? Py_None : kw,
-                               binding_func->func.defaults_tuple);
-            if (unlikely(!tup)) goto bad;
-            new_func = (__pyx_FusedFunctionObject *) __Pyx_CyFunction_CallMethod(
-                func, binding_func->__signatures__, tup, NULL);
-        } else {
-            tup = PyTuple_Pack(4, binding_func->__signatures__, args,
-                               kw == NULL ? Py_None : kw,
-                               binding_func->func.defaults_tuple);
-            if (unlikely(!tup)) goto bad;
-            new_func = (__pyx_FusedFunctionObject *) __pyx_FusedFunction_callfunction(func, tup, NULL);
-        }
-        Py_DECREF(tup);
-        if (unlikely(!new_func))
-            goto bad;
-        __Pyx_CyFunction_SetClassObj(new_func, __Pyx_CyFunction_GetClassObj(binding_func));
-        func = (PyObject *) new_func;
-    }
-    result = __pyx_FusedFunction_callfunction(func, args, kw);
-bad:
-    Py_XDECREF(new_args);
-    Py_XDECREF((PyObject *) new_func);
-    return result;
-}
-static PyMemberDef __pyx_FusedFunction_members[] = {
-    {(char *) "__signatures__",
-     T_OBJECT,
-     offsetof(__pyx_FusedFunctionObject, __signatures__),
-     READONLY,
-     0},
-    {(char *) "__self__", T_OBJECT_EX, offsetof(__pyx_FusedFunctionObject, self), READONLY, 0},
-    {0, 0, 0, 0, 0},
-};
-static PyGetSetDef __pyx_FusedFunction_getsets[] = {
-    {(char *) "__doc__",  (getter)__Pyx_CyFunction_get_doc, (setter)__Pyx_CyFunction_set_doc, 0, 0},
-    {0, 0, 0, 0, 0}
-};
-#if CYTHON_USE_TYPE_SPECS
-static PyType_Slot __pyx_FusedFunctionType_slots[] = {
-    {Py_tp_dealloc, (void *)__pyx_FusedFunction_dealloc},
-    {Py_tp_call, (void *)__pyx_FusedFunction_call},
-    {Py_tp_traverse, (void *)__pyx_FusedFunction_traverse},
-    {Py_tp_clear, (void *)__pyx_FusedFunction_clear},
-    {Py_tp_members, (void *)__pyx_FusedFunction_members},
-    {Py_tp_getset, (void *)__pyx_FusedFunction_getsets},
-    {Py_tp_descr_get, (void *)__pyx_FusedFunction_descr_get},
-    {Py_mp_subscript, (void *)__pyx_FusedFunction_getitem},
-    {0, 0},
-};
-static PyType_Spec __pyx_FusedFunctionType_spec = {
-    __PYX_TYPE_MODULE_PREFIX "fused_cython_function",
-    sizeof(__pyx_FusedFunctionObject),
-    0,
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC | Py_TPFLAGS_BASETYPE,
-    __pyx_FusedFunctionType_slots
-};
-#else
-static PyMappingMethods __pyx_FusedFunction_mapping_methods = {
-    0,
-    (binaryfunc) __pyx_FusedFunction_getitem,
-    0,
-};
-static PyTypeObject __pyx_FusedFunctionType_type = {
-    PyVarObject_HEAD_INIT(0, 0)
-    __PYX_TYPE_MODULE_PREFIX "fused_cython_function",
-    sizeof(__pyx_FusedFunctionObject),
-    0,
-    (destructor) __pyx_FusedFunction_dealloc,
-    0,
-    0,
-    0,
-#if PY_MAJOR_VERSION < 3
-    0,
-#else
-    0,
-#endif
-    0,
-    0,
-    0,
-    &__pyx_FusedFunction_mapping_methods,
-    0,
-    (ternaryfunc) __pyx_FusedFunction_call,
-    0,
-    0,
-    0,
-    0,
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC | Py_TPFLAGS_BASETYPE,
-    0,
-    (traverseproc) __pyx_FusedFunction_traverse,
-    (inquiry) __pyx_FusedFunction_clear,
-    0,
-    0,
-    0,
-    0,
-    0,
-    __pyx_FusedFunction_members,
-    __pyx_FusedFunction_getsets,
-    &__pyx_CyFunctionType_type,
-    0,
-    __pyx_FusedFunction_descr_get,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-#if PY_VERSION_HEX >= 0x030400a1
-    0,
-#endif
-#if PY_VERSION_HEX >= 0x030800b1 && (!CYTHON_COMPILING_IN_PYPY || PYPY_VERSION_NUM >= 0x07030800)
-    0,
-#endif
-#if __PYX_NEED_TP_PRINT_SLOT
-    0,
-#endif
-#if PY_VERSION_HEX >= 0x030C0000
-    0,
-#endif
-#if CYTHON_COMPILING_IN_PYPY && PY_VERSION_HEX >= 0x03090000 && PY_VERSION_HEX < 0x030a0000
-    0,
-#endif
-};
-#endif
-static int __pyx_FusedFunction_init(PyObject *module) {
-#if CYTHON_USE_TYPE_SPECS
-    PyObject *bases = PyTuple_Pack(1, __pyx_CyFunctionType);
-    if (unlikely(!bases)) {
-        return -1;
-    }
-    __pyx_FusedFunctionType = __Pyx_FetchCommonTypeFromSpec(module, &__pyx_FusedFunctionType_spec, bases);
-    Py_DECREF(bases);
-#else
-    CYTHON_UNUSED_VAR(module);
-    __pyx_FusedFunctionType_type.tp_base = __pyx_CyFunctionType;
-    __pyx_FusedFunctionType = __Pyx_FetchCommonType(&__pyx_FusedFunctionType_type);
-#endif
-    if (unlikely(__pyx_FusedFunctionType == NULL)) {
-        return -1;
-    }
-    return 0;
-}
-
 /* CLineInTraceback */
 #ifndef CYTHON_CLINE_IN_TRACEBACK
 static int __Pyx_CLineForTraceback(PyThreadState *tstate, int c_line) {
@@ -32318,75 +29928,6 @@ __pyx_fail:
     return result;
 }
 
-/* ObjectToMemviewSlice */
-  static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_short(PyObject *obj, int writable_flag) {
-    __Pyx_memviewslice result = { 0, 0, { 0 }, { 0 }, { 0 } };
-    __Pyx_BufFmt_StackElem stack[1];
-    int axes_specs[] = { (__Pyx_MEMVIEW_DIRECT | __Pyx_MEMVIEW_STRIDED), (__Pyx_MEMVIEW_DIRECT | __Pyx_MEMVIEW_STRIDED), (__Pyx_MEMVIEW_DIRECT | __Pyx_MEMVIEW_STRIDED) };
-    int retcode;
-    if (obj == Py_None) {
-        result.memview = (struct __pyx_memoryview_obj *) Py_None;
-        return result;
-    }
-    retcode = __Pyx_ValidateAndInit_memviewslice(axes_specs, 0,
-                                                 PyBUF_RECORDS_RO | writable_flag, 3,
-                                                 &__Pyx_TypeInfo_unsigned_short, stack,
-                                                 &result, obj);
-    if (unlikely(retcode == -1))
-        goto __pyx_fail;
-    return result;
-__pyx_fail:
-    result.memview = NULL;
-    result.data = NULL;
-    return result;
-}
-
-/* ObjectToMemviewSlice */
-  static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_int(PyObject *obj, int writable_flag) {
-    __Pyx_memviewslice result = { 0, 0, { 0 }, { 0 }, { 0 } };
-    __Pyx_BufFmt_StackElem stack[1];
-    int axes_specs[] = { (__Pyx_MEMVIEW_DIRECT | __Pyx_MEMVIEW_STRIDED), (__Pyx_MEMVIEW_DIRECT | __Pyx_MEMVIEW_STRIDED), (__Pyx_MEMVIEW_DIRECT | __Pyx_MEMVIEW_STRIDED) };
-    int retcode;
-    if (obj == Py_None) {
-        result.memview = (struct __pyx_memoryview_obj *) Py_None;
-        return result;
-    }
-    retcode = __Pyx_ValidateAndInit_memviewslice(axes_specs, 0,
-                                                 PyBUF_RECORDS_RO | writable_flag, 3,
-                                                 &__Pyx_TypeInfo_unsigned_int, stack,
-                                                 &result, obj);
-    if (unlikely(retcode == -1))
-        goto __pyx_fail;
-    return result;
-__pyx_fail:
-    result.memview = NULL;
-    result.data = NULL;
-    return result;
-}
-
-/* ObjectToMemviewSlice */
-  static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(PyObject *obj, int writable_flag) {
-    __Pyx_memviewslice result = { 0, 0, { 0 }, { 0 }, { 0 } };
-    __Pyx_BufFmt_StackElem stack[1];
-    int axes_specs[] = { (__Pyx_MEMVIEW_DIRECT | __Pyx_MEMVIEW_STRIDED), (__Pyx_MEMVIEW_DIRECT | __Pyx_MEMVIEW_STRIDED), (__Pyx_MEMVIEW_DIRECT | __Pyx_MEMVIEW_STRIDED) };
-    int retcode;
-    if (obj == Py_None) {
-        result.memview = (struct __pyx_memoryview_obj *) Py_None;
-        return result;
-    }
-    retcode = __Pyx_ValidateAndInit_memviewslice(axes_specs, 0,
-                                                 PyBUF_RECORDS_RO | writable_flag, 3,
-                                                 &__Pyx_TypeInfo_unsigned_PY_LONG_LONG, stack,
-                                                 &result, obj);
-    if (unlikely(retcode == -1))
-        goto __pyx_fail;
-    return result;
-__pyx_fail:
-    result.memview = NULL;
-    result.data = NULL;
-    return result;
-}
-
 /* CIntFromPyVerify */
   #define __PYX_VERIFY_RETURN_INT(target_type, func_type, func_value)\
     __PYX__VERIFY_RETURN_INT(target_type, func_type, func_value, 0)
@@ -32444,85 +29985,27 @@ __pyx_fail:
     return result;
 }
 
-/* MemviewDtypeToObject */
-  static CYTHON_INLINE PyObject *__pyx_memview_get_int(const char *itemp) {
-    return (PyObject *) __Pyx_PyInt_From_int(*(int *) itemp);
-}
-static CYTHON_INLINE int __pyx_memview_set_int(const char *itemp, PyObject *obj) {
-    int value = __Pyx_PyInt_As_int(obj);
-    if (unlikely((value == (int)-1) && PyErr_Occurred()))
-        return 0;
-    *(int *) itemp = value;
-    return 1;
-}
-
-/* PyUCS4InUnicode */
-  #if PY_VERSION_HEX < 0x03090000 || (defined(PyUnicode_WCHAR_KIND) && defined(PyUnicode_AS_UNICODE))
-#if PY_VERSION_HEX < 0x03090000
-#define __Pyx_PyUnicode_AS_UNICODE(op) PyUnicode_AS_UNICODE(op)
-#define __Pyx_PyUnicode_GET_SIZE(op) PyUnicode_GET_SIZE(op)
-#else
-#define __Pyx_PyUnicode_AS_UNICODE(op) (((PyASCIIObject *)(op))->wstr)
-#define __Pyx_PyUnicode_GET_SIZE(op) ((PyCompactUnicodeObject *)(op))->wstr_length
-#endif
-#if !defined(Py_UNICODE_SIZE) || Py_UNICODE_SIZE == 2
-static int __Pyx_PyUnicodeBufferContainsUCS4_SP(Py_UNICODE* buffer, Py_ssize_t length, Py_UCS4 character) {
-    Py_UNICODE high_val, low_val;
-    Py_UNICODE* pos;
-    high_val = (Py_UNICODE) (0xD800 | (((character - 0x10000) >> 10) & ((1<<10)-1)));
-    low_val  = (Py_UNICODE) (0xDC00 | ( (character - 0x10000)        & ((1<<10)-1)));
-    for (pos=buffer; pos < buffer+length-1; pos++) {
-        if (unlikely((high_val == pos[0]) & (low_val == pos[1]))) return 1;
+/* ObjectToMemviewSlice */
+  static CYTHON_INLINE __Pyx_memviewslice __Pyx_PyObject_to_MemoryviewSlice_dsds_long(PyObject *obj, int writable_flag) {
+    __Pyx_memviewslice result = { 0, 0, { 0 }, { 0 }, { 0 } };
+    __Pyx_BufFmt_StackElem stack[1];
+    int axes_specs[] = { (__Pyx_MEMVIEW_DIRECT | __Pyx_MEMVIEW_STRIDED), (__Pyx_MEMVIEW_DIRECT | __Pyx_MEMVIEW_STRIDED) };
+    int retcode;
+    if (obj == Py_None) {
+        result.memview = (struct __pyx_memoryview_obj *) Py_None;
+        return result;
     }
-    return 0;
-}
-#endif
-static int __Pyx_PyUnicodeBufferContainsUCS4_BMP(Py_UNICODE* buffer, Py_ssize_t length, Py_UCS4 character) {
-    Py_UNICODE uchar;
-    Py_UNICODE* pos;
-    uchar = (Py_UNICODE) character;
-    for (pos=buffer; pos < buffer+length; pos++) {
-        if (unlikely(uchar == pos[0])) return 1;
-    }
-    return 0;
-}
-#endif
-static CYTHON_INLINE int __Pyx_UnicodeContainsUCS4(PyObject* unicode, Py_UCS4 character) {
-#if CYTHON_PEP393_ENABLED
-    const int kind = PyUnicode_KIND(unicode);
-    #ifdef PyUnicode_WCHAR_KIND
-    if (likely(kind != PyUnicode_WCHAR_KIND))
-    #endif
-    {
-        Py_ssize_t i;
-        const void* udata = PyUnicode_DATA(unicode);
-        const Py_ssize_t length = PyUnicode_GET_LENGTH(unicode);
-        for (i=0; i < length; i++) {
-            if (unlikely(character == PyUnicode_READ(kind, udata, i))) return 1;
-        }
-        return 0;
-    }
-#elif PY_VERSION_HEX >= 0x03090000
-    #error Cannot use "UChar in Unicode" in Python 3.9 without PEP-393 unicode strings.
-#elif !defined(PyUnicode_AS_UNICODE)
-    #error Cannot use "UChar in Unicode" in Python < 3.9 without Py_UNICODE support.
-#endif
-#if PY_VERSION_HEX < 0x03090000 || (defined(PyUnicode_WCHAR_KIND) && defined(PyUnicode_AS_UNICODE))
-#if !defined(Py_UNICODE_SIZE) || Py_UNICODE_SIZE == 2
-    if ((sizeof(Py_UNICODE) == 2) && unlikely(character > 65535)) {
-        return __Pyx_PyUnicodeBufferContainsUCS4_SP(
-            __Pyx_PyUnicode_AS_UNICODE(unicode),
-            __Pyx_PyUnicode_GET_SIZE(unicode),
-            character);
-    } else
-#endif
-    {
-        return __Pyx_PyUnicodeBufferContainsUCS4_BMP(
-            __Pyx_PyUnicode_AS_UNICODE(unicode),
-            __Pyx_PyUnicode_GET_SIZE(unicode),
-            character);
-    }
-#endif
+    retcode = __Pyx_ValidateAndInit_memviewslice(axes_specs, 0,
+                                                 PyBUF_RECORDS_RO | writable_flag, 2,
+                                                 &__Pyx_TypeInfo_long, stack,
+                                                 &result, obj);
+    if (unlikely(retcode == -1))
+        goto __pyx_fail;
+    return result;
+__pyx_fail:
+    result.memview = NULL;
+    result.data = NULL;
+    return result;
 }
 
 /* MemviewSliceCopyTemplate */
@@ -33000,6 +30483,70 @@ raise_neg_overflow:
     return (int) -1;
 }
 
+/* CIntToPy */
+  static CYTHON_INLINE PyObject* __Pyx_PyInt_From_unsigned_char(unsigned char value) {
+#ifdef __Pyx_HAS_GCC_DIAGNOSTIC
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
+#endif
+    const unsigned char neg_one = (unsigned char) -1, const_zero = (unsigned char) 0;
+#ifdef __Pyx_HAS_GCC_DIAGNOSTIC
+#pragma GCC diagnostic pop
+#endif
+    const int is_unsigned = neg_one > const_zero;
+    if (is_unsigned) {
+        if (sizeof(unsigned char) < sizeof(long)) {
+            return PyInt_FromLong((long) value);
+        } else if (sizeof(unsigned char) <= sizeof(unsigned long)) {
+            return PyLong_FromUnsignedLong((unsigned long) value);
+#ifdef HAVE_LONG_LONG
+        } else if (sizeof(unsigned char) <= sizeof(unsigned PY_LONG_LONG)) {
+            return PyLong_FromUnsignedLongLong((unsigned PY_LONG_LONG) value);
+#endif
+        }
+    } else {
+        if (sizeof(unsigned char) <= sizeof(long)) {
+            return PyInt_FromLong((long) value);
+#ifdef HAVE_LONG_LONG
+        } else if (sizeof(unsigned char) <= sizeof(PY_LONG_LONG)) {
+            return PyLong_FromLongLong((PY_LONG_LONG) value);
+#endif
+        }
+    }
+    {
+        int one = 1; int little = (int)*(unsigned char *)&one;
+        unsigned char *bytes = (unsigned char *)&value;
+#if !CYTHON_COMPILING_IN_LIMITED_API && PY_VERSION_HEX < 0x030d0000
+        return _PyLong_FromByteArray(bytes, sizeof(unsigned char),
+                                     little, !is_unsigned);
+#else
+        PyObject *from_bytes, *result = NULL;
+        PyObject *py_bytes = NULL, *arg_tuple = NULL, *kwds = NULL, *order_str = NULL;
+        from_bytes = PyObject_GetAttrString((PyObject*)&PyLong_Type, "from_bytes");
+        if (!from_bytes) return NULL;
+        py_bytes = PyBytes_FromStringAndSize((char*)bytes, sizeof(unsigned char));
+        if (!py_bytes) goto limited_bad;
+        order_str = PyUnicode_FromString(little ? "little" : "big");
+        if (!order_str) goto limited_bad;
+        arg_tuple = PyTuple_Pack(2, py_bytes, order_str);
+        if (!arg_tuple) goto limited_bad;
+        if (!is_unsigned) {
+            kwds = PyDict_New();
+            if (!kwds) goto limited_bad;
+            if (PyDict_SetItemString(kwds, "signed", __Pyx_NewRef(Py_True))) goto limited_bad;
+        }
+        result = PyObject_Call(from_bytes, arg_tuple, kwds);
+        limited_bad:
+        Py_XDECREF(kwds);
+        Py_XDECREF(arg_tuple);
+        Py_XDECREF(order_str);
+        Py_XDECREF(py_bytes);
+        Py_XDECREF(from_bytes);
+        return result;
+#endif
+    }
+}
+
 /* CIntFromPy */
   static CYTHON_INLINE unsigned char __Pyx_PyInt_As_unsigned_char(PyObject *x) {
 #ifdef __Pyx_HAS_GCC_DIAGNOSTIC
@@ -33274,70 +30821,6 @@ raise_neg_overflow:
 }
 
 /* CIntToPy */
-  static CYTHON_INLINE PyObject* __Pyx_PyInt_From_unsigned_char(unsigned char value) {
-#ifdef __Pyx_HAS_GCC_DIAGNOSTIC
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wconversion"
-#endif
-    const unsigned char neg_one = (unsigned char) -1, const_zero = (unsigned char) 0;
-#ifdef __Pyx_HAS_GCC_DIAGNOSTIC
-#pragma GCC diagnostic pop
-#endif
-    const int is_unsigned = neg_one > const_zero;
-    if (is_unsigned) {
-        if (sizeof(unsigned char) < sizeof(long)) {
-            return PyInt_FromLong((long) value);
-        } else if (sizeof(unsigned char) <= sizeof(unsigned long)) {
-            return PyLong_FromUnsignedLong((unsigned long) value);
-#ifdef HAVE_LONG_LONG
-        } else if (sizeof(unsigned char) <= sizeof(unsigned PY_LONG_LONG)) {
-            return PyLong_FromUnsignedLongLong((unsigned PY_LONG_LONG) value);
-#endif
-        }
-    } else {
-        if (sizeof(unsigned char) <= sizeof(long)) {
-            return PyInt_FromLong((long) value);
-#ifdef HAVE_LONG_LONG
-        } else if (sizeof(unsigned char) <= sizeof(PY_LONG_LONG)) {
-            return PyLong_FromLongLong((PY_LONG_LONG) value);
-#endif
-        }
-    }
-    {
-        int one = 1; int little = (int)*(unsigned char *)&one;
-        unsigned char *bytes = (unsigned char *)&value;
-#if !CYTHON_COMPILING_IN_LIMITED_API && PY_VERSION_HEX < 0x030d0000
-        return _PyLong_FromByteArray(bytes, sizeof(unsigned char),
-                                     little, !is_unsigned);
-#else
-        PyObject *from_bytes, *result = NULL;
-        PyObject *py_bytes = NULL, *arg_tuple = NULL, *kwds = NULL, *order_str = NULL;
-        from_bytes = PyObject_GetAttrString((PyObject*)&PyLong_Type, "from_bytes");
-        if (!from_bytes) return NULL;
-        py_bytes = PyBytes_FromStringAndSize((char*)bytes, sizeof(unsigned char));
-        if (!py_bytes) goto limited_bad;
-        order_str = PyUnicode_FromString(little ? "little" : "big");
-        if (!order_str) goto limited_bad;
-        arg_tuple = PyTuple_Pack(2, py_bytes, order_str);
-        if (!arg_tuple) goto limited_bad;
-        if (!is_unsigned) {
-            kwds = PyDict_New();
-            if (!kwds) goto limited_bad;
-            if (PyDict_SetItemString(kwds, "signed", __Pyx_NewRef(Py_True))) goto limited_bad;
-        }
-        result = PyObject_Call(from_bytes, arg_tuple, kwds);
-        limited_bad:
-        Py_XDECREF(kwds);
-        Py_XDECREF(arg_tuple);
-        Py_XDECREF(order_str);
-        Py_XDECREF(py_bytes);
-        Py_XDECREF(from_bytes);
-        return result;
-#endif
-    }
-}
-
-/* CIntToPy */
   static CYTHON_INLINE PyObject* __Pyx_PyInt_From_int(int value) {
 #ifdef __Pyx_HAS_GCC_DIAGNOSTIC
 #pragma GCC diagnostic push
@@ -33399,96 +30882,6 @@ raise_neg_overflow:
         return result;
 #endif
     }
-}
-
-/* CIntToPy */
-  static CYTHON_INLINE PyObject* __Pyx_PyInt_From_long(long value) {
-#ifdef __Pyx_HAS_GCC_DIAGNOSTIC
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wconversion"
-#endif
-    const long neg_one = (long) -1, const_zero = (long) 0;
-#ifdef __Pyx_HAS_GCC_DIAGNOSTIC
-#pragma GCC diagnostic pop
-#endif
-    const int is_unsigned = neg_one > const_zero;
-    if (is_unsigned) {
-        if (sizeof(long) < sizeof(long)) {
-            return PyInt_FromLong((long) value);
-        } else if (sizeof(long) <= sizeof(unsigned long)) {
-            return PyLong_FromUnsignedLong((unsigned long) value);
-#ifdef HAVE_LONG_LONG
-        } else if (sizeof(long) <= sizeof(unsigned PY_LONG_LONG)) {
-            return PyLong_FromUnsignedLongLong((unsigned PY_LONG_LONG) value);
-#endif
-        }
-    } else {
-        if (sizeof(long) <= sizeof(long)) {
-            return PyInt_FromLong((long) value);
-#ifdef HAVE_LONG_LONG
-        } else if (sizeof(long) <= sizeof(PY_LONG_LONG)) {
-            return PyLong_FromLongLong((PY_LONG_LONG) value);
-#endif
-        }
-    }
-    {
-        int one = 1; int little = (int)*(unsigned char *)&one;
-        unsigned char *bytes = (unsigned char *)&value;
-#if !CYTHON_COMPILING_IN_LIMITED_API && PY_VERSION_HEX < 0x030d0000
-        return _PyLong_FromByteArray(bytes, sizeof(long),
-                                     little, !is_unsigned);
-#else
-        PyObject *from_bytes, *result = NULL;
-        PyObject *py_bytes = NULL, *arg_tuple = NULL, *kwds = NULL, *order_str = NULL;
-        from_bytes = PyObject_GetAttrString((PyObject*)&PyLong_Type, "from_bytes");
-        if (!from_bytes) return NULL;
-        py_bytes = PyBytes_FromStringAndSize((char*)bytes, sizeof(long));
-        if (!py_bytes) goto limited_bad;
-        order_str = PyUnicode_FromString(little ? "little" : "big");
-        if (!order_str) goto limited_bad;
-        arg_tuple = PyTuple_Pack(2, py_bytes, order_str);
-        if (!arg_tuple) goto limited_bad;
-        if (!is_unsigned) {
-            kwds = PyDict_New();
-            if (!kwds) goto limited_bad;
-            if (PyDict_SetItemString(kwds, "signed", __Pyx_NewRef(Py_True))) goto limited_bad;
-        }
-        result = PyObject_Call(from_bytes, arg_tuple, kwds);
-        limited_bad:
-        Py_XDECREF(kwds);
-        Py_XDECREF(arg_tuple);
-        Py_XDECREF(order_str);
-        Py_XDECREF(py_bytes);
-        Py_XDECREF(from_bytes);
-        return result;
-#endif
-    }
-}
-
-/* ImportNumPyArray */
-  static PyObject* __Pyx__ImportNumPyArray(void) {
-    PyObject *numpy_module, *ndarray_object = NULL;
-    numpy_module = __Pyx_Import(__pyx_n_s_numpy, NULL, 0);
-    if (likely(numpy_module)) {
-        ndarray_object = PyObject_GetAttrString(numpy_module, "ndarray");
-        Py_DECREF(numpy_module);
-    }
-    if (unlikely(!ndarray_object)) {
-        PyErr_Clear();
-    }
-    if (unlikely(!ndarray_object || !PyObject_TypeCheck(ndarray_object, &PyType_Type))) {
-        Py_XDECREF(ndarray_object);
-        Py_INCREF(Py_None);
-        ndarray_object = Py_None;
-    }
-    return ndarray_object;
-}
-static CYTHON_INLINE PyObject* __Pyx_ImportNumPyArrayTypeIfAvailable(void) {
-    if (unlikely(!__pyx_numpy_ndarray)) {
-        __pyx_numpy_ndarray = __Pyx__ImportNumPyArray();
-    }
-    Py_INCREF(__pyx_numpy_ndarray);
-    return __pyx_numpy_ndarray;
 }
 
 /* CIntFromPy */
@@ -33762,6 +31155,70 @@ raise_neg_overflow:
     PyErr_SetString(PyExc_OverflowError,
         "can't convert negative value to long");
     return (long) -1;
+}
+
+/* CIntToPy */
+  static CYTHON_INLINE PyObject* __Pyx_PyInt_From_long(long value) {
+#ifdef __Pyx_HAS_GCC_DIAGNOSTIC
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
+#endif
+    const long neg_one = (long) -1, const_zero = (long) 0;
+#ifdef __Pyx_HAS_GCC_DIAGNOSTIC
+#pragma GCC diagnostic pop
+#endif
+    const int is_unsigned = neg_one > const_zero;
+    if (is_unsigned) {
+        if (sizeof(long) < sizeof(long)) {
+            return PyInt_FromLong((long) value);
+        } else if (sizeof(long) <= sizeof(unsigned long)) {
+            return PyLong_FromUnsignedLong((unsigned long) value);
+#ifdef HAVE_LONG_LONG
+        } else if (sizeof(long) <= sizeof(unsigned PY_LONG_LONG)) {
+            return PyLong_FromUnsignedLongLong((unsigned PY_LONG_LONG) value);
+#endif
+        }
+    } else {
+        if (sizeof(long) <= sizeof(long)) {
+            return PyInt_FromLong((long) value);
+#ifdef HAVE_LONG_LONG
+        } else if (sizeof(long) <= sizeof(PY_LONG_LONG)) {
+            return PyLong_FromLongLong((PY_LONG_LONG) value);
+#endif
+        }
+    }
+    {
+        int one = 1; int little = (int)*(unsigned char *)&one;
+        unsigned char *bytes = (unsigned char *)&value;
+#if !CYTHON_COMPILING_IN_LIMITED_API && PY_VERSION_HEX < 0x030d0000
+        return _PyLong_FromByteArray(bytes, sizeof(long),
+                                     little, !is_unsigned);
+#else
+        PyObject *from_bytes, *result = NULL;
+        PyObject *py_bytes = NULL, *arg_tuple = NULL, *kwds = NULL, *order_str = NULL;
+        from_bytes = PyObject_GetAttrString((PyObject*)&PyLong_Type, "from_bytes");
+        if (!from_bytes) return NULL;
+        py_bytes = PyBytes_FromStringAndSize((char*)bytes, sizeof(long));
+        if (!py_bytes) goto limited_bad;
+        order_str = PyUnicode_FromString(little ? "little" : "big");
+        if (!order_str) goto limited_bad;
+        arg_tuple = PyTuple_Pack(2, py_bytes, order_str);
+        if (!arg_tuple) goto limited_bad;
+        if (!is_unsigned) {
+            kwds = PyDict_New();
+            if (!kwds) goto limited_bad;
+            if (PyDict_SetItemString(kwds, "signed", __Pyx_NewRef(Py_True))) goto limited_bad;
+        }
+        result = PyObject_Call(from_bytes, arg_tuple, kwds);
+        limited_bad:
+        Py_XDECREF(kwds);
+        Py_XDECREF(arg_tuple);
+        Py_XDECREF(order_str);
+        Py_XDECREF(py_bytes);
+        Py_XDECREF(from_bytes);
+        return result;
+#endif
+    }
 }
 
 /* CIntFromPy */
@@ -34047,7 +31504,7 @@ __Pyx_PyType_GetName(PyTypeObject* tp)
     if (unlikely(name == NULL) || unlikely(!PyUnicode_Check(name))) {
         PyErr_Clear();
         Py_XDECREF(name);
-        name = __Pyx_NewRef(__pyx_n_s__31);
+        name = __Pyx_NewRef(__pyx_n_s__29);
     }
     return name;
 }

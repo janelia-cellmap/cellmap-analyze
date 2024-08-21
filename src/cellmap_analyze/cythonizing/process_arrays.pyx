@@ -50,7 +50,7 @@ def initialize_contact_site_array(
     unsigned char[:, :, :] surface_voxels_1, 
     unsigned char[:, :, :] surface_voxels_2, 
     unsigned char[:, :, :] mask,
-    unsigned long long[:, :, :] initialized_contact_sites,
+    unsigned char[:, :, :] initialized_contact_sites,
     bint mask_out_surface_voxels):
 
     cdef int x, y, z

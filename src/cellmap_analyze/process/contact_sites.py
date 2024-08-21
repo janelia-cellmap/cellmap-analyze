@@ -5,6 +5,7 @@ from cellmap_analyze.util import dask_util
 from cellmap_analyze.util import io_util
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
+    dask_computer,
     guesstimate_npartitions,
 )
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
@@ -13,10 +14,7 @@ from skimage import measure
 from cellmap_analyze.cythonizing.process_arrays import initialize_contact_site_array
 
 # from cellmap_analyze.util.bresenham3D import bresenham3DWithMask
-from cellmap_analyze.cythonizing.bresenham3D import (
-    bresenham3DWithMask,
-    bresenham3DWithMaskSingle,
-)
+from cellmap_analyze.cythonizing.bresenham3D import bresenham_3D_lines
 import logging
 from cellmap_analyze.process.connected_components import ConnectedComponents
 from scipy.spatial import KDTree
@@ -25,7 +23,6 @@ from cellmap_analyze.util.measure_util import trim_array
 from cellmap_analyze.util.zarr_util import (
     create_multiscale_dataset,
 )
-
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -76,7 +73,7 @@ class ContactSites:
 
         if minimum_volume_nm_3 is None:
             minimum_volume_nm_3 = (
-                np.pi * (contact_distance_nm**2)
+                np.pi * ((contact_distance_nm / 2) ** 2)
             ) * contact_distance_nm
 
         self.minimum_volume_nm_3 = minimum_volume_nm_3
@@ -101,16 +98,6 @@ class ContactSites:
         if self.num_workers == 1:
             self.compute_args = {"scheduler": "single-threaded"}
 
-    # @staticmethod
-    # def get_surface_voxels(organelle_1, organelle_2):
-    #     surface_voxels_1 = find_boundary(organelle_1, mode="inner") > 0
-    #     surface_voxels_2 = find_boundary(organelle_2, mode="inner") > 0
-
-    #     return (
-    #         surface_voxels_1,
-    #         surface_voxels_2,
-    #     )
-
     @staticmethod
     def get_ndarray_contact_sites(
         organelle_1, organelle_2, contact_distance_voxels, mask_out_surface_voxels=False
@@ -118,7 +105,7 @@ class ContactSites:
         surface_voxels_1 = np.zeros_like(organelle_1, np.uint8)
         surface_voxels_2 = np.zeros_like(organelle_2, np.uint8)
         mask = np.zeros_like(organelle_1, np.uint8)
-        current_pair_contact_sites = np.zeros_like(organelle_1, np.uint64)
+        current_pair_contact_sites = np.zeros_like(organelle_1, np.uint8)
         initialize_contact_site_array(
             organelle_1,
             organelle_2,
@@ -128,26 +115,6 @@ class ContactSites:
             current_pair_contact_sites,
             mask_out_surface_voxels,
         )
-
-        # bresenham method
-
-        # find_boundary(organelle_1, surface_voxels_1)
-        # find_boundary(organelle_2, surface_voxels_2)
-
-        # organelle_1 = organelle_1 > 0
-        # organelle_2 = organelle_2 > 0
-        # if mask_out_surface_voxels:
-        #     mask = organelle_1 | organelle_2
-        # else:
-        #     # use nonsurface voxels as mask
-        #     mask = (organelle_1 & ~surface_voxels_1) | (organelle_2 & ~surface_voxels_2)
-        # mask = mask.astype(np.uint8)
-
-        # overlap_voxels = np.argwhere(organelle_1 & organelle_2)
-        # if len(overlap_voxels) > 0:
-        #     indices = tuple(zip(*overlap_voxels))
-        #     current_pair_contact_sites[indices] = 1
-        #     found_contact_voxels = True
 
         del organelle_1, organelle_2
 
@@ -165,41 +132,14 @@ class ContactSites:
             tree2, contact_distance_voxels
         )
 
-        all_valid_voxels = set()
-        for i, sublist in enumerate(contact_voxels_list_of_lists):
-            for j in sublist:
-                contact_voxel_1 = object_1_surface_voxel_coordinates[i]
-                contact_voxel_2 = object_2_surface_voxel_coordinates[j]
-                if (
-                    current_pair_contact_sites[
-                        contact_voxel_1[0], contact_voxel_1[1], contact_voxel_1[2]
-                    ]
-                    or current_pair_contact_sites[
-                        contact_voxel_2[0], contact_voxel_2[1], contact_voxel_2[2]
-                    ]
-                ):
-                    continue
-
-                # if np.all(np.abs(contact_voxel_1 - contact_voxel_2) <= 1):
-                #     continue
-
-                valid_voxels = bresenham3DWithMaskSingle(
-                    *contact_voxel_1,
-                    *contact_voxel_2,
-                    mask=mask,
-                )
-                if valid_voxels:
-                    all_valid_voxels.update(valid_voxels)
-
-        if mask_out_surface_voxels:
-            mask[contact_voxel_1[0], contact_voxel_1[1], contact_voxel_1[2]] = 1
-            mask[contact_voxel_2[0], contact_voxel_2[1], contact_voxel_2[2]] = 1
-
-        found_contact_voxels = False
-        if len(all_valid_voxels) > 0:
-            x_coords, y_coords, z_coords = zip(*all_valid_voxels)
-            current_pair_contact_sites[x_coords, y_coords, z_coords] = 1
-            found_contact_voxels = True
+        found_contact_voxels = bresenham_3D_lines(
+            contact_voxels_list_of_lists,
+            object_1_surface_voxel_coordinates,
+            object_2_surface_voxel_coordinates,
+            current_pair_contact_sites,
+            2 * np.ceil(contact_distance_voxels),
+            mask,
+        )
 
         if found_contact_voxels:
             # need connectivity of 3 due to bresenham allowing diagonals

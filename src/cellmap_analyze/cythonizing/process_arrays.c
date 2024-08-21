@@ -24021,7 +24021,7 @@ static PyObject *__pyx_fuse_0_0__pyx_pw_14process_arrays_17initialize_contact_si
     __pyx_v_surface_voxels_1 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_1.memview)) __PYX_ERR(0, 50, __pyx_L3_error)
     __pyx_v_surface_voxels_2 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_2.memview)) __PYX_ERR(0, 51, __pyx_L3_error)
     __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 52, __pyx_L3_error)
-    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
+    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
     __pyx_v_mask_out_surface_voxels = __Pyx_PyObject_IsTrue(values[6]); if (unlikely((__pyx_v_mask_out_surface_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 54, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
@@ -24266,7 +24266,7 @@ static PyObject *__pyx_pf_14process_arrays_16initialize_contact_site_array(CYTHO
             __Pyx_RaiseBufferIndexError(__pyx_t_13);
             __PYX_ERR(0, 72, __pyx_L1_error)
           }
-          *((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
+          *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
 
           /* "process_arrays.pyx":71
  *                 organelle_1_value = organelle_1[x, y, z]
@@ -25135,7 +25135,7 @@ static PyObject *__pyx_fuse_0_1__pyx_pw_14process_arrays_19initialize_contact_si
     __pyx_v_surface_voxels_1 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_1.memview)) __PYX_ERR(0, 50, __pyx_L3_error)
     __pyx_v_surface_voxels_2 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_2.memview)) __PYX_ERR(0, 51, __pyx_L3_error)
     __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 52, __pyx_L3_error)
-    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
+    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
     __pyx_v_mask_out_surface_voxels = __Pyx_PyObject_IsTrue(values[6]); if (unlikely((__pyx_v_mask_out_surface_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 54, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
@@ -25380,7 +25380,7 @@ static PyObject *__pyx_pf_14process_arrays_18initialize_contact_site_array(CYTHO
             __Pyx_RaiseBufferIndexError(__pyx_t_13);
             __PYX_ERR(0, 72, __pyx_L1_error)
           }
-          *((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
+          *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
 
           /* "process_arrays.pyx":71
  *                 organelle_1_value = organelle_1[x, y, z]
@@ -26249,7 +26249,7 @@ static PyObject *__pyx_fuse_0_2__pyx_pw_14process_arrays_21initialize_contact_si
     __pyx_v_surface_voxels_1 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_1.memview)) __PYX_ERR(0, 50, __pyx_L3_error)
     __pyx_v_surface_voxels_2 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_2.memview)) __PYX_ERR(0, 51, __pyx_L3_error)
     __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 52, __pyx_L3_error)
-    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
+    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
     __pyx_v_mask_out_surface_voxels = __Pyx_PyObject_IsTrue(values[6]); if (unlikely((__pyx_v_mask_out_surface_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 54, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
@@ -26494,7 +26494,7 @@ static PyObject *__pyx_pf_14process_arrays_20initialize_contact_site_array(CYTHO
             __Pyx_RaiseBufferIndexError(__pyx_t_13);
             __PYX_ERR(0, 72, __pyx_L1_error)
           }
-          *((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
+          *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
 
           /* "process_arrays.pyx":71
  *                 organelle_1_value = organelle_1[x, y, z]
@@ -27363,7 +27363,7 @@ static PyObject *__pyx_fuse_0_3__pyx_pw_14process_arrays_23initialize_contact_si
     __pyx_v_surface_voxels_1 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_1.memview)) __PYX_ERR(0, 50, __pyx_L3_error)
     __pyx_v_surface_voxels_2 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_2.memview)) __PYX_ERR(0, 51, __pyx_L3_error)
     __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 52, __pyx_L3_error)
-    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
+    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
     __pyx_v_mask_out_surface_voxels = __Pyx_PyObject_IsTrue(values[6]); if (unlikely((__pyx_v_mask_out_surface_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 54, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
@@ -27608,7 +27608,7 @@ static PyObject *__pyx_pf_14process_arrays_22initialize_contact_site_array(CYTHO
             __Pyx_RaiseBufferIndexError(__pyx_t_13);
             __PYX_ERR(0, 72, __pyx_L1_error)
           }
-          *((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
+          *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
 
           /* "process_arrays.pyx":71
  *                 organelle_1_value = organelle_1[x, y, z]
@@ -28477,7 +28477,7 @@ static PyObject *__pyx_fuse_0_4__pyx_pw_14process_arrays_25initialize_contact_si
     __pyx_v_surface_voxels_1 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_1.memview)) __PYX_ERR(0, 50, __pyx_L3_error)
     __pyx_v_surface_voxels_2 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_2.memview)) __PYX_ERR(0, 51, __pyx_L3_error)
     __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 52, __pyx_L3_error)
-    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
+    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
     __pyx_v_mask_out_surface_voxels = __Pyx_PyObject_IsTrue(values[6]); if (unlikely((__pyx_v_mask_out_surface_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 54, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
@@ -28722,7 +28722,7 @@ static PyObject *__pyx_pf_14process_arrays_24initialize_contact_site_array(CYTHO
             __Pyx_RaiseBufferIndexError(__pyx_t_13);
             __PYX_ERR(0, 72, __pyx_L1_error)
           }
-          *((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
+          *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
 
           /* "process_arrays.pyx":71
  *                 organelle_1_value = organelle_1[x, y, z]
@@ -29591,7 +29591,7 @@ static PyObject *__pyx_fuse_1_0__pyx_pw_14process_arrays_27initialize_contact_si
     __pyx_v_surface_voxels_1 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_1.memview)) __PYX_ERR(0, 50, __pyx_L3_error)
     __pyx_v_surface_voxels_2 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_2.memview)) __PYX_ERR(0, 51, __pyx_L3_error)
     __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 52, __pyx_L3_error)
-    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
+    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
     __pyx_v_mask_out_surface_voxels = __Pyx_PyObject_IsTrue(values[6]); if (unlikely((__pyx_v_mask_out_surface_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 54, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
@@ -29836,7 +29836,7 @@ static PyObject *__pyx_pf_14process_arrays_26initialize_contact_site_array(CYTHO
             __Pyx_RaiseBufferIndexError(__pyx_t_13);
             __PYX_ERR(0, 72, __pyx_L1_error)
           }
-          *((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
+          *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
 
           /* "process_arrays.pyx":71
  *                 organelle_1_value = organelle_1[x, y, z]
@@ -30705,7 +30705,7 @@ static PyObject *__pyx_fuse_1_1__pyx_pw_14process_arrays_29initialize_contact_si
     __pyx_v_surface_voxels_1 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_1.memview)) __PYX_ERR(0, 50, __pyx_L3_error)
     __pyx_v_surface_voxels_2 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_2.memview)) __PYX_ERR(0, 51, __pyx_L3_error)
     __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 52, __pyx_L3_error)
-    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
+    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
     __pyx_v_mask_out_surface_voxels = __Pyx_PyObject_IsTrue(values[6]); if (unlikely((__pyx_v_mask_out_surface_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 54, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
@@ -30950,7 +30950,7 @@ static PyObject *__pyx_pf_14process_arrays_28initialize_contact_site_array(CYTHO
             __Pyx_RaiseBufferIndexError(__pyx_t_13);
             __PYX_ERR(0, 72, __pyx_L1_error)
           }
-          *((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
+          *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
 
           /* "process_arrays.pyx":71
  *                 organelle_1_value = organelle_1[x, y, z]
@@ -31819,7 +31819,7 @@ static PyObject *__pyx_fuse_1_2__pyx_pw_14process_arrays_31initialize_contact_si
     __pyx_v_surface_voxels_1 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_1.memview)) __PYX_ERR(0, 50, __pyx_L3_error)
     __pyx_v_surface_voxels_2 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_2.memview)) __PYX_ERR(0, 51, __pyx_L3_error)
     __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 52, __pyx_L3_error)
-    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
+    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
     __pyx_v_mask_out_surface_voxels = __Pyx_PyObject_IsTrue(values[6]); if (unlikely((__pyx_v_mask_out_surface_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 54, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
@@ -32064,7 +32064,7 @@ static PyObject *__pyx_pf_14process_arrays_30initialize_contact_site_array(CYTHO
             __Pyx_RaiseBufferIndexError(__pyx_t_13);
             __PYX_ERR(0, 72, __pyx_L1_error)
           }
-          *((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
+          *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
 
           /* "process_arrays.pyx":71
  *                 organelle_1_value = organelle_1[x, y, z]
@@ -32933,7 +32933,7 @@ static PyObject *__pyx_fuse_1_3__pyx_pw_14process_arrays_33initialize_contact_si
     __pyx_v_surface_voxels_1 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_1.memview)) __PYX_ERR(0, 50, __pyx_L3_error)
     __pyx_v_surface_voxels_2 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_2.memview)) __PYX_ERR(0, 51, __pyx_L3_error)
     __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 52, __pyx_L3_error)
-    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
+    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
     __pyx_v_mask_out_surface_voxels = __Pyx_PyObject_IsTrue(values[6]); if (unlikely((__pyx_v_mask_out_surface_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 54, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
@@ -33178,7 +33178,7 @@ static PyObject *__pyx_pf_14process_arrays_32initialize_contact_site_array(CYTHO
             __Pyx_RaiseBufferIndexError(__pyx_t_13);
             __PYX_ERR(0, 72, __pyx_L1_error)
           }
-          *((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
+          *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
 
           /* "process_arrays.pyx":71
  *                 organelle_1_value = organelle_1[x, y, z]
@@ -34047,7 +34047,7 @@ static PyObject *__pyx_fuse_1_4__pyx_pw_14process_arrays_35initialize_contact_si
     __pyx_v_surface_voxels_1 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_1.memview)) __PYX_ERR(0, 50, __pyx_L3_error)
     __pyx_v_surface_voxels_2 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_2.memview)) __PYX_ERR(0, 51, __pyx_L3_error)
     __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 52, __pyx_L3_error)
-    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
+    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
     __pyx_v_mask_out_surface_voxels = __Pyx_PyObject_IsTrue(values[6]); if (unlikely((__pyx_v_mask_out_surface_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 54, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
@@ -34292,7 +34292,7 @@ static PyObject *__pyx_pf_14process_arrays_34initialize_contact_site_array(CYTHO
             __Pyx_RaiseBufferIndexError(__pyx_t_13);
             __PYX_ERR(0, 72, __pyx_L1_error)
           }
-          *((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
+          *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
 
           /* "process_arrays.pyx":71
  *                 organelle_1_value = organelle_1[x, y, z]
@@ -35161,7 +35161,7 @@ static PyObject *__pyx_fuse_2_0__pyx_pw_14process_arrays_37initialize_contact_si
     __pyx_v_surface_voxels_1 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_1.memview)) __PYX_ERR(0, 50, __pyx_L3_error)
     __pyx_v_surface_voxels_2 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_2.memview)) __PYX_ERR(0, 51, __pyx_L3_error)
     __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 52, __pyx_L3_error)
-    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
+    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
     __pyx_v_mask_out_surface_voxels = __Pyx_PyObject_IsTrue(values[6]); if (unlikely((__pyx_v_mask_out_surface_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 54, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
@@ -35406,7 +35406,7 @@ static PyObject *__pyx_pf_14process_arrays_36initialize_contact_site_array(CYTHO
             __Pyx_RaiseBufferIndexError(__pyx_t_13);
             __PYX_ERR(0, 72, __pyx_L1_error)
           }
-          *((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
+          *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
 
           /* "process_arrays.pyx":71
  *                 organelle_1_value = organelle_1[x, y, z]
@@ -36275,7 +36275,7 @@ static PyObject *__pyx_fuse_2_1__pyx_pw_14process_arrays_39initialize_contact_si
     __pyx_v_surface_voxels_1 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_1.memview)) __PYX_ERR(0, 50, __pyx_L3_error)
     __pyx_v_surface_voxels_2 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_2.memview)) __PYX_ERR(0, 51, __pyx_L3_error)
     __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 52, __pyx_L3_error)
-    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
+    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
     __pyx_v_mask_out_surface_voxels = __Pyx_PyObject_IsTrue(values[6]); if (unlikely((__pyx_v_mask_out_surface_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 54, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
@@ -36520,7 +36520,7 @@ static PyObject *__pyx_pf_14process_arrays_38initialize_contact_site_array(CYTHO
             __Pyx_RaiseBufferIndexError(__pyx_t_13);
             __PYX_ERR(0, 72, __pyx_L1_error)
           }
-          *((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
+          *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
 
           /* "process_arrays.pyx":71
  *                 organelle_1_value = organelle_1[x, y, z]
@@ -37389,7 +37389,7 @@ static PyObject *__pyx_fuse_2_2__pyx_pw_14process_arrays_41initialize_contact_si
     __pyx_v_surface_voxels_1 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_1.memview)) __PYX_ERR(0, 50, __pyx_L3_error)
     __pyx_v_surface_voxels_2 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_2.memview)) __PYX_ERR(0, 51, __pyx_L3_error)
     __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 52, __pyx_L3_error)
-    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
+    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
     __pyx_v_mask_out_surface_voxels = __Pyx_PyObject_IsTrue(values[6]); if (unlikely((__pyx_v_mask_out_surface_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 54, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
@@ -37634,7 +37634,7 @@ static PyObject *__pyx_pf_14process_arrays_40initialize_contact_site_array(CYTHO
             __Pyx_RaiseBufferIndexError(__pyx_t_13);
             __PYX_ERR(0, 72, __pyx_L1_error)
           }
-          *((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
+          *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
 
           /* "process_arrays.pyx":71
  *                 organelle_1_value = organelle_1[x, y, z]
@@ -38503,7 +38503,7 @@ static PyObject *__pyx_fuse_2_3__pyx_pw_14process_arrays_43initialize_contact_si
     __pyx_v_surface_voxels_1 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_1.memview)) __PYX_ERR(0, 50, __pyx_L3_error)
     __pyx_v_surface_voxels_2 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_2.memview)) __PYX_ERR(0, 51, __pyx_L3_error)
     __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 52, __pyx_L3_error)
-    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
+    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
     __pyx_v_mask_out_surface_voxels = __Pyx_PyObject_IsTrue(values[6]); if (unlikely((__pyx_v_mask_out_surface_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 54, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
@@ -38748,7 +38748,7 @@ static PyObject *__pyx_pf_14process_arrays_42initialize_contact_site_array(CYTHO
             __Pyx_RaiseBufferIndexError(__pyx_t_13);
             __PYX_ERR(0, 72, __pyx_L1_error)
           }
-          *((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
+          *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
 
           /* "process_arrays.pyx":71
  *                 organelle_1_value = organelle_1[x, y, z]
@@ -39617,7 +39617,7 @@ static PyObject *__pyx_fuse_2_4__pyx_pw_14process_arrays_45initialize_contact_si
     __pyx_v_surface_voxels_1 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_1.memview)) __PYX_ERR(0, 50, __pyx_L3_error)
     __pyx_v_surface_voxels_2 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_2.memview)) __PYX_ERR(0, 51, __pyx_L3_error)
     __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 52, __pyx_L3_error)
-    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
+    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
     __pyx_v_mask_out_surface_voxels = __Pyx_PyObject_IsTrue(values[6]); if (unlikely((__pyx_v_mask_out_surface_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 54, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
@@ -39862,7 +39862,7 @@ static PyObject *__pyx_pf_14process_arrays_44initialize_contact_site_array(CYTHO
             __Pyx_RaiseBufferIndexError(__pyx_t_13);
             __PYX_ERR(0, 72, __pyx_L1_error)
           }
-          *((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
+          *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
 
           /* "process_arrays.pyx":71
  *                 organelle_1_value = organelle_1[x, y, z]
@@ -40731,7 +40731,7 @@ static PyObject *__pyx_fuse_3_0__pyx_pw_14process_arrays_47initialize_contact_si
     __pyx_v_surface_voxels_1 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_1.memview)) __PYX_ERR(0, 50, __pyx_L3_error)
     __pyx_v_surface_voxels_2 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_2.memview)) __PYX_ERR(0, 51, __pyx_L3_error)
     __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 52, __pyx_L3_error)
-    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
+    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
     __pyx_v_mask_out_surface_voxels = __Pyx_PyObject_IsTrue(values[6]); if (unlikely((__pyx_v_mask_out_surface_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 54, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
@@ -40976,7 +40976,7 @@ static PyObject *__pyx_pf_14process_arrays_46initialize_contact_site_array(CYTHO
             __Pyx_RaiseBufferIndexError(__pyx_t_13);
             __PYX_ERR(0, 72, __pyx_L1_error)
           }
-          *((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
+          *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
 
           /* "process_arrays.pyx":71
  *                 organelle_1_value = organelle_1[x, y, z]
@@ -41845,7 +41845,7 @@ static PyObject *__pyx_fuse_3_1__pyx_pw_14process_arrays_49initialize_contact_si
     __pyx_v_surface_voxels_1 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_1.memview)) __PYX_ERR(0, 50, __pyx_L3_error)
     __pyx_v_surface_voxels_2 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_2.memview)) __PYX_ERR(0, 51, __pyx_L3_error)
     __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 52, __pyx_L3_error)
-    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
+    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
     __pyx_v_mask_out_surface_voxels = __Pyx_PyObject_IsTrue(values[6]); if (unlikely((__pyx_v_mask_out_surface_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 54, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
@@ -42090,7 +42090,7 @@ static PyObject *__pyx_pf_14process_arrays_48initialize_contact_site_array(CYTHO
             __Pyx_RaiseBufferIndexError(__pyx_t_13);
             __PYX_ERR(0, 72, __pyx_L1_error)
           }
-          *((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
+          *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
 
           /* "process_arrays.pyx":71
  *                 organelle_1_value = organelle_1[x, y, z]
@@ -42959,7 +42959,7 @@ static PyObject *__pyx_fuse_3_2__pyx_pw_14process_arrays_51initialize_contact_si
     __pyx_v_surface_voxels_1 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_1.memview)) __PYX_ERR(0, 50, __pyx_L3_error)
     __pyx_v_surface_voxels_2 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_2.memview)) __PYX_ERR(0, 51, __pyx_L3_error)
     __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 52, __pyx_L3_error)
-    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
+    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
     __pyx_v_mask_out_surface_voxels = __Pyx_PyObject_IsTrue(values[6]); if (unlikely((__pyx_v_mask_out_surface_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 54, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
@@ -43204,7 +43204,7 @@ static PyObject *__pyx_pf_14process_arrays_50initialize_contact_site_array(CYTHO
             __Pyx_RaiseBufferIndexError(__pyx_t_13);
             __PYX_ERR(0, 72, __pyx_L1_error)
           }
-          *((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
+          *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
 
           /* "process_arrays.pyx":71
  *                 organelle_1_value = organelle_1[x, y, z]
@@ -44073,7 +44073,7 @@ static PyObject *__pyx_fuse_3_3__pyx_pw_14process_arrays_53initialize_contact_si
     __pyx_v_surface_voxels_1 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_1.memview)) __PYX_ERR(0, 50, __pyx_L3_error)
     __pyx_v_surface_voxels_2 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_2.memview)) __PYX_ERR(0, 51, __pyx_L3_error)
     __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 52, __pyx_L3_error)
-    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
+    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
     __pyx_v_mask_out_surface_voxels = __Pyx_PyObject_IsTrue(values[6]); if (unlikely((__pyx_v_mask_out_surface_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 54, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
@@ -44318,7 +44318,7 @@ static PyObject *__pyx_pf_14process_arrays_52initialize_contact_site_array(CYTHO
             __Pyx_RaiseBufferIndexError(__pyx_t_13);
             __PYX_ERR(0, 72, __pyx_L1_error)
           }
-          *((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
+          *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
 
           /* "process_arrays.pyx":71
  *                 organelle_1_value = organelle_1[x, y, z]
@@ -45187,7 +45187,7 @@ static PyObject *__pyx_fuse_3_4__pyx_pw_14process_arrays_55initialize_contact_si
     __pyx_v_surface_voxels_1 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_1.memview)) __PYX_ERR(0, 50, __pyx_L3_error)
     __pyx_v_surface_voxels_2 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_2.memview)) __PYX_ERR(0, 51, __pyx_L3_error)
     __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 52, __pyx_L3_error)
-    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
+    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
     __pyx_v_mask_out_surface_voxels = __Pyx_PyObject_IsTrue(values[6]); if (unlikely((__pyx_v_mask_out_surface_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 54, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
@@ -45432,7 +45432,7 @@ static PyObject *__pyx_pf_14process_arrays_54initialize_contact_site_array(CYTHO
             __Pyx_RaiseBufferIndexError(__pyx_t_13);
             __PYX_ERR(0, 72, __pyx_L1_error)
           }
-          *((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
+          *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
 
           /* "process_arrays.pyx":71
  *                 organelle_1_value = organelle_1[x, y, z]
@@ -46301,7 +46301,7 @@ static PyObject *__pyx_fuse_4_0__pyx_pw_14process_arrays_57initialize_contact_si
     __pyx_v_surface_voxels_1 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_1.memview)) __PYX_ERR(0, 50, __pyx_L3_error)
     __pyx_v_surface_voxels_2 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_2.memview)) __PYX_ERR(0, 51, __pyx_L3_error)
     __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 52, __pyx_L3_error)
-    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
+    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
     __pyx_v_mask_out_surface_voxels = __Pyx_PyObject_IsTrue(values[6]); if (unlikely((__pyx_v_mask_out_surface_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 54, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
@@ -46546,7 +46546,7 @@ static PyObject *__pyx_pf_14process_arrays_56initialize_contact_site_array(CYTHO
             __Pyx_RaiseBufferIndexError(__pyx_t_13);
             __PYX_ERR(0, 72, __pyx_L1_error)
           }
-          *((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
+          *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
 
           /* "process_arrays.pyx":71
  *                 organelle_1_value = organelle_1[x, y, z]
@@ -47415,7 +47415,7 @@ static PyObject *__pyx_fuse_4_1__pyx_pw_14process_arrays_59initialize_contact_si
     __pyx_v_surface_voxels_1 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_1.memview)) __PYX_ERR(0, 50, __pyx_L3_error)
     __pyx_v_surface_voxels_2 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_2.memview)) __PYX_ERR(0, 51, __pyx_L3_error)
     __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 52, __pyx_L3_error)
-    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
+    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
     __pyx_v_mask_out_surface_voxels = __Pyx_PyObject_IsTrue(values[6]); if (unlikely((__pyx_v_mask_out_surface_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 54, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
@@ -47660,7 +47660,7 @@ static PyObject *__pyx_pf_14process_arrays_58initialize_contact_site_array(CYTHO
             __Pyx_RaiseBufferIndexError(__pyx_t_13);
             __PYX_ERR(0, 72, __pyx_L1_error)
           }
-          *((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
+          *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
 
           /* "process_arrays.pyx":71
  *                 organelle_1_value = organelle_1[x, y, z]
@@ -48529,7 +48529,7 @@ static PyObject *__pyx_fuse_4_2__pyx_pw_14process_arrays_61initialize_contact_si
     __pyx_v_surface_voxels_1 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_1.memview)) __PYX_ERR(0, 50, __pyx_L3_error)
     __pyx_v_surface_voxels_2 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_2.memview)) __PYX_ERR(0, 51, __pyx_L3_error)
     __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 52, __pyx_L3_error)
-    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
+    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
     __pyx_v_mask_out_surface_voxels = __Pyx_PyObject_IsTrue(values[6]); if (unlikely((__pyx_v_mask_out_surface_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 54, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
@@ -48774,7 +48774,7 @@ static PyObject *__pyx_pf_14process_arrays_60initialize_contact_site_array(CYTHO
             __Pyx_RaiseBufferIndexError(__pyx_t_13);
             __PYX_ERR(0, 72, __pyx_L1_error)
           }
-          *((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
+          *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
 
           /* "process_arrays.pyx":71
  *                 organelle_1_value = organelle_1[x, y, z]
@@ -49643,7 +49643,7 @@ static PyObject *__pyx_fuse_4_3__pyx_pw_14process_arrays_63initialize_contact_si
     __pyx_v_surface_voxels_1 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_1.memview)) __PYX_ERR(0, 50, __pyx_L3_error)
     __pyx_v_surface_voxels_2 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_2.memview)) __PYX_ERR(0, 51, __pyx_L3_error)
     __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 52, __pyx_L3_error)
-    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
+    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
     __pyx_v_mask_out_surface_voxels = __Pyx_PyObject_IsTrue(values[6]); if (unlikely((__pyx_v_mask_out_surface_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 54, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
@@ -49888,7 +49888,7 @@ static PyObject *__pyx_pf_14process_arrays_62initialize_contact_site_array(CYTHO
             __Pyx_RaiseBufferIndexError(__pyx_t_13);
             __PYX_ERR(0, 72, __pyx_L1_error)
           }
-          *((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
+          *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
 
           /* "process_arrays.pyx":71
  *                 organelle_1_value = organelle_1[x, y, z]
@@ -50757,7 +50757,7 @@ static PyObject *__pyx_fuse_4_4__pyx_pw_14process_arrays_65initialize_contact_si
     __pyx_v_surface_voxels_1 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[2], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_1.memview)) __PYX_ERR(0, 50, __pyx_L3_error)
     __pyx_v_surface_voxels_2 = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[3], PyBUF_WRITABLE); if (unlikely(!__pyx_v_surface_voxels_2.memview)) __PYX_ERR(0, 51, __pyx_L3_error)
     __pyx_v_mask = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[4], PyBUF_WRITABLE); if (unlikely(!__pyx_v_mask.memview)) __PYX_ERR(0, 52, __pyx_L3_error)
-    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_PY_LONG_LONG(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
+    __pyx_v_initialized_contact_sites = __Pyx_PyObject_to_MemoryviewSlice_dsdsds_unsigned_char(values[5], PyBUF_WRITABLE); if (unlikely(!__pyx_v_initialized_contact_sites.memview)) __PYX_ERR(0, 53, __pyx_L3_error)
     __pyx_v_mask_out_surface_voxels = __Pyx_PyObject_IsTrue(values[6]); if (unlikely((__pyx_v_mask_out_surface_voxels == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 54, __pyx_L3_error)
   }
   goto __pyx_L6_skip;
@@ -51002,7 +51002,7 @@ static PyObject *__pyx_pf_14process_arrays_64initialize_contact_site_array(CYTHO
             __Pyx_RaiseBufferIndexError(__pyx_t_13);
             __PYX_ERR(0, 72, __pyx_L1_error)
           }
-          *((unsigned PY_LONG_LONG *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
+          *((unsigned char *) ( /* dim=2 */ (( /* dim=1 */ (( /* dim=0 */ (__pyx_v_initialized_contact_sites.data + __pyx_t_10 * __pyx_v_initialized_contact_sites.strides[0]) ) + __pyx_t_11 * __pyx_v_initialized_contact_sites.strides[1]) ) + __pyx_t_12 * __pyx_v_initialized_contact_sites.strides[2]) )) = 1;
 
           /* "process_arrays.pyx":71
  *                 organelle_1_value = organelle_1[x, y, z]
