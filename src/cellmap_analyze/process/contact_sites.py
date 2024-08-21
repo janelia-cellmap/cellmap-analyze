@@ -260,7 +260,7 @@ class ContactSites:
             logger,
         ):
             with io_util.Timing_Messager("Calculating contact sites", logger):
-                b.compute(**self.compute_args)
+                dask_computer(b, self.num_workers, **self.compute_args)
 
     def get_contact_sites(self):
         self.calculate_contact_sites_blockwise()

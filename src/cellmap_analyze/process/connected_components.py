@@ -1,13 +1,17 @@
+from collections import defaultdict
 import pickle
+import types
 from funlib.persistence import Array, open_ds
 from funlib.geometry import Roi
 import numpy as np
+from tqdm import tqdm
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util import io_util
 from cellmap_analyze.util.dask_util import (
     DaskBlock,
     create_block_from_index,
     create_blocks,
+    dask_computer,
     guesstimate_npartitions,
 )
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
@@ -59,6 +63,21 @@ class ConnectedComponents:
         self.compute_args = {}
         if self.num_workers == 1:
             self.compute_args = {"scheduler": "single-threaded"}
+            self.num_local_threads_available = 1
+            self.local_config = None
+        else:
+            self.num_local_threads_available = len(os.sched_getaffinity(0))
+            self.local_config = {
+                "jobqueue": {
+                    "local": {
+                        "ncpus": self.num_local_threads_available,
+                        "processes": self.num_local_threads_available,
+                        "cores": self.num_local_threads_available,
+                        "log-directory": "job-logs",
+                        "name": "dask-worker",
+                    }
+                }
+            }
 
     @staticmethod
     def convert_position_to_global_id(position, dimensions):
@@ -99,7 +118,7 @@ class ConnectedComponents:
     @staticmethod
     def get_object_sizes(data):
         labels, counts = np.unique(data[data > 0], return_counts=True)
-        return dict(zip(labels, counts))
+        return defaultdict(int, zip(labels, counts))
 
     @staticmethod
     def get_connected_ids(nodes, edges):
@@ -134,10 +153,6 @@ class ConnectedComponents:
         data = tmp_blockwise_idi.to_ndarray_ts(
             block.read_roi,
         )
-        # if roi.shape != self.ds.intersect(roi).shape:
-        #     data = self.ds.to_ndarray(roi, fill_value=0)
-        # else:
-        #     data = self.ds.to_ndarray(roi)
 
         mask = data.astype(bool)
         mask[2:, 2:, 2:] = False
@@ -151,7 +166,7 @@ class ConnectedComponents:
         return [block], id_to_volume_dict, touching_ids
 
     @staticmethod
-    def __combine_id_to_volume_dicts(dict1, dict2):
+    def combine_id_to_volume_dicts(dict1, dict2):
         # make dict1 the larger dict
         if len(dict1) < len(dict2):
             dict1, dict2 = dict2, dict1
@@ -163,17 +178,23 @@ class ConnectedComponents:
 
     @staticmethod
     def __combine_results(results):
-        blocks = []
-        id_to_volume_dict = {}
-        touching_ids = set()
         if type(results) is tuple:
             results = [results]
+        elif isinstance(results, types.GeneratorType):
+            results = list(results)
 
-        for block, current_id_to_volume_dict, current_touching_ids in results:
+        for idx, (block, current_id_to_volume_dict, current_touching_ids) in enumerate(
+            tqdm(results)
+        ):
+            if idx == 0:
+                blocks = block
+                id_to_volume_dict = current_id_to_volume_dict
+                touching_ids = current_touching_ids
+                continue
+
             blocks += block
-            id_to_volume_dict = ConnectedComponents.__combine_id_to_volume_dicts(
-                id_to_volume_dict, current_id_to_volume_dict
-            )
+            for key, value in current_id_to_volume_dict.items():
+                id_to_volume_dict[key] += value
             touching_ids.update(current_touching_ids)
 
         return blocks, id_to_volume_dict, touching_ids
@@ -185,13 +206,12 @@ class ConnectedComponents:
             db.from_sequence(
                 block_indexes,
                 npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
-            )
-            .map(
+            ).map(
                 ConnectedComponents.get_connected_component_information_blockwise,
                 self.tmp_blockwise_idi,
                 self.connectivity,
             )
-            .reduction(self.__combine_results, self.__combine_results)
+            # .reduction(self.__combine_results, self.__combine_results)
         )
 
         with dask_util.start_dask(
@@ -202,12 +222,40 @@ class ConnectedComponents:
             with io_util.Timing_Messager(
                 "Calculating connected component information", logger
             ):
-                blocks_with_dict, self.id_to_volume_dict, self.touching_ids = b.compute(
-                    **self.compute_args
-                )
+                bagged_results = dask_computer(b, self.num_workers, **self.compute_args)
+
+        # moved this out of dask, seems fast enough without having to daskify
+        with io_util.Timing_Messager("Combining bagged results", logger):
+            blocks_with_dict, self.id_to_volume_dict, self.touching_ids = (
+                ConnectedComponents.__combine_results(bagged_results)
+            )
+
         self.blocks = [None] * num_blocks
         for block in blocks_with_dict:
             self.blocks[block.index] = block
+
+    def write_out_block_objects(self):
+        def write_out_block_object(block, tmp_blockwise_path):
+            block_coords_string = "/".join([str(c) for c in block.coords])
+            output_path = f"{tmp_blockwise_path}/{block_coords_string}.pkl"
+            print(output_path)
+            # write relabeling dict to pkl file
+            with open(f"{output_path}", "wb") as handle:
+                pickle.dump(block, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+        # NOTE: do it the following way since it should be fast enough with 10 workers and then we don't have to bog down distributed stuff
+        with dask_util.start_dask(
+            num_workers=self.num_local_threads_available,
+            msg="write out blocks",
+            logger=logger,
+            config=self.local_config,
+        ):
+            with io_util.Timing_Messager("Writing out blocks", logger):
+                b = db.from_sequence(
+                    self.blocks,
+                    npartitions=guesstimate_npartitions(self.blocks, self.num_workers),
+                ).map(write_out_block_object, self.tmp_blockwise_idi.path)
+                dask_computer(b, self.num_local_threads_available, **self.compute_args)
 
     def get_final_connected_components(self):
         with io_util.Timing_Messager("Finding connected components", logger):
@@ -242,14 +290,6 @@ class ConnectedComponents:
                     for id in block.relabeling_dict.keys()
                 }
             del relabeling_dict
-
-        with io_util.Timing_Messager("Writing out blocks", logger):
-            for block in self.blocks:
-                block_coords_string = "/".join([str(c) for c in block.coords])
-                output_path = f"{self.tmp_blockwise_idi.path}/{block_coords_string}.pkl"
-                # write relabeling dict to pkl file
-                with open(f"{output_path}", "wb") as handle:
-                    pickle.dump(block, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     @staticmethod
     def relabel_block(
@@ -302,7 +342,7 @@ class ConnectedComponents:
 
         with dask_util.start_dask(self.num_workers, "relabel dataset", logger):
             with io_util.Timing_Messager("Relabeling dataset", logger):
-                b.compute(**self.compute_args)
+                dask_computer(b, self.num_workers, **self.compute_args)
 
     @staticmethod
     def delete_chunks(block_coords, tmp_blockwise_ds_path):
@@ -325,12 +365,14 @@ class ConnectedComponents:
             ).map(ConnectedComponents.delete_chunks, self.tmp_blockwise_ds_path)
 
             with dask_util.start_dask(
-                self.num_workers, f"delete blockwise depth: {depth}", logger
+                self.num_workers,
+                f"delete blockwise depth: {depth}",
+                logger,
             ):
                 with io_util.Timing_Messager(
                     f"Deleting blockwise depth: {depth}", logger
                 ):
-                    b.compute(**self.compute_args)
+                    dask_computer(b, self.num_workers, **self.compute_args)
 
         base_path, _ = split_dataset_path(self.tmp_blockwise_ds_path)
         os.system(
@@ -341,5 +383,6 @@ class ConnectedComponents:
     def merge_connected_components_across_blocks(self):
         self.get_connected_component_information()
         self.get_final_connected_components()
+        self.write_out_block_objects()
         self.relabel_dataset()
         self.delete_tmp_dataset()
