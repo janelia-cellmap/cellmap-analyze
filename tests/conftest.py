@@ -1,6 +1,7 @@
 import pytest
 import numpy as np
 from funlib.geometry import Roi
+from scipy import ndimage
 from cellmap_analyze.util.information_holders import (
     ContactingOrganelleInformation,
     ObjectInformation,
@@ -37,7 +38,13 @@ def blockwise_connected_components(image_shape, chunk_size):
                 seg[x, y, z] = id
                 id += 1
 
-    seg[9:11, 9:11, 9:11] = id + 1
+    seg[7:11, 7:11, 7:11] = id + 1
+    return seg
+
+
+@pytest.fixture(scope="session")
+def connected_components(blockwise_connected_components):
+    seg, _ = ndimage.label(blockwise_connected_components > 0)
     return seg
 
 
@@ -274,7 +281,6 @@ def write_zarrs(tmp_zarr, test_image_dict, voxel_size, chunk_size):
         current_voxel_size = (
             voxel_size if "downsampled" not in data_name else 2 * voxel_size
         )
-        print(data)
         data_path = f"{tmp_zarr}/{data_name}"
         ds = create_multiscale_dataset(
             data_path,
