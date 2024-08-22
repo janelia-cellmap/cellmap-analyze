@@ -10,7 +10,7 @@ from cellmap_analyze.util.image_data_interface import (
 
 
 @pytest.mark.parametrize("minimum_volume_voxels", [0, 1, 7, 9, 64, 65])
-def test_contact_site_blocks(
+def test_connected_components(
     tmp_zarr,
     connected_components,
     minimum_volume_voxels,
@@ -37,7 +37,6 @@ def test_contact_site_blocks(
     test_data = ImageDataInterface(
         f"{tmp_zarr}/test_connected_components_minimum_volume_nm_3_{minimum_volume_nm_3}/s0"
     ).to_ndarray_ts()
-    raise Exception(minimum_volume_voxels, len(uniques))
     assert np.array_equal(
         test_data,
         ground_truth,
