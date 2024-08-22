@@ -19,6 +19,29 @@ def image_shape():
 
 
 @pytest.fixture(scope="session")
+def chunk_size():
+    return np.array((4, 4, 4))
+
+
+@pytest.fixture(scope="session")
+def blockwise_connected_components(image_shape, chunk_size):
+    seg = np.zeros(image_shape, dtype=np.uint64)
+    # single voxel
+    seg[1, 1, 1] = 1
+
+    # cube around border
+    id = 2
+    for x in range(3, 5):
+        for y in range(3, 5):
+            for z in range(3, 5):
+                seg[x, y, z] = id
+                id += 1
+
+    seg[9:11, 9:11, 9:11] = id + 1
+    return seg
+
+
+@pytest.fixture(scope="session")
 def segmentation_1(image_shape):
     seg = np.zeros(image_shape, dtype=np.uint8)
     seg[:2, 2:10, 2:10] = 1
@@ -220,14 +243,18 @@ def tmp_zarr(tmpdir_factory):
 
 @pytest.fixture(scope="session")
 def test_image_dict(
+    blockwise_connected_components,
     segmentation_1,
     segmentation_2,
+    segmentation_1_downsampled,
     contact_sites_distance_1,
     contact_sites_distance_2,
     contact_sites_distance_3,
 ):
     dict = {
+        "blockwise_connected_components": blockwise_connected_components,
         "segmentation_1": segmentation_1,
+        "segmentation_1_downsampled": segmentation_1_downsampled,
         "segmentation_2": segmentation_2,
         "contact_sites_distance_1": contact_sites_distance_1,
         "contact_sites_distance_2": contact_sites_distance_2,
@@ -242,14 +269,18 @@ def voxel_size():
 
 
 @pytest.fixture(autouse=True, scope="session")
-def write_zarrs(tmp_zarr, image_shape, test_image_dict, voxel_size):
+def write_zarrs(tmp_zarr, test_image_dict, voxel_size, chunk_size):
     for data_name, data in test_image_dict.items():
+        current_voxel_size = (
+            voxel_size if "downsampled" not in data_name else 2 * voxel_size
+        )
+        print(data)
         data_path = f"{tmp_zarr}/{data_name}"
         ds = create_multiscale_dataset(
             data_path,
             dtype=np.uint8,
-            voxel_size=3 * [voxel_size],
-            total_roi=Roi((0, 0, 0), image_shape * voxel_size),
-            write_size=3 * [4 * voxel_size],
+            voxel_size=(3 * [current_voxel_size]),
+            total_roi=Roi((0, 0, 0), np.array(data.shape) * current_voxel_size),
+            write_size=chunk_size * current_voxel_size,
         )
         ds.data[:] = data

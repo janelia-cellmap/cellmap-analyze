@@ -3,6 +3,7 @@ from cellmap_analyze.process.contact_sites import ContactSites
 import numpy as np
 
 from cellmap_analyze.util.image_data_interface import (
+    ImageDataInterface,
     open_ds_tensorstore,
     to_ndarray_tensorstore,
 )
@@ -31,12 +32,9 @@ def test_contact_site_whole_3(segmentation_1, segmentation_2, contact_sites_dist
 
 @pytest.mark.parametrize("contact_distance", [1, 2, 3])
 def test_contact_site_blocks(tmp_zarr, voxel_size, contact_distance):
-    segmentation_1_path = f"{tmp_zarr}/segmentation_1/s0"
-    segmentation_2_path = f"{tmp_zarr}/segmentation_2/s0"
-
     cs = ContactSites(
-        segmentation_1_path,
-        segmentation_2_path,
+        f"{tmp_zarr}/segmentation_1/s0",
+        f"{tmp_zarr}/segmentation_2/s0",
         tmp_zarr + f"/test_contact_sites_distance_{contact_distance}",
         voxel_size * contact_distance,
         minimum_volume_nm_3=0,
@@ -44,12 +42,38 @@ def test_contact_site_blocks(tmp_zarr, voxel_size, contact_distance):
     )
     cs.get_contact_sites()
 
-    ground_truth_path = f"{tmp_zarr}/contact_sites_distance_{contact_distance}/s0"
-    ground_truth = to_ndarray_tensorstore(open_ds_tensorstore(ground_truth_path))
+    ground_truth = ImageDataInterface(
+        f"{tmp_zarr}/contact_sites_distance_{contact_distance}/s0"
+    ).to_ndarray_ts()
+    test_data = ImageDataInterface(
+        f"{tmp_zarr}/test_contact_sites_distance_{contact_distance}/s0"
+    ).to_ndarray_ts()
+    assert np.array_equal(
+        test_data,
+        ground_truth,
+    )
 
-    test_path = f"{tmp_zarr}/test_contact_sites_distance_{contact_distance}/s0"
-    test_data = to_ndarray_tensorstore(open_ds_tensorstore(test_path))
-    print(np.sum(test_data != ground_truth))
+
+@pytest.mark.parametrize("contact_distance", [1, 2, 3])
+def test_different_voxel_sizes(tmp_zarr, voxel_size, contact_distance):
+
+    cs = ContactSites(
+        f"{tmp_zarr}/segmentation_1_downsampled/s0",
+        f"{tmp_zarr}/segmentation_2/s0",
+        tmp_zarr + f"/test_downsampled_contact_sites_distance_{contact_distance}",
+        voxel_size * contact_distance,
+        minimum_volume_nm_3=0,
+        num_workers=1,
+    )
+    cs.get_contact_sites()
+
+    ground_truth = ImageDataInterface(
+        f"{tmp_zarr}/contact_sites_distance_{contact_distance}/s0"
+    ).to_ndarray_ts()
+    test_data = ImageDataInterface(
+        f"{tmp_zarr}/test_downsampled_contact_sites_distance_{contact_distance}/s0"
+    ).to_ndarray_ts()
+
     assert np.array_equal(
         test_data,
         ground_truth,

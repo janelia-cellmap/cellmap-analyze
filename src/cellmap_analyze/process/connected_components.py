@@ -46,6 +46,7 @@ class ConnectedComponents:
         minimum_volume_nm_3=None,
         num_workers=10,
         connectivity=2,
+        delete_tmp=False,
     ):
         self.tmp_blockwise_ds_path = tmp_blockwise_ds_path
         self.tmp_blockwise_idi = ImageDataInterface(self.tmp_blockwise_ds_path)
@@ -59,6 +60,8 @@ class ConnectedComponents:
         self.voxel_size = self.tmp_blockwise_idi.voxel_size
         self.minimum_volume_voxels = minimum_volume_nm_3 / np.prod(self.voxel_size)
         self.connectivity = connectivity
+        self.delete_tmp = delete_tmp
+
         self.num_workers = num_workers
         self.compute_args = {}
         if self.num_workers == 1:
@@ -137,7 +140,7 @@ class ConnectedComponents:
         removed_ids = []
         for current_connected_ids in connected_ids:
             volume = sum([id_to_volume_dict[id] for id in current_connected_ids])
-            if volume > minimum_volume_voxels:
+            if volume >= minimum_volume_voxels:
                 kept_ids.append(current_connected_ids)
             else:
                 removed_ids.append(current_connected_ids)
@@ -238,7 +241,6 @@ class ConnectedComponents:
         def write_out_block_object(block, tmp_blockwise_path):
             block_coords_string = "/".join([str(c) for c in block.coords])
             output_path = f"{tmp_blockwise_path}/{block_coords_string}.pkl"
-            print(output_path)
             # write relabeling dict to pkl file
             with open(f"{output_path}", "wb") as handle:
                 pickle.dump(block, handle, protocol=pickle.HIGHEST_PROTOCOL)
@@ -385,4 +387,5 @@ class ConnectedComponents:
         self.get_final_connected_components()
         self.write_out_block_objects()
         self.relabel_dataset()
-        self.delete_tmp_dataset()
+        if self.delete_tmp:
+            self.delete_tmp_dataset()

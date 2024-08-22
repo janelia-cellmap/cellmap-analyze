@@ -74,6 +74,21 @@ def to_ndarray_tensorstore(
     if offset is None:
         offset = Coordinate(np.zeros(roi.dims, dtype=int))
 
+    if output_voxel_size is None:
+        output_voxel_size = voxel_size
+
+    rescale_factor = 1
+    if voxel_size != output_voxel_size:
+        # in the case where there is a mismatch in voxel sizes, we may need to extra pad to ensure that the output is a multiple of the output voxel size
+        original_roi = roi
+        roi = original_roi.snap_to_grid(voxel_size)
+        rescale_factor = voxel_size[0] / output_voxel_size[0]
+        snapped_offset = (original_roi.begin - roi.begin) / output_voxel_size
+        snapped_end = (original_roi.end - roi.begin) / output_voxel_size
+        snapped_slices = tuple(
+            slice(snapped_offset[i], snapped_end[i]) for i in range(3)
+        )
+
     roi -= offset
     roi /= voxel_size
 
@@ -83,12 +98,10 @@ def to_ndarray_tensorstore(
     domain = dataset.domain
     # Compute the valid range
     valid_slices = tuple(
-        [
-            slice(max(s.start, inclusive_min), min(s.stop, exclusive_max))
-            for s, inclusive_min, exclusive_max in zip(
-                roi_slices, domain.inclusive_min, domain.exclusive_max
-            )
-        ]
+        slice(max(s.start, inclusive_min), min(s.stop, exclusive_max))
+        for s, inclusive_min, exclusive_max in zip(
+            roi_slices, domain.inclusive_min, domain.exclusive_max
+        )
     )
 
     # Create an array to hold the requested data, filled with a default value (e.g., zeros)
@@ -105,13 +118,14 @@ def to_ndarray_tensorstore(
     # Read the region of interest from the dataset
     padded_data[padded_slices] = dataset[valid_slices].read().result()
 
-    if output_voxel_size and output_voxel_size != voxel_size:
+    if rescale_factor > 1:
         rescale_factor = voxel_size[0] / output_voxel_size[0]
         padded_data = (
             padded_data.repeat(rescale_factor, 0)
             .repeat(rescale_factor, 1)
             .repeat(rescale_factor, 2)
         )
+        padded_data = padded_data[snapped_slices]
     return padded_data
 
 

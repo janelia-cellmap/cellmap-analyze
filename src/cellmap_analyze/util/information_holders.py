@@ -104,7 +104,7 @@ class ObjectInformation:
         is_equal = (
             self.volume == other.volume
             and self.surface_area == other.surface_area
-            and np.array_equal(self.com, other.com)
+            and np.allclose(self.com, other.com, rtol=1e-13, atol=1e-13)
             and self.bounding_box == other.bounding_box
             and self.is_contact_site == other.is_contact_site
         )

@@ -12,8 +12,6 @@ from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.io_util import get_name_from_path
 from skimage import measure
 from cellmap_analyze.cythonizing.process_arrays import initialize_contact_site_array
-
-# from cellmap_analyze.util.bresenham3D import bresenham3DWithMask
 from cellmap_analyze.cythonizing.bresenham3D import bresenham_3D_lines
 import logging
 from cellmap_analyze.process.connected_components import ConnectedComponents
@@ -51,16 +49,15 @@ class ContactSites:
         self.organelle_2_idi.output_voxel_size = output_voxel_size
         self.organelle_1_idi.output_voxel_size = output_voxel_size
         self.voxel_size = output_voxel_size
-        self.contact_distance_voxels = (
-            contact_distance_nm / self.organelle_1_idi.voxel_size[0]
-        )
+
+        self.contact_distance_voxels = contact_distance_nm / output_voxel_size[0]
 
         self.padding_voxels = int(np.ceil(self.contact_distance_voxels) + 1)
         # add one to ensure accuracy during surface area calculation since we need to make sure that neighboring ones are calculated
 
         self.roi = roi
         if self.roi is None:
-            self.roi = self.organelle_1_idi.roi
+            self.roi = self.organelle_1_idi.roi.intersect(self.organelle_2_idi.roi)
 
         if not get_name_from_path(output_path):
             output_path = (
@@ -100,8 +97,16 @@ class ContactSites:
 
     @staticmethod
     def get_ndarray_contact_sites(
-        organelle_1, organelle_2, contact_distance_voxels, mask_out_surface_voxels=False
+        organelle_1,
+        organelle_2,
+        contact_distance_voxels,
+        mask_out_surface_voxels=False,
+        zero_pad=False,
     ):
+        if zero_pad:
+            organelle_1 = np.pad(organelle_1, 1)
+            organelle_2 = np.pad(organelle_2, 1)
+
         surface_voxels_1 = np.zeros_like(organelle_1, np.uint8)
         surface_voxels_2 = np.zeros_like(organelle_2, np.uint8)
         mask = np.zeros_like(organelle_1, np.uint8)
@@ -117,7 +122,6 @@ class ContactSites:
         )
 
         del organelle_1, organelle_2
-
         # # get all voxel pairs that are within the contact distance
         object_1_surface_voxel_coordinates = np.argwhere(surface_voxels_1)
         object_2_surface_voxel_coordinates = np.argwhere(surface_voxels_2)
@@ -147,6 +151,8 @@ class ContactSites:
                 current_pair_contact_sites, connectivity=3
             )
 
+        if zero_pad:
+            return current_pair_contact_sites[1:-1, 1:-1, 1:-1].astype(np.uint64)
         return current_pair_contact_sites.astype(np.uint64)
 
     @staticmethod
@@ -212,5 +218,6 @@ class ContactSites:
             num_workers=self.num_workers,
             minimum_volume_nm_3=self.minimum_volume_nm_3,
             connectivity=3,
+            delete_tmp=True,
         )
         cc.merge_connected_components_across_blocks()
