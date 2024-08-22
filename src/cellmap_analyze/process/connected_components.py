@@ -1,16 +1,12 @@
 from collections import defaultdict
 import pickle
 import types
-from funlib.persistence import Array, open_ds
-from funlib.geometry import Roi
 import numpy as np
 from tqdm import tqdm
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util import io_util
 from cellmap_analyze.util.dask_util import (
-    DaskBlock,
     create_block_from_index,
-    create_blocks,
     dask_computer,
     guesstimate_npartitions,
 )
@@ -205,16 +201,13 @@ class ConnectedComponents:
     def get_connected_component_information(self):
         num_blocks = dask_util.get_num_blocks(self.tmp_blockwise_idi)
         block_indexes = list(range(num_blocks))
-        b = (
-            db.from_sequence(
-                block_indexes,
-                npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
-            ).map(
-                ConnectedComponents.get_connected_component_information_blockwise,
-                self.tmp_blockwise_idi,
-                self.connectivity,
-            )
-            # .reduction(self.__combine_results, self.__combine_results)
+        b = db.from_sequence(
+            block_indexes,
+            npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
+        ).map(
+            ConnectedComponents.get_connected_component_information_blockwise,
+            self.tmp_blockwise_idi,
+            self.connectivity,
         )
 
         with dask_util.start_dask(
