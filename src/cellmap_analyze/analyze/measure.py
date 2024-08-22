@@ -1,18 +1,18 @@
+import types
 from funlib.persistence import open_ds
 import numpy as np
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util import io_util
 from cellmap_analyze.util.dask_util import (
     DaskBlock,
+    create_block_from_index,
     create_blocks,
     guesstimate_npartitions,
 )
+from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.information_holders import ObjectInformation
 from cellmap_analyze.util.io_util import (
     get_name_from_path,
-    open_ds_tensorstore,
-    split_dataset_path,
-    to_ndarray_tensorstore,
 )
 import pandas as pd
 import logging
@@ -21,6 +21,7 @@ import dask.bag as db
 from cellmap_analyze.util.measure_util import get_object_information
 
 import os
+from tqdm import tqdm
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -40,8 +41,7 @@ class Measure:
         **kwargs,
     ):
         self.input_path = input_path
-        self.input_ds = open_ds(*split_dataset_path(self.input_path))
-        self.input_ds_tensorstore = open_ds_tensorstore(self.input_path)
+        self.input_idi = ImageDataInterface(self.input_path)
         self.output_path = output_path
 
         self.contact_sites = False
@@ -56,33 +56,30 @@ class Measure:
                 )
             self.organelle_1_path = kwargs["organelle_1_path"]
             self.organelle_2_path = kwargs["organelle_2_path"]
-            self.organelle_1_ds = open_ds(*split_dataset_path(self.organelle_1_path))
-            self.organelle_2_ds = open_ds(*split_dataset_path(self.organelle_2_path))
-            self.organelle_1_ds_tensorstore = open_ds_tensorstore(self.organelle_1_path)
-            self.organelle_2_ds_tensorstore = open_ds_tensorstore(self.organelle_2_path)
+            self.organelle_1_idi = ImageDataInterface(self.organelle_1_path)
+            self.organelle_2_idi = ImageDataInterface(self.organelle_2_path)
+            output_voxel_size = min(
+                self.organelle_1_idi.voxel_size, self.organelle_2_idi.voxel_size
+            )
+            self.organelle_1_idi.output_voxel_size = output_voxel_size
+            self.organelle_2_idi.output_voxel_size = output_voxel_size
 
-            self.get_measurements_blockwise_extra_kwargs["organelle_1_ds"] = (
-                self.organelle_1_ds
+            self.get_measurements_blockwise_extra_kwargs["organelle_1_idi"] = (
+                self.organelle_1_idi
             )
-            self.get_measurements_blockwise_extra_kwargs["organelle_2_ds"] = (
-                self.organelle_2_ds
+            self.get_measurements_blockwise_extra_kwargs["organelle_2_idi"] = (
+                self.organelle_2_idi
             )
-            self.get_measurements_blockwise_extra_kwargs[
-                "organelle_1_ds_tensorstore"
-            ] = self.organelle_1_ds_tensorstore
-            self.get_measurements_blockwise_extra_kwargs[
-                "organelle_2_ds_tensorstore"
-            ] = self.organelle_2_ds_tensorstore
 
             self.contact_sites = True
 
         self.global_offset = np.zeros((3,))
         self.num_workers = num_workers
         if roi is None:
-            self.roi = self.input_ds.roi
+            self.roi = self.input_idi.roi
         else:
             self.roi = roi
-        self.voxel_size = self.input_ds.voxel_size
+        self.voxel_size = self.input_idi.voxel_size
         self.num_workers = num_workers
         self.compute_args = {}
         if self.num_workers == 1:
@@ -90,52 +87,49 @@ class Measure:
 
     @staticmethod
     def get_measurements_blockwise(
-        block: DaskBlock,
-        input_ds,
-        input_ds_tensorstore,
-        voxel_size,
+        block_index,
+        input_idi: ImageDataInterface,
         global_offset,
         contact_sites,
         **kwargs,
     ):
-        data = to_ndarray_tensorstore(
-            input_ds_tensorstore,
-            block.read_roi,
-            voxel_size,
-            input_ds.roi.offset,
+        block = create_block_from_index(
+            input_idi,
+            block_index,
+            padding=input_idi.voxel_size[0],
         )
+        data = input_idi.to_ndarray_ts(block.read_roi)
 
         extra_kwargs = {}
         if contact_sites:
-            organelle_1_ds = kwargs.get("organelle_1_ds")
-            organelle_1_ds_tensorstore = kwargs.get("organelle_1_ds_tensorstore")
-            organelle_2_ds = kwargs.get("organelle_2_ds")
-            organelle_2_ds_tensorstore = kwargs.get("organelle_2_ds_tensorstore")
-
-            extra_kwargs["organelle_1"] = to_ndarray_tensorstore(
-                organelle_1_ds_tensorstore,
+            organelle_1_idi = kwargs.get("organelle_1_idi")
+            organelle_2_idi = kwargs.get("organelle_2_idi")
+            extra_kwargs["organelle_1"] = organelle_1_idi.to_ndarray_ts(
                 block.read_roi,
-                voxel_size,
-                organelle_1_ds.roi.offset,
             )
-            extra_kwargs["organelle_2"] = to_ndarray_tensorstore(
-                organelle_2_ds_tensorstore,
+            extra_kwargs["organelle_2"] = organelle_2_idi.to_ndarray_ts(
                 block.read_roi,
-                voxel_size,
-                organelle_2_ds.roi.offset,
             )
 
         # get information only from actual block(not including padding)
         block_offset = np.array(block.write_roi.begin) + global_offset
         object_informations = get_object_information(
-            data, voxel_size[0], trim=1, offset=block_offset, **extra_kwargs
+            data, input_idi.voxel_size[0], trim=1, offset=block_offset, **extra_kwargs
         )
         return object_informations
 
     @staticmethod
     def __summer(object_information_dicts):
-        output_dict = {}
-        for object_information_dict in object_information_dicts:
+        if type(object_information_dicts) is tuple:
+            object_information_dicts = [object_information_dicts]
+        elif isinstance(object_information_dicts, types.GeneratorType):
+            object_information_dicts = list(object_information_dicts)
+
+        for idx, object_information_dict in enumerate(tqdm(object_information_dicts)):
+            if idx == 0:
+                output_dict = object_information_dict
+                continue
+
             for id, oi in object_information_dict.items():
                 if id in output_dict:
                     output_dict[id] += oi
@@ -145,21 +139,20 @@ class Measure:
         return output_dict
 
     def measure(self):
+        num_blocks = dask_util.get_num_blocks(self.input_idi)
+        block_indexes = list(range(num_blocks))
         b = (
             db.from_sequence(
-                self.blocks,
-                npartitions=guesstimate_npartitions(self.blocks, self.num_workers),
-            )
-            .map(
+                block_indexes,
+                npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
+            ).map(
                 Measure.get_measurements_blockwise,
-                self.input_ds,
-                self.input_ds_tensorstore,
-                self.voxel_size,
+                self.input_idi,
                 self.global_offset,
                 self.contact_sites,
                 **self.get_measurements_blockwise_extra_kwargs,
             )
-            .reduction(Measure.__summer, Measure.__summer)
+            # .reduction(Measure.__summer, Measure.__summer)
         )
 
         with dask_util.start_dask(
@@ -168,7 +161,11 @@ class Measure:
             logger,
         ):
             with io_util.Timing_Messager("Measuring object information", logger):
-                self.measurements = b.compute(**self.compute_args)
+                bagged_results = b.compute(**self.compute_args)
+
+        # moved this out of dask, seems fast enough without having to daskify
+        with io_util.Timing_Messager("Combining bagged results", logger):
+            self.measurements = Measure.__summer(bagged_results)
 
     def write_measurements(self):
         os.makedirs(self.output_path, exist_ok=True)
@@ -226,9 +223,6 @@ class Measure:
         df.to_csv(output_file, index=False)
 
     def get_measurements(self):
-        self.blocks = create_blocks(
-            self.roi, self.input_ds, padding=self.input_ds.voxel_size
-        )
         self.measure()
         if self.output_path:
             self.write_measurements()
