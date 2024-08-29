@@ -47,7 +47,6 @@ class ConnectedComponents:
         self.tmp_blockwise_ds_path = tmp_blockwise_ds_path
         self.tmp_blockwise_idi = ImageDataInterface(self.tmp_blockwise_ds_path)
         self.output_ds_path = output_ds_path
-        self.tmp_block_info_path = f"{self.output_ds_path}_tmp_relabeling_dicts"
 
         if roi is None:
             self.roi = self.tmp_blockwise_idi.roi
@@ -146,22 +145,29 @@ class ConnectedComponents:
     def get_connected_component_information_blockwise(
         block_index, tmp_blockwise_idi: ImageDataInterface, connectivity
     ):
-        block = create_block_from_index(
-            tmp_blockwise_idi, block_index, padding=tmp_blockwise_idi.voxel_size
-        )
-        data = tmp_blockwise_idi.to_ndarray_ts(
-            block.read_roi,
-        )
+        try:
+            block = create_block_from_index(
+                tmp_blockwise_idi, block_index, padding=tmp_blockwise_idi.voxel_size
+            )
+            data = tmp_blockwise_idi.to_ndarray_ts(
+                block.read_roi,
+            )
 
-        mask = data.astype(bool)
-        mask[2:, 2:, 2:] = False
-        touching_ids = ConnectedComponents.get_touching_ids(
-            data, mask=mask, connectivity=connectivity
-        )
+            mask = data.astype(bool)
+            mask[2:, 2:, 2:] = False
+            touching_ids = ConnectedComponents.get_touching_ids(
+                data, mask=mask, connectivity=connectivity
+            )
 
-        # get information only from actual block(not including padding)
-        id_to_volume_dict = ConnectedComponents.get_object_sizes(data[1:-1, 1:-1, 1:-1])
-        block.relabeling_dict = {id: 0 for id in id_to_volume_dict.keys()}
+            # get information only from actual block(not including padding)
+            id_to_volume_dict = ConnectedComponents.get_object_sizes(
+                data[1:-1, 1:-1, 1:-1]
+            )
+            block.relabeling_dict = {id: 0 for id in id_to_volume_dict.keys()}
+        except:
+            raise Exception(
+                f"Error in get_connected_component_information_blockwise {block_index}, {tmp_blockwise_idi.voxel_size}"
+            )
         return [block], id_to_volume_dict, touching_ids
 
     @staticmethod
@@ -373,7 +379,6 @@ class ConnectedComponents:
         os.system(
             f"rm -rf {base_path}/{get_name_from_path(self.tmp_blockwise_ds_path)}"
         )
-        os.system(f"rm -rf {self.tmp_block_info_path}")
 
     def merge_connected_components_across_blocks(self):
         self.get_connected_component_information()
