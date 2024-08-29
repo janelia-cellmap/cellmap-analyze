@@ -83,8 +83,7 @@ class ContactSites:
             dtype=np.uint64,
             voxel_size=self.voxel_size,
             total_roi=self.roi,
-            write_size=self.organelle_1_idi.chunk_shape
-            * self.organelle_1_idi.voxel_size,
+            write_size=self.organelle_1_idi.chunk_shape * self.voxel_size,
         )
 
         self.contact_sites_blockwise_idi = ImageDataInterface(
