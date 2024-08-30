@@ -14,7 +14,6 @@ from cellmap_analyze.util.io_util import (
 from skimage import measure
 from skimage.segmentation import expand_labels, find_boundaries
 from sklearn.metrics.pairwise import pairwise_distances
-from cellmap_analyze.util.bresenham3D import bresenham3DWithMask
 import logging
 from skimage.graph import pixel_graph
 import networkx as nx
