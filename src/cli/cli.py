@@ -31,3 +31,13 @@ def contact_sites():
         os.chdir(rp.execution_directory)
         contact_sites = ContactSites(**rp.run_config)
         contact_sites.get_contact_sites()
+
+
+def measure():
+    from cellmap_analyze.analyze.measure import Measure
+
+    rp = RunProperties()
+    with io_util.tee_streams(rp.logpath):
+        os.chdir(rp.execution_directory)
+        measure = Measure(**rp.run_config)
+        measure.get_measurements()
