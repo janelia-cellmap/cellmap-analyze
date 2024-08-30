@@ -105,13 +105,13 @@ def create_block_from_index(
     )
 
 
-def get_num_blocks(idi, block_size=None):
+def get_num_blocks(idi, roi=None, block_size=None):
     if not block_size:
         block_size = idi.chunk_shape * idi.voxel_size
+    if not roi:
+        roi = idi.roi
     num_blocks = int(
-        np.prod(
-            [np.ceil(idi.roi.shape[i] / block_size[i]) for i in range(len(block_size))]
-        )
+        np.prod([np.ceil(roi.shape[i] / block_size[i]) for i in range(len(block_size))])
     )
     return num_blocks
 
@@ -167,7 +167,7 @@ def dask_computer(b, num_workers, **kwargs):
         elif num_workers <= 500:
             interval = "30s"
         else:
-            interval = "300s"
+            interval = "150s"
         progress(b, interval=interval)  # watch progress
         return b.compute(**kwargs)
 
@@ -228,6 +228,7 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
     """
     job_script_prologue = [
         "export NUMEXPR_MAX_THREADS=1",
+        "export NUMEXPR_NUM_THREADS=1",
         "export MKL_NUM_THREADS=1",
         "export NUM_MKL_THREADS=1",
         "export OPENBLAS_NUM_THREADS=1",
@@ -246,8 +247,8 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
         with open("dask-config.yaml") as f:
             config = yaml.load(f, Loader=SafeLoader)
 
+    cluster_type = next(iter(config["jobqueue"]))
     dask.config.update(dask.config.config, config)
-    cluster_type = next(iter(dask.config.config["jobqueue"]))
     set_local_directory(cluster_type)
 
     if cluster_type == "local":
@@ -256,7 +257,7 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
         cluster = LocalCluster(
             n_workers=num_workers,
             threads_per_worker=1,
-            job_script_prologue=job_script_prologue,
+            # job_script_prologue=job_script_prologue,
         )
     else:
         if cluster_type == "lsf":
