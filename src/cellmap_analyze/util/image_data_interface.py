@@ -36,13 +36,20 @@ def get_name_from_path(path):
 
 
 def open_ds_tensorstore(dataset_path: str, mode="r"):
-    # open with zarr or n5 depending
+    # open with zarr or n5 depending on extension
     filetype = (
         "zarr" if dataset_path.rfind(".zarr") > dataset_path.rfind(".n5") else "n5"
     )
     spec = {
         "driver": filetype,
-        "kvstore": {"driver": "file", "path": dataset_path},
+        # "context": {
+        #     "data_copy_concurrency": {"limit": 1},
+        #     "file_io_concurrency": {"limit": 1},
+        # },
+        "kvstore": {
+            "driver": "file",
+            "path": dataset_path,
+        },
     }
     if mode == "r":
         dataset_future = ts.open(spec, read=True, write=False)
@@ -58,6 +65,7 @@ def to_ndarray_tensorstore(
     voxel_size=None,
     offset=None,
     output_voxel_size=None,
+    swap_axes=False,
 ):
     """Read a region of a tensorstore dataset and return it as a numpy array
 
@@ -68,6 +76,13 @@ def to_ndarray_tensorstore(
     Returns:
         Numpy array of the region
     """
+    if swap_axes:
+        print("Swapping axes")
+        if roi:
+            roi = Roi(roi.begin[::-1], roi.shape[::-1])
+        if offset:
+            offset = Coordinate(offset[::-1])
+
     if roi is None:
         return dataset.read().result()
 
@@ -126,24 +141,43 @@ def to_ndarray_tensorstore(
             .repeat(rescale_factor, 2)
         )
         padded_data = padded_data[snapped_slices]
+
+    if swap_axes:
+        padded_data = np.swapaxes(padded_data, 0, 2)
+
     return padded_data
 
 
 class ImageDataInterface:
-    def __init__(self, dataset_path, mode="r"):
+    def __init__(self, dataset_path, mode="r", output_voxel_size=None):
         self.path = dataset_path
         filename, dataset = split_dataset_path(dataset_path)
         self.ds = open_ds(filename, dataset, mode=mode)
-        self.ts = open_ds_tensorstore(dataset_path)
+        self.filetype = (
+            "zarr" if dataset_path.rfind(".zarr") > dataset_path.rfind(".n5") else "n5"
+        )
+        self.swap_axes = self.filetype == "n5"
+        self.ts = None
         self.voxel_size = self.ds.voxel_size
         self.chunk_shape = self.ds.chunk_shape
         self.roi = self.ds.roi
         self.offset = self.ds.roi.offset
-        self.output_voxel_size = self.voxel_size
+        if output_voxel_size is not None:
+            self.output_voxel_size = output_voxel_size
+        else:
+            self.output_voxel_size = self.voxel_size
 
     def to_ndarray_ts(self, roi=None):
+        if not self.ts:
+            self.ts = open_ds_tensorstore(self.path)
+
         return to_ndarray_tensorstore(
-            self.ts, roi, self.voxel_size, self.offset, self.output_voxel_size
+            self.ts,
+            roi,
+            self.voxel_size,
+            self.offset,
+            self.output_voxel_size,
+            self.swap_axes,
         )
 
     def to_ndarray_ds(self, roi=None):
