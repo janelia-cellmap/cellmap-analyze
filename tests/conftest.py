@@ -9,9 +9,9 @@ from cellmap_analyze.util.information_holders import (
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset
 import os
 
-pytest_plugins = [
-    "fixtures.measure",
-]
+# pytest_plugins = [
+#     "fixtures.measure",
+# ]
 
 
 @pytest.fixture(scope="session")

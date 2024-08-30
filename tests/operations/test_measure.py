@@ -76,15 +76,30 @@ def simple_id_to_surface_area_dict(contact_site, segmentation, voxel_surface_are
     return id_to_surface_area_dict
 
 
-def simple_object_information_dict(
+def simple_object_information_dict(segmentation, voxel_size):
+    voxel_volume = voxel_size**3
+    voxel_surface_area = voxel_size**2
+    object_information_dict = {}
+    for id in np.unique(segmentation[segmentation > 0]):
+        obj = segmentation == id
+        object_information_dict[id] = ObjectInformation(
+            volume=np.sum(obj) * voxel_volume,
+            com=simple_com(obj, voxel_size),
+            surface_area=simple_surface_area(obj, voxel_surface_area),
+            bounding_box=simple_bounding_box(obj, voxel_size),
+        )
+    return object_information_dict
+
+
+def simple_contact_site_information_dict(
     segmentation_1, segmentation_2, contact_site, voxel_size
 ):
     voxel_volume = voxel_size**3
     voxel_surface_area = voxel_size**2
-    object_information_dict = {}
+    contact_site_information_dict = {}
     for id in np.unique(contact_site[contact_site > 0]):
         cs = contact_site == id
-        object_information_dict[id] = ObjectInformation(
+        contact_site_information_dict[id] = ObjectInformation(
             volume=np.sum(cs) * voxel_volume,
             com=simple_com(cs, voxel_size),
             surface_area=simple_surface_area(cs, voxel_surface_area),
@@ -96,34 +111,68 @@ def simple_object_information_dict(
                 cs, segmentation_2, voxel_surface_area
             ),
         )
-    return object_information_dict
+    return contact_site_information_dict
 
 
 @pytest.fixture(scope="session")
-def object_information_dict_contact_distance_1(
+def contact_site_information_dict_contact_distance_1(
     segmentation_1, segmentation_2, contact_sites_distance_1, voxel_size
 ):
-    return simple_object_information_dict(
+    return simple_contact_site_information_dict(
         segmentation_1, segmentation_2, contact_sites_distance_1, voxel_size
     )
 
 
 @pytest.fixture(scope="session")
-def object_information_dict_contact_distance_2(
+def contact_site_information_dict_contact_distance_2(
     segmentation_1, segmentation_2, contact_sites_distance_2, voxel_size
 ):
-    return simple_object_information_dict(
+    return simple_contact_site_information_dict(
         segmentation_1, segmentation_2, contact_sites_distance_2, voxel_size
     )
 
 
 @pytest.fixture(scope="session")
-def object_information_dict_contact_distance_3(
+def contact_site_information_dict_contact_distance_3(
     segmentation_1, segmentation_2, contact_sites_distance_3, voxel_size
 ):
-    return simple_object_information_dict(
+    return simple_contact_site_information_dict(
         segmentation_1, segmentation_2, contact_sites_distance_3, voxel_size
     )
+
+
+def test_measure_whole_objects(
+    segmentation_1, segmentation_2, segmentation_1_downsampled, voxel_size
+):
+    for segmentation, vs in [
+        (segmentation_1, voxel_size),
+        (segmentation_2, voxel_size),
+        (segmentation_1_downsampled, voxel_size * 2),
+    ]:
+        object_information_dict = simple_object_information_dict(segmentation, vs)
+        test_object_information_dict = get_object_information(
+            segmentation, voxel_edge_length=vs
+        )
+        assert object_information_dict == test_object_information_dict
+
+
+def test_measure_blockwise_objects(
+    tmp_zarr, segmentation_1, segmentation_2, segmentation_1_downsampled, voxel_size
+):
+    for segmentation, segmentation_name, vs in [
+        (segmentation_1, "segmentation_1", voxel_size),
+        (segmentation_2, "segmentation_2", voxel_size),
+        (segmentation_1_downsampled, "segmentation_1_downsampled", voxel_size * 2),
+    ]:
+        object_information_dict = simple_object_information_dict(segmentation, vs)
+        test_object_information_dict = get_object_information(
+            segmentation, voxel_edge_length=vs
+        )
+        assert object_information_dict == test_object_information_dict
+
+        compare_measurements(
+            f"{tmp_zarr}/{segmentation_name}/s0", None, None, object_information_dict
+        )
 
 
 def test_measure_whole_contact_sites_distance_1(
@@ -131,15 +180,18 @@ def test_measure_whole_contact_sites_distance_1(
     segmentation_2,
     voxel_size,
     contact_sites_distance_1,
-    object_information_dict_contact_distance_1,
+    contact_site_information_dict_contact_distance_1,
 ):
-    test_object_information_dict = get_object_information(
+    test_contact_site_information_dict = get_object_information(
         contact_sites_distance_1,
         organelle_1=segmentation_1,
         organelle_2=segmentation_2,
         voxel_edge_length=voxel_size,
     )
-    assert object_information_dict_contact_distance_1 == test_object_information_dict
+    assert (
+        contact_site_information_dict_contact_distance_1
+        == test_contact_site_information_dict
+    )
 
 
 def test_measure_whole_contact_sites_distance_2(
@@ -147,16 +199,19 @@ def test_measure_whole_contact_sites_distance_2(
     segmentation_2,
     voxel_size,
     contact_sites_distance_2,
-    object_information_dict_contact_distance_2,
+    contact_site_information_dict_contact_distance_2,
 ):
-    test_object_information_dict = get_object_information(
+    test_contact_site_information_dict = get_object_information(
         contact_sites_distance_2,
         organelle_1=segmentation_1,
         organelle_2=segmentation_2,
         voxel_edge_length=voxel_size,
     )
 
-    assert object_information_dict_contact_distance_2 == test_object_information_dict
+    assert (
+        contact_site_information_dict_contact_distance_2
+        == test_contact_site_information_dict
+    )
 
 
 def test_measure_whole_contact_sites_distance_3(
@@ -164,60 +219,99 @@ def test_measure_whole_contact_sites_distance_3(
     segmentation_2,
     voxel_size,
     contact_sites_distance_3,
-    object_information_dict_contact_distance_3,
+    contact_site_information_dict_contact_distance_3,
 ):
-    test_object_information_dict = get_object_information(
+    test_contact_site_information_dict = get_object_information(
         contact_sites_distance_3,
         organelle_1=segmentation_1,
         organelle_2=segmentation_2,
         voxel_edge_length=voxel_size,
     )
 
-    assert object_information_dict_contact_distance_3 == test_object_information_dict
+    assert (
+        contact_site_information_dict_contact_distance_3
+        == test_contact_site_information_dict
+    )
 
 
 def compare_measurements(
-    segmentation_1_path, segmentation_2_path, contact_site_path, object_information_dict
+    input_ds_path,
+    segmentation_1_path,
+    segmentation_2_path,
+    contact_site_information_dict,
 ):
     m = Measure(
-        contact_site_path,
+        input_ds_path,
         organelle_1_path=segmentation_1_path,
         organelle_2_path=segmentation_2_path,
         output_path=None,
         num_workers=1,
     )
     m.get_measurements()
-    assert m.measurements == object_information_dict
+    assert m.measurements == contact_site_information_dict
 
 
 def test_measure_blockwise_contact_sites_distance_1(
-    tmp_zarr, object_information_dict_contact_distance_1
+    tmp_zarr, contact_site_information_dict_contact_distance_1
 ):
     compare_measurements(
+        f"{tmp_zarr}/contact_sites_distance_1/s0",
         f"{tmp_zarr}/segmentation_1/s0",
         f"{tmp_zarr}/segmentation_2/s0",
-        f"{tmp_zarr}/contact_sites_distance_1/s0",
-        object_information_dict_contact_distance_1,
+        contact_site_information_dict_contact_distance_1,
     )
 
 
 def test_measure_blockwise_contact_sites_distance_2(
-    tmp_zarr, object_information_dict_contact_distance_2
+    tmp_zarr, contact_site_information_dict_contact_distance_2
 ):
     compare_measurements(
+        f"{tmp_zarr}/contact_sites_distance_2/s0",
         f"{tmp_zarr}/segmentation_1/s0",
         f"{tmp_zarr}/segmentation_2/s0",
-        f"{tmp_zarr}/contact_sites_distance_2/s0",
-        object_information_dict_contact_distance_2,
+        contact_site_information_dict_contact_distance_2,
     )
 
 
 def test_measure_blockwise_contact_sites_distance_3(
-    tmp_zarr, object_information_dict_contact_distance_3
+    tmp_zarr, contact_site_information_dict_contact_distance_3
 ):
     compare_measurements(
+        f"{tmp_zarr}/contact_sites_distance_3/s0",
         f"{tmp_zarr}/segmentation_1/s0",
         f"{tmp_zarr}/segmentation_2/s0",
+        contact_site_information_dict_contact_distance_3,
+    )
+
+
+def test_measure_blockwise_downsampled_contact_sites_distance_1(
+    tmp_zarr, contact_site_information_dict_contact_distance_1
+):
+    compare_measurements(
+        f"{tmp_zarr}/contact_sites_distance_1/s0",
+        f"{tmp_zarr}/segmentation_1_downsampled/s0",
+        f"{tmp_zarr}/segmentation_2/s0",
+        contact_site_information_dict_contact_distance_1,
+    )
+
+
+def test_measure_blockwise_downsampled_contact_sites_distance_2(
+    tmp_zarr, contact_site_information_dict_contact_distance_2
+):
+    compare_measurements(
+        f"{tmp_zarr}/contact_sites_distance_2/s0",
+        f"{tmp_zarr}/segmentation_1_downsampled/s0",
+        f"{tmp_zarr}/segmentation_2/s0",
+        contact_site_information_dict_contact_distance_2,
+    )
+
+
+def test_measure_blockwise_downsampled_contact_sites_distance_3(
+    tmp_zarr, contact_site_information_dict_contact_distance_3
+):
+    compare_measurements(
         f"{tmp_zarr}/contact_sites_distance_3/s0",
-        object_information_dict_contact_distance_3,
+        f"{tmp_zarr}/segmentation_1_downsampled/s0",
+        f"{tmp_zarr}/segmentation_2/s0",
+        contact_site_information_dict_contact_distance_3,
     )
