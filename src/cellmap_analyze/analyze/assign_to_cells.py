@@ -1,5 +1,8 @@
 from typing import Union, List
-from cellmap_analyze.util.io_util import open_ds_tensorstore, to_ndarray_tensorstore
+from cellmap_analyze.util.image_data_interface import (
+    open_ds_tensorstore,
+    to_ndarray_tensorstore,
+)
 import logging
 import pandas as pd
 import numpy as np
@@ -19,6 +22,7 @@ class AssignToCells:
         organelle_csvs: Union[str, List[str]],
         cell_ds_path: str,
         organelle_correction_offsets=None,
+        base_resolution=None,
         cell_resolution=None,
     ):
         if isinstance(organelle_csvs, str):
@@ -27,6 +31,7 @@ class AssignToCells:
         self.organelle_info_dict = {}
 
         for organelle_csv in organelle_csvs:
+            print(organelle_csv)
             df = pd.read_csv(organelle_csv)
             if "Total Objects" in df.columns:
                 # delete last two columns of dataframe
@@ -39,9 +44,10 @@ class AssignToCells:
 
         ds = open_ds_tensorstore(cell_ds_path)
         self.cell_domain = ds.domain
-        if cell_resolution:
-            self.cell_resolution = cell_resolution
-        else:
+        print(self.cell_domain)
+        self.base_resolution = base_resolution
+        self.cell_resolution = cell_resolution
+        if self.cell_resolution is None:
             self.cell_resolution = ds.spec().to_json()["metadata"]["resolution"][0]
 
         self.cell_data = to_ndarray_tensorstore(ds)
@@ -55,14 +61,18 @@ class AssignToCells:
 
     def assign_to_cells(self):
         for organelle_csv, df in self.organelle_info_dict.items():
+            # get filename from organelle_csv
+            filename = os.path.basename(organelle_csv)
+            if filename == "cell.csv":
+                continue
             df.insert(12, "Cell ID", 0)
             if "er.csv" in organelle_csv:
                 df["Cell ID"] = df["Object ID"]
             else:
-                # need to add cell resolution / 2 to account for half voxel offset when loading in the data as an image
                 inds = (
                     df[["COM Z (nm)", "COM Y (nm)", "COM X (nm)"]].to_numpy()
-                    + self.cell_resolution / 2
+                    + self.base_resolution
+                    / 2  # to shift top left pixel from (-base_resolution/2 to 0,0 so that the corners are aligned)
                 ) // self.cell_resolution
                 inds = inds.astype(int)
 
@@ -78,16 +88,20 @@ class AssignToCells:
                 ]
             df["Cell ID"] = df["Cell ID"].astype(int)
 
-    def correct_cell_csv(self, cell_csv):
-        df = pd.read_csv(cell_csv)
-        if "Total Objects" in df.columns:
-            # delete last two columns of dataframe
-            df = df.iloc[:, :-2]
-        AssignToCells.correct_coordinates(df, -self.cell_resolution / 2)
-        self.organelle_info_dict[cell_csv] = df
+    # def correct_cell_csv(self, cell_csv, corrected_offset):
+    #     df = pd.read_csv(cell_csv)
+    #     if "Total Objects" in df.columns:
+    #         # delete last two columns of dataframe
+    #         df = df.iloc[:, :-2]
+    #     AssignToCells.correct_coordinates(df, corrected_offset)
+    #     self.organelle_info_dict[cell_csv] = df
 
-    def write_updated_csvs(self, output_path):
-        os.makedirs(output_path, exist_ok=True)
+    def write_updated_csvs(self, base_output_path):
+        os.makedirs(base_output_path, exist_ok=True)
         for csv, df in self.organelle_info_dict.items():
             csv_name = os.path.basename(csv)
+            output_path = base_output_path
+            if "_to_" in csv_name:
+                output_path = base_output_path + "/contact_sites/"
+                os.makedirs(output_path, exist_ok=True)
             df.to_csv(output_path + "/" + csv_name, index=False)
