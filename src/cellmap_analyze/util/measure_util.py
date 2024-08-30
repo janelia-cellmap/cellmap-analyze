@@ -211,7 +211,6 @@ def get_object_information(
                 voxel_edge_length=voxel_edge_length,
                 trim=trim,
             )
-            # # # current_contact_site_ids = np.unique(contact_sites[contact_sites > 0])
 
         # Note some contact site ids may be overwritten but that shouldnt be an issue
         for _, region_prop in region_props.iterrows():
