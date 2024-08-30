@@ -4,7 +4,6 @@ N-D Bresenham line algo
 """
 
 import numpy as np
-import itertools
 
 
 def _bresenhamline_nslope(slope):

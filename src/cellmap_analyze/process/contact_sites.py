@@ -1,5 +1,3 @@
-from funlib.persistence import open_ds
-from funlib.geometry import Roi
 import numpy as np
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util import io_util

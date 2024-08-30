@@ -1,5 +1,4 @@
 import pytest
-from cellmap_analyze.analyze.measure import Measure
 from cellmap_analyze.process.connected_components import ConnectedComponents
 
 import numpy as np

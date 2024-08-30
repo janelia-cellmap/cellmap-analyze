@@ -1,17 +1,13 @@
 import types
-from funlib.persistence import open_ds
 import numpy as np
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util import io_util
 from cellmap_analyze.util.dask_util import (
-    DaskBlock,
     create_block_from_index,
-    create_blocks,
     dask_computer,
     guesstimate_npartitions,
 )
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
-from cellmap_analyze.util.information_holders import ObjectInformation
 from cellmap_analyze.util.io_util import (
     get_name_from_path,
 )

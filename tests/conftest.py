@@ -2,10 +2,6 @@ import pytest
 import numpy as np
 from funlib.geometry import Roi
 from scipy import ndimage
-from cellmap_analyze.util.information_holders import (
-    ContactingOrganelleInformation,
-    ObjectInformation,
-)
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset
 import os
 

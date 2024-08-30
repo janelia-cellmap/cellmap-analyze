@@ -14,7 +14,6 @@ from datetime import datetime
 import yaml
 from yaml.loader import SafeLoader
 from dataclasses import dataclass
-from funlib.persistence import Array
 from funlib.geometry import Coordinate, Roi
 import numpy as np
 import logging
