@@ -7,6 +7,7 @@ from cellmap_analyze.util.dask_util import (
     DaskBlock,
     create_block_from_index,
     create_blocks,
+    dask_computer,
     guesstimate_npartitions,
 )
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
@@ -22,6 +23,7 @@ from cellmap_analyze.util.measure_util import get_object_information
 
 import os
 from tqdm import tqdm
+import time
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -46,7 +48,9 @@ class Measure:
 
         self.contact_sites = False
         self.get_measurements_blockwise_extra_kwargs = {}
-        if "organelle_1_path" in kwargs.keys() or "organelle_2_path" in kwargs.keys():
+        if (
+            "organelle_1_path" in kwargs.keys() or "organelle_2_path" in kwargs.keys()
+        ) and not (not kwargs["organelle_1_path"] and not kwargs["organelle_2_path"]):
             if not (
                 "organelle_1_path" in kwargs.keys()
                 and "organelle_2_path" in kwargs.keys()
@@ -89,6 +93,7 @@ class Measure:
     def get_measurements_blockwise(
         block_index,
         input_idi: ImageDataInterface,
+        roi,
         global_offset,
         contact_sites,
         **kwargs,
@@ -96,6 +101,7 @@ class Measure:
         block = create_block_from_index(
             input_idi,
             block_index,
+            roi=roi,
             padding=input_idi.voxel_size[0],
         )
         data = input_idi.to_ndarray_ts(block.read_roi)
@@ -114,8 +120,20 @@ class Measure:
         # get information only from actual block(not including padding)
         block_offset = np.array(block.write_roi.begin) + global_offset
         object_informations = get_object_information(
-            data, input_idi.voxel_size[0], trim=1, offset=block_offset, **extra_kwargs
+            data,
+            input_idi.voxel_size[0],
+            trim=1,
+            offset=block_offset,
+            **extra_kwargs,
         )
+
+        if not object_informations and not contact_sites:
+            # NOTE: noticed that this code could hang and stop at 99% if processing a single organelle (non contact-site).
+            # however if i added os.system calls to touch and rm file named with block index, then it wouldnt hang. so assuming that it has to do with a timing thing in that it only had to load/process a single dataset chunk.
+            # sleeping for a little bit may therefore help:
+            # NOTE: this happened after adding concurrency limits=1 when opening tensorstore, but never tested on complete single organelle datasets before that switch
+            time.sleep(0.1)
+
         return object_informations
 
     @staticmethod
@@ -139,8 +157,9 @@ class Measure:
         return output_dict
 
     def measure(self):
-        num_blocks = dask_util.get_num_blocks(self.input_idi)
+        num_blocks = dask_util.get_num_blocks(self.input_idi, self.roi)
         block_indexes = list(range(num_blocks))
+
         b = (
             db.from_sequence(
                 block_indexes,
@@ -148,6 +167,7 @@ class Measure:
             ).map(
                 Measure.get_measurements_blockwise,
                 self.input_idi,
+                self.roi,
                 self.global_offset,
                 self.contact_sites,
                 **self.get_measurements_blockwise_extra_kwargs,
@@ -161,7 +181,7 @@ class Measure:
             logger,
         ):
             with io_util.Timing_Messager("Measuring object information", logger):
-                bagged_results = b.compute(**self.compute_args)
+                bagged_results = dask_computer(b, self.num_workers, **self.compute_args)
 
         # moved this out of dask, seems fast enough without having to daskify
         with io_util.Timing_Messager("Combining bagged results", logger):
