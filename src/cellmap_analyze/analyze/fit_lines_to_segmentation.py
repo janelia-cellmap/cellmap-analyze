@@ -3,15 +3,10 @@ from funlib.geometry import Roi
 import numpy as np
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util import io_util
-from cellmap_analyze.util.io_util import (
-    open_ds_tensorstore,
-    split_dataset_path,
-    to_ndarray_tensorstore,
-)
+from cellmap_analyze.util.image_data_interface import ImageDataInterface
 import logging
 import pandas as pd
 import dask.dataframe as dd
-from funlib.geometry import Coordinate
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -24,9 +19,7 @@ logger = logging.getLogger(__name__)
 class FitLinesToSegmentation:
     def __init__(self, input_csv, segmentation_ds_path, num_workers=8):
         self.df = pd.read_csv(input_csv)  # , nrows=1000)
-        self.segmentation_ds = open_ds(*split_dataset_path(segmentation_ds_path))
-        self.segmentation_ds_tensorstore = open_ds_tensorstore(segmentation_ds_path)
-        self.voxel_size = self.segmentation_ds.voxel_size
+        self.segmentation_idi = ImageDataInterface(segmentation_ds_path)
         self.num_workers = num_workers
 
     @staticmethod
@@ -83,19 +76,14 @@ class FitLinesToSegmentation:
         results_df = []
         for _, row in df.iterrows():
             id = row["Object ID"]
-            box_min = np.array([row[f"MIN {d} (nm)"] for d in ["X", "Y", "Z"]])
-            box_max = np.array([row[f"MAX {d} (nm)"] for d in ["X", "Y", "Z"]])
-            com = np.array([row[f"COM {d} (nm)"] for d in ["X", "Y", "Z"]])
+            box_min = np.array([row[f"MIN {d} (nm)"] for d in ["Z", "Y", "X"]])
+            box_max = np.array([row[f"MAX {d} (nm)"] for d in ["Z", "Y", "X"]])
+            com = np.array([row[f"COM {d} (nm)"] for d in ["Z", "Y", "X"]])
             # define an roi to actually ecompass the bounding box
             roi = Roi(
                 box_min - self.voxel_size, (box_max - box_min) + self.voxel_size * 2
             )
-            data = to_ndarray_tensorstore(
-                self.segmentation_ds_tensorstore,
-                roi,
-                self.voxel_size,
-                Coordinate(self.segmentation_ds.roi.begin[::-1]),
-            )
+            data = self.segmentation_idi.to_ndarray_ts(roi)
             line_start, line_end = FitLinesToSegmentation.fit_line_to_object(
                 data, id, self.voxel_size, roi.offset, com=com
             )
@@ -104,7 +92,7 @@ class FitLinesToSegmentation:
             for point_string, point_coords in zip(
                 ["Start", "End"], [line_start, line_end]
             ):
-                for dim_idx, dim in enumerate(["X", "Y", "Z"]):
+                for dim_idx, dim in enumerate(["Z", "Y", "X"]):
                     result_df[f"Line {point_string} {dim} (nm)"] = point_coords[dim_idx]
             results_df.append(result_df)
 
@@ -114,7 +102,7 @@ class FitLinesToSegmentation:
     def get_fit_lines_to_objects(self):
         # append column with default values to df
         for s_e in ["Start", "End"]:
-            for dim in ["X", "Y", "Z"]:
+            for dim in ["Z", "Y", "X"]:
                 self.df[f"Line {s_e} {dim} (nm)"] = np.NaN
 
         ddf = dd.from_pandas(self.df, npartitions=self.num_workers * 10)
