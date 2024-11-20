@@ -12,14 +12,6 @@ logging.basicConfig(format="%(levelname)s:%(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def get_name_from_path(path):
-    _, data_name = split_dataset_path(path)
-    if data_name.startswith("/"):
-        data_name = data_name[1:]
-    data_name = data_name.split("/s")[0]
-    return data_name
-
-
 def open_ds_tensorstore(dataset_path: str, mode="r"):
     # open with zarr or n5 depending on extension
     filetype = (
