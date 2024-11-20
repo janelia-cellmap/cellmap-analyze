@@ -60,7 +60,7 @@ class ContactSites:
         if not get_name_from_path(output_path):
             output_path = (
                 output_path
-                + f"/{get_name_from_path(organelle_1_path)}_to_{get_name_from_path(organelle_2_path)}"
+                + f"/{get_name_from_path(organelle_1_path)}_{get_name_from_path(organelle_2_path)}_contacts"
             )
 
         self.output_path = output_path
@@ -168,15 +168,12 @@ class ContactSites:
         )
         organelle_1 = organelle_1_idi.to_ndarray_ts(block.read_roi)
         organelle_2 = organelle_2_idi.to_ndarray_ts(block.read_roi)
-        global_id_offset = ConnectedComponents.convert_position_to_global_id(
-            block.write_roi.begin / contact_sites_blockwise_idi.voxel_size,
-            contact_sites_blockwise_idi.roi.shape
-            / contact_sites_blockwise_idi.voxel_size,
+        global_id_offset = block_index * np.prod(
+            block.write_roi.shape / contact_sites_blockwise_idi.voxel_size[0]
         )
         contact_sites = ContactSites.get_ndarray_contact_sites(
             organelle_1, organelle_2, contact_distance_voxels
         )
-
         contact_sites[contact_sites > 0] += global_id_offset
         contact_sites_blockwise_idi.ds[block.write_roi] = trim_array(
             contact_sites, padding_voxels
