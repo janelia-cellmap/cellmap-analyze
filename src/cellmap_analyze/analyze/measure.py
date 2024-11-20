@@ -123,12 +123,12 @@ class Measure:
             **extra_kwargs,
         )
 
-        if not object_informations and not contact_sites:
-            # NOTE: noticed that this code could hang and stop at 99% if processing a single organelle (non contact-site).
-            # however if i added os.system calls to touch and rm file named with block index, then it wouldnt hang. so assuming that it has to do with a timing thing in that it only had to load/process a single dataset chunk.
-            # sleeping for a little bit may therefore help:
-            # NOTE: this happened after adding concurrency limits=1 when opening tensorstore, but never tested on complete single organelle datasets before that switch
-            time.sleep(0.1)
+        # if not object_informations and not contact_sites:
+        #     # NOTE: noticed that this code could hang and stop at 99% if processing a single organelle (non contact-site).
+        #     # however if i added os.system calls to touch and rm file named with block index, then it wouldnt hang. so assuming that it has to do with a timing thing in that it only had to load/process a single dataset chunk.
+        #     # sleeping for a little bit may therefore help:
+        #     # NOTE: this happened after adding concurrency limits=1 when opening tensorstore, but never tested on complete single organelle datasets before that switch
+        #     time.sleep(0.1)
 
         return object_informations
 
@@ -236,6 +236,8 @@ class Measure:
         # ensure Object ID is written as an int
         df["Object ID"] = df["Object ID"].astype(int)
         df = df.sort_values(by=["Object ID"])
+        output_dir = os.path.dirname(output_file)
+        os.makedirs(output_dir, exist_ok=True)
         df.to_csv(output_file, index=False)
 
     def get_measurements(self):
