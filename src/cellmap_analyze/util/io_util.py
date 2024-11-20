@@ -14,17 +14,30 @@ import argparse
 import yaml
 from yaml.loader import SafeLoader
 from funlib.geometry import Roi
+import re
 
 # Much below taken from flyemflows: https://github.com/janelia-flyem/flyemflows/blob/master/flyemflows/util/util.py
 logging.basicConfig(format="%(levelname)s:%(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def split_on_last_scale(string):
+    # This regex looks for 's' followed by one or more digits
+    match = re.search(r"(.*)(/s\d+)(.*)", string)
+
+    if match:
+        # Split the string into three parts: before 's#', 's#', and after 's#'
+        return match.group(1)
+    else:
+        # Return the original string if no match is found
+        return string
+
 def get_name_from_path(path):
     _, data_name = split_dataset_path(path)
     if data_name.startswith("/"):
         data_name = data_name[1:]
-    data_name = data_name.split("/s")[0]
+    data_name = split_on_last_scale(data_name)
+    data_name = data_name.split("/")[-1]
     return data_name
 
 
