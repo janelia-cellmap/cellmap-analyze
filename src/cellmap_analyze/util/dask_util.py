@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 class DaskBlock:
     index: int
     id: int
+    full_block_size: Coordinate
     coords: tuple
     read_roi: Roi
     write_roi: Roi
@@ -69,6 +70,7 @@ def create_block(
     return DaskBlock(
         index,
         block_id,
+        block_size,
         coords,
         read_roi,
         write_roi,
