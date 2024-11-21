@@ -24,6 +24,7 @@ import itertools
 from funlib.segment.arrays import replace_values
 import os
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset
+import skimage
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -36,23 +37,70 @@ logger = logging.getLogger(__name__)
 class ConnectedComponents:
     def __init__(
         self,
-        tmp_blockwise_ds_path,
         output_ds_path,
+        input_ds_path=None,
+        intensity_threshold_minimum=-1,
+        intensity_threshold_maximum=np.inf,  # exclusive
+        connected_components_blockwise_ds_path=None,
         roi=None,
         minimum_volume_nm_3=None,
         num_workers=10,
         connectivity=2,
         delete_tmp=False,
     ):
-        self.tmp_blockwise_ds_path = tmp_blockwise_ds_path
-        self.tmp_blockwise_idi = ImageDataInterface(self.tmp_blockwise_ds_path)
-        self.output_ds_path = output_ds_path
+        if input_ds_path and connected_components_blockwise_ds_path:
+            raise Exception(
+                "Cannot provide both input_ds_path and tmp_blockwise_ds_path"
+            )
+        if not input_ds_path and not connected_components_blockwise_ds_path:
+            raise Exception(
+                "Must provide either input_ds_path or tmp_blockwise_ds_path"
+            )
+
+        if input_ds_path:
+            template_idi = self.input_idi = ImageDataInterface(input_ds_path)
+        else:
+            template_idi = self.connected_components_blockwise_idi = ImageDataInterface(
+                connected_components_blockwise_ds_path
+            )
 
         if roi is None:
-            self.roi = self.tmp_blockwise_idi.roi
+            self.roi = template_idi.roi
         else:
             self.roi = roi
-        self.voxel_size = self.tmp_blockwise_idi.voxel_size
+        self.voxel_size = template_idi.voxel_size
+
+        self.do_full_connected_components = False
+        if input_ds_path:
+            self.input_ds_path = input_ds_path
+            input_ds_name = get_name_from_path(self.input_ds_path)
+            input_ds_basepath = split_dataset_path(self.input_ds_path)[0]
+            self.connected_components_blockwise_ds_path = (
+                input_ds_basepath + "/" + input_ds_name + "_blockwise"
+            )
+            self.intensity_threshold_minimum = intensity_threshold_minimum
+            self.intensity_threshold_maximum = intensity_threshold_maximum
+            create_multiscale_dataset(
+                self.connected_components_blockwise_ds_path,
+                dtype=np.uint64,
+                voxel_size=self.voxel_size,
+                total_roi=self.roi,
+                write_size=template_idi.chunk_shape * self.voxel_size,
+            )
+            self.connected_components_blockwise_idi = ImageDataInterface(
+                self.connected_components_blockwise_ds_path + "/s0", mode="r+"
+            )
+            self.do_full_connected_components = True
+        else:
+            self.connected_components_blockwise_ds_path = (
+                connected_components_blockwise_ds_path
+            )
+
+            self.connected_components_blockwise_idi = ImageDataInterface(
+                self.connected_components_blockwise_ds_path
+            )
+        self.output_ds_path = output_ds_path
+
         self.minimum_volume_voxels = minimum_volume_nm_3 / np.prod(self.voxel_size)
         self.connectivity = connectivity
         self.delete_tmp = delete_tmp
@@ -78,14 +126,49 @@ class ConnectedComponents:
             }
 
     @staticmethod
-    def convert_position_to_global_id(position, dimensions):
-        id = (
-            dimensions[0] * dimensions[1] * position[2]
-            + dimensions[0] * position[1]
-            + position[0]
-            + 1
+    def calculate_block_connected_components(
+        block_index,
+        input_idi: ImageDataInterface,
+        connected_components_blockwise_idi: ImageDataInterface,
+        intensity_threshold_minimum=-1,
+        intensity_threshold_maximum=np.inf,
+    ):
+        block = create_block_from_index(
+            connected_components_blockwise_idi,
+            block_index,
         )
-        return id
+        input = input_idi.to_ndarray_ts(block.read_roi)
+        thresholded = (input >= intensity_threshold_minimum) & (
+            input < intensity_threshold_maximum
+        )
+        connected_components = skimage.measure.label(thresholded)
+        global_id_offset = block_index * np.prod(
+            block.full_block_size / connected_components_blockwise_idi.voxel_size[0]
+        )
+        connected_components[connected_components > 0] += global_id_offset
+        connected_components_blockwise_idi.ds[block.write_roi] = connected_components
+
+    def calculate_connected_comopnents_blockwise(self):
+        num_blocks = dask_util.get_num_blocks(self.input_idi)
+        block_indexes = list(range(num_blocks))
+        b = db.from_sequence(
+            block_indexes,
+            npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
+        ).map(
+            ConnectedComponents.calculate_block_connected_components,
+            self.input_idi,
+            self.connected_components_blockwise_idi,
+            self.intensity_threshold_minimum,
+            self.intensity_threshold_maximum,
+        )
+
+        with dask_util.start_dask(
+            self.num_workers,
+            "calculate connected components",
+            logger,
+        ):
+            with io_util.Timing_Messager("Calculating connected components", logger):
+                dask_computer(b, self.num_workers, **self.compute_args)
 
     @staticmethod
     def get_touching_ids(data, mask, connectivity=2):
@@ -143,13 +226,17 @@ class ConnectedComponents:
 
     @staticmethod
     def get_connected_component_information_blockwise(
-        block_index, tmp_blockwise_idi: ImageDataInterface, connectivity
+        block_index,
+        connected_components_blockwise_idi: ImageDataInterface,
+        connectivity,
     ):
         try:
             block = create_block_from_index(
-                tmp_blockwise_idi, block_index, padding=tmp_blockwise_idi.voxel_size
+                connected_components_blockwise_idi,
+                block_index,
+                padding=connected_components_blockwise_idi.voxel_size,
             )
-            data = tmp_blockwise_idi.to_ndarray_ts(
+            data = connected_components_blockwise_idi.to_ndarray_ts(
                 block.read_roi,
             )
 
@@ -166,7 +253,7 @@ class ConnectedComponents:
             block.relabeling_dict = {id: 0 for id in id_to_volume_dict.keys()}
         except:
             raise Exception(
-                f"Error in get_connected_component_information_blockwise {block_index}, {tmp_blockwise_idi.voxel_size}"
+                f"Error in get_connected_component_information_blockwise {block_index}, {connected_components_blockwise_idi.voxel_size}"
             )
         return [block], id_to_volume_dict, touching_ids
 
@@ -205,14 +292,14 @@ class ConnectedComponents:
         return blocks, id_to_volume_dict, touching_ids
 
     def get_connected_component_information(self):
-        num_blocks = dask_util.get_num_blocks(self.tmp_blockwise_idi)
+        num_blocks = dask_util.get_num_blocks(self.connected_components_blockwise_idi)
         block_indexes = list(range(num_blocks))
         b = db.from_sequence(
             block_indexes,
             npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
         ).map(
             ConnectedComponents.get_connected_component_information_blockwise,
-            self.tmp_blockwise_idi,
+            self.connected_components_blockwise_idi,
             self.connectivity,
         )
 
@@ -255,7 +342,9 @@ class ConnectedComponents:
                 b = db.from_sequence(
                     self.blocks,
                     npartitions=guesstimate_npartitions(self.blocks, self.num_workers),
-                ).map(write_out_block_object, self.tmp_blockwise_idi.path)
+                ).map(
+                    write_out_block_object, self.connected_components_blockwise_idi.path
+                )
                 dask_computer(b, self.num_local_threads_available, **self.compute_args)
 
     def get_final_connected_components(self):
@@ -295,18 +384,18 @@ class ConnectedComponents:
     @staticmethod
     def relabel_block(
         block_coords,
-        tmp_blockwise_idi: ImageDataInterface,
+        connected_components_blockwise_idi: ImageDataInterface,
         new_dtype,
         output_idi: ImageDataInterface,
     ):
         # read block from pickle file
         block_coords_string = "/".join([str(c) for c in block_coords])
         with open(
-            f"{tmp_blockwise_idi.path}/{block_coords_string}.pkl", "rb"
+            f"{connected_components_blockwise_idi.path}/{block_coords_string}.pkl", "rb"
         ) as handle:
             block = pickle.load(handle)
         # print_with_datetime(block.relabeling_dict, logger)
-        data = tmp_blockwise_idi.to_ndarray_ts(
+        data = connected_components_blockwise_idi.to_ndarray_ts(
             block.write_roi,
         )
 
@@ -325,8 +414,8 @@ class ConnectedComponents:
             dtype=self.new_dtype,
             voxel_size=self.voxel_size,
             total_roi=self.roi,
-            write_size=self.tmp_blockwise_idi.chunk_shape
-            * self.tmp_blockwise_idi.voxel_size,
+            write_size=self.connected_components_blockwise_idi.chunk_shape
+            * self.connected_components_blockwise_idi.voxel_size,
         )
         self.output_idi = ImageDataInterface(self.output_ds_path + "/s0", mode="r+")
 
@@ -336,7 +425,7 @@ class ConnectedComponents:
             npartitions=guesstimate_npartitions(self.blocks, self.num_workers),
         ).map(
             ConnectedComponents.relabel_block,
-            self.tmp_blockwise_idi,
+            self.connected_components_blockwise_idi,
             self.new_dtype,
             self.output_idi,
         )
@@ -363,7 +452,10 @@ class ConnectedComponents:
             b = db.from_sequence(
                 all_block_coords,
                 npartitions=guesstimate_npartitions(self.blocks, self.num_workers),
-            ).map(ConnectedComponents.delete_chunks, self.tmp_blockwise_ds_path)
+            ).map(
+                ConnectedComponents.delete_chunks,
+                self.connected_components_blockwise_ds_path,
+            )
 
             with dask_util.start_dask(
                 self.num_workers,
@@ -375,10 +467,14 @@ class ConnectedComponents:
                 ):
                     dask_computer(b, self.num_workers, **self.compute_args)
 
-        base_path, _ = split_dataset_path(self.tmp_blockwise_ds_path)
+        base_path, _ = split_dataset_path(self.connected_components_blockwise_ds_path)
         os.system(
-            f"rm -rf {base_path}/{get_name_from_path(self.tmp_blockwise_ds_path)}"
+            f"rm -rf {base_path}/{get_name_from_path(self.connected_components_blockwise_ds_path)}"
         )
+
+    def calculate_full_connected_components(self):
+        self.calculate_connected_comopnents_blockwise()
+        self.merge_connected_components_across_blocks()
 
     def merge_connected_components_across_blocks(self):
         self.get_connected_component_information()
