@@ -17,13 +17,14 @@ def test_connected_components(
 ):
     minimum_volume_nm_3 = minimum_volume_voxels * voxel_size**3
     cc = ConnectedComponents(
-        tmp_blockwise_ds_path=f"{tmp_zarr}/blockwise_connected_components/s0",
+        input_ds_path=f"{tmp_zarr}/intensity_image/s0",
         output_ds_path=f"{tmp_zarr}/test_connected_components_minimum_volume_nm_3_{minimum_volume_nm_3}",
+        intensity_threshold_minimum=127,
         minimum_volume_nm_3=minimum_volume_nm_3,
         num_workers=1,
         connectivity=3,
     )
-    cc.merge_connected_components_across_blocks()
+    cc.calculate_full_connected_components()
 
     ground_truth = connected_components
     uniques, counts = np.unique(ground_truth, return_counts=True)

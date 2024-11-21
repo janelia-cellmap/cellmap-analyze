@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
 from funlib.geometry import Roi
-from scipy import ndimage
+from skimage import measure
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset
 import os
 
@@ -39,8 +39,24 @@ def blockwise_connected_components(image_shape, chunk_size):
 
 
 @pytest.fixture(scope="session")
-def connected_components(blockwise_connected_components):
-    seg, _ = ndimage.label(blockwise_connected_components > 0)
+def intensity_image(image_shape, chunk_size):
+    seg = np.zeros(image_shape, dtype=np.uint8)
+    # single voxel
+    seg[1, 1, 1] = 127
+
+    # cube around border
+    for x in range(3, 5):
+        for y in range(3, 5):
+            for z in range(3, 5):
+                seg[x, y, z] = 127
+
+    seg[7:11, 7:11, 7:11] = 127
+    return seg
+
+
+@pytest.fixture(scope="session")
+def connected_components(intensity_image):
+    seg = measure.label(intensity_image > 0)
     return seg
 
 
@@ -247,6 +263,7 @@ def tmp_zarr(tmpdir_factory):
 @pytest.fixture(scope="session")
 def test_image_dict(
     blockwise_connected_components,
+    intensity_image,
     segmentation_1,
     segmentation_2,
     segmentation_1_downsampled,
@@ -256,6 +273,7 @@ def test_image_dict(
 ):
     dict = {
         "blockwise_connected_components": blockwise_connected_components,
+        "intensity_image": intensity_image,
         "segmentation_1": segmentation_1,
         "segmentation_1_downsampled": segmentation_1_downsampled,
         "segmentation_2": segmentation_2,
