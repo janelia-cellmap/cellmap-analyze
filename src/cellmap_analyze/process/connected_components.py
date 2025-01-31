@@ -1,3 +1,5 @@
+# %%
+
 from collections import defaultdict
 import pickle
 import types
@@ -23,8 +25,11 @@ import dask.bag as db
 import itertools
 from funlib.segment.arrays import replace_values
 import os
+from cellmap_analyze.util.mask_util import MasksFromConfig
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset
 import skimage
+from skimage.segmentation import find_boundaries
+
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -37,73 +42,93 @@ logger = logging.getLogger(__name__)
 class ConnectedComponents:
     def __init__(
         self,
-        output_ds_path,
-        input_ds_path=None,
+        output_path,
+        input_path=None,
         intensity_threshold_minimum=-1,
         intensity_threshold_maximum=np.inf,  # exclusive
-        connected_components_blockwise_ds_path=None,
+        mask_config=None,
+        connected_components_blockwise_path=None,
         roi=None,
-        minimum_volume_nm_3=None,
+        minimum_volume_nm_3=0,
         num_workers=10,
         connectivity=2,
         delete_tmp=False,
+        invert=False,
+        calculating_holes=False,
+        fill_holes=False,
     ):
-        if input_ds_path and connected_components_blockwise_ds_path:
-            raise Exception(
-                "Cannot provide both input_ds_path and tmp_blockwise_ds_path"
-            )
-        if not input_ds_path and not connected_components_blockwise_ds_path:
-            raise Exception(
-                "Must provide either input_ds_path or tmp_blockwise_ds_path"
-            )
+        if input_path and connected_components_blockwise_path:
+            raise Exception("Cannot provide both input_path and tmp_blockwise_path")
+        if not input_path and not connected_components_blockwise_path:
+            raise Exception("Must provide either input_path or tmp_blockwise_path")
 
-        if input_ds_path:
-            template_idi = self.input_idi = ImageDataInterface(input_ds_path)
+        if input_path:
+            template_idi = self.input_idi = ImageDataInterface(input_path)
         else:
             template_idi = self.connected_components_blockwise_idi = ImageDataInterface(
-                connected_components_blockwise_ds_path
+                connected_components_blockwise_path
             )
 
         if roi is None:
             self.roi = template_idi.roi
         else:
             self.roi = roi
+
+        self.calculating_holes = calculating_holes
+        self.invert = invert
+        self.oob_value = None
+        if self.calculating_holes:
+            self.invert = True
+            self.oob_value = np.prod(self.input_idi.ds.shape) * 10
+
         self.voxel_size = template_idi.voxel_size
 
         self.do_full_connected_components = False
-        if input_ds_path:
-            self.input_ds_path = input_ds_path
-            input_ds_name = get_name_from_path(self.input_ds_path)
-            input_ds_basepath = split_dataset_path(self.input_ds_path)[0]
-            self.connected_components_blockwise_ds_path = (
-                input_ds_basepath + "/" + input_ds_name + "_blockwise"
+        if input_path:
+            self.input_path = input_path
+            output_ds_name = get_name_from_path(output_path)
+            output_ds_basepath = split_dataset_path(output_path)[0]
+            self.connected_components_blockwise_path = (
+                output_ds_basepath + "/" + output_ds_name + "_blockwise"
             )
             self.intensity_threshold_minimum = intensity_threshold_minimum
             self.intensity_threshold_maximum = intensity_threshold_maximum
             create_multiscale_dataset(
-                self.connected_components_blockwise_ds_path,
+                self.connected_components_blockwise_path,
                 dtype=np.uint64,
                 voxel_size=self.voxel_size,
                 total_roi=self.roi,
                 write_size=template_idi.chunk_shape * self.voxel_size,
             )
             self.connected_components_blockwise_idi = ImageDataInterface(
-                self.connected_components_blockwise_ds_path + "/s0", mode="r+"
+                self.connected_components_blockwise_path + "/s0",
+                mode="r+",
+                custom_fill_value=self.oob_value,
             )
             self.do_full_connected_components = True
         else:
-            self.connected_components_blockwise_ds_path = (
-                connected_components_blockwise_ds_path
+            self.connected_components_blockwise_path = (
+                connected_components_blockwise_path
             )
 
             self.connected_components_blockwise_idi = ImageDataInterface(
-                self.connected_components_blockwise_ds_path
+                self.connected_components_blockwise_path
             )
-        self.output_ds_path = output_ds_path
-
+        self.output_path = output_path
         self.minimum_volume_voxels = minimum_volume_nm_3 / np.prod(self.voxel_size)
+
+        self.mask = None
+        if mask_config:
+            self.mask = MasksFromConfig(
+                mask_config,
+                output_voxel_size=self.voxel_size,
+                connectivity=connectivity,
+            )
+
         self.connectivity = connectivity
+        self.invert = invert
         self.delete_tmp = delete_tmp
+        self.fill_holes = fill_holes
 
         self.num_workers = num_workers
         self.compute_args = {}
@@ -132,24 +157,60 @@ class ConnectedComponents:
         connected_components_blockwise_idi: ImageDataInterface,
         intensity_threshold_minimum=-1,
         intensity_threshold_maximum=np.inf,
+        calculating_holes=False,
+        oob_value=None,
+        invert=None,
+        mask: MasksFromConfig = None,
+        connectivity=2,
     ):
+        if calculating_holes:
+            invert = True
+
         block = create_block_from_index(
             connected_components_blockwise_idi,
             block_index,
         )
         input = input_idi.to_ndarray_ts(block.read_roi)
-        thresholded = (input >= intensity_threshold_minimum) & (
-            input < intensity_threshold_maximum
+        if invert:
+            thresholded = input == 0
+        else:
+            thresholded = (input >= intensity_threshold_minimum) & (
+                input < intensity_threshold_maximum
+            )
+
+        if mask:
+            mask_block = mask.process_block(roi=block.read_roi)
+            thresholded &= mask_block
+
+        connected_components = skimage.measure.label(
+            thresholded, connectivity=connectivity
         )
-        connected_components = skimage.measure.label(thresholded)
+
         global_id_offset = block_index * np.prod(
             block.full_block_size / connected_components_blockwise_idi.voxel_size[0]
         )
         connected_components[connected_components > 0] += global_id_offset
+
+        if calculating_holes and block.read_roi.shape != block.read_roi.intersect(
+            input_idi.roi
+        ):
+            idxs = np.where(input == oob_value)
+            if len(idxs) > 0:
+                # couldnt do inplace for large uint types because it was converting to floats
+                relabeled = connected_components.copy()
+                ids_to_set_to_zero = np.unique(connected_components[idxs])
+                replace_values(
+                    connected_components,
+                    list(ids_to_set_to_zero),
+                    [oob_value] * len(ids_to_set_to_zero),
+                    out_array=relabeled,
+                )
+                connected_components = relabeled
+
         connected_components_blockwise_idi.ds[block.write_roi] = connected_components
 
     def calculate_connected_comopnents_blockwise(self):
-        num_blocks = dask_util.get_num_blocks(self.input_idi)
+        num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
         block_indexes = list(range(num_blocks))
         b = db.from_sequence(
             block_indexes,
@@ -160,6 +221,11 @@ class ConnectedComponents:
             self.connected_components_blockwise_idi,
             self.intensity_threshold_minimum,
             self.intensity_threshold_maximum,
+            self.calculating_holes,
+            self.oob_value,
+            self.invert,
+            self.mask,
+            self.connectivity,
         )
 
         with dask_util.start_dask(
@@ -323,29 +389,35 @@ class ConnectedComponents:
         for block in blocks_with_dict:
             self.blocks[block.index] = block
 
-    def write_out_block_objects(self):
-        def write_out_block_object(block, tmp_blockwise_path):
+    @staticmethod
+    def write_out_block_objects(
+        path,
+        blocks,
+        num_local_threads_available,
+        local_config,
+        num_workers,
+        compute_args,
+    ):
+        def write_out_block_object(block, tmp_path):
             block_coords_string = "/".join([str(c) for c in block.coords])
-            output_path = f"{tmp_blockwise_path}/{block_coords_string}.pkl"
+            output_path = f"{tmp_path}/{block_coords_string}.pkl"
             # write relabeling dict to pkl file
             with open(f"{output_path}", "wb") as handle:
                 pickle.dump(block, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
         # NOTE: do it the following way since it should be fast enough with 10 workers and then we don't have to bog down distributed stuff
         with dask_util.start_dask(
-            num_workers=self.num_local_threads_available,
+            num_workers=num_local_threads_available,
             msg="write out blocks",
             logger=logger,
-            config=self.local_config,
+            config=local_config,
         ):
             with io_util.Timing_Messager("Writing out blocks", logger):
                 b = db.from_sequence(
-                    self.blocks,
-                    npartitions=guesstimate_npartitions(self.blocks, self.num_workers),
-                ).map(
-                    write_out_block_object, self.connected_components_blockwise_idi.path
-                )
-                dask_computer(b, self.num_local_threads_available, **self.compute_args)
+                    blocks,
+                    npartitions=guesstimate_npartitions(blocks, num_workers),
+                ).map(write_out_block_object, path)
+                dask_computer(b, num_local_threads_available, **compute_args)
 
     def get_final_connected_components(self):
         with io_util.Timing_Messager("Finding connected components", logger):
@@ -353,13 +425,21 @@ class ConnectedComponents:
                 self.id_to_volume_dict.keys(), self.touching_ids
             )
 
-        if self.minimum_volume_voxels:
+        if self.minimum_volume_voxels > 0:
             with io_util.Timing_Messager("Volume filter connected", logger):
                 connected_ids, _ = ConnectedComponents.volume_filter_connected_ids(
                     connected_ids,
                     self.id_to_volume_dict,
                     self.minimum_volume_voxels,
                 )
+
+        if self.calculating_holes:
+            connected_ids = [
+                current_connected_ids
+                for current_connected_ids in connected_ids
+                if self.oob_value not in current_connected_ids
+            ]
+
         del self.id_to_volume_dict, self.touching_ids
         # sort connected_ids by the minimum id in each connected component
         new_ids = [[i + 1] * len(ids) for i, ids in enumerate(connected_ids)]
@@ -385,7 +465,7 @@ class ConnectedComponents:
     def relabel_block(
         block_coords,
         connected_components_blockwise_idi: ImageDataInterface,
-        new_dtype,
+        dtype,
         output_idi: ImageDataInterface,
     ):
         # read block from pickle file
@@ -399,40 +479,47 @@ class ConnectedComponents:
             block.write_roi,
         )
 
-        if len(block.relabeling_dict) == 0:
-            new_data = data.astype(new_dtype)
-        else:
-            new_data = np.zeros_like(data, dtype=new_dtype)
-            keys, values = zip(*block.relabeling_dict.items())
-            replace_values(data, list(keys), list(values), new_data)
-        del data
-        output_idi.ds[block.write_roi] = new_data
+        if len(block.relabeling_dict) > 0:
+            try:
+                # couldn't do it inplace for large uint types because it was converting to floats
+                relabeled = np.zeros_like(data, dtype=dtype)
+                keys, values = zip(*block.relabeling_dict.items())
+                replace_values(data, list(keys), list(values), out_array=relabeled)
+                data = relabeled
+            except:
+                raise Exception(
+                    f"Error in relabel_block {block_coords}, {list(keys)}, {list(values)}"
+                )
 
-    def relabel_dataset(self):
+        output_idi.ds[block.write_roi] = data
+
+    @staticmethod
+    def relabel_dataset(
+        original_idi, output_path, blocks, roi, dtype, num_workers, compute_args
+    ):
         create_multiscale_dataset(
-            self.output_ds_path,
-            dtype=self.new_dtype,
-            voxel_size=self.voxel_size,
-            total_roi=self.roi,
-            write_size=self.connected_components_blockwise_idi.chunk_shape
-            * self.connected_components_blockwise_idi.voxel_size,
+            output_path,
+            dtype=dtype,
+            voxel_size=original_idi.voxel_size,
+            total_roi=roi,
+            write_size=original_idi.chunk_shape * original_idi.voxel_size,
         )
-        self.output_idi = ImageDataInterface(self.output_ds_path + "/s0", mode="r+")
+        output_idi = ImageDataInterface(output_path + "/s0", mode="r+")
 
-        block_coords = [block.coords for block in self.blocks]
+        block_coords = [block.coords for block in blocks]
         b = db.from_sequence(
             block_coords,
-            npartitions=guesstimate_npartitions(self.blocks, self.num_workers),
+            npartitions=guesstimate_npartitions(blocks, num_workers),
         ).map(
             ConnectedComponents.relabel_block,
-            self.connected_components_blockwise_idi,
-            self.new_dtype,
-            self.output_idi,
+            original_idi,
+            dtype,
+            output_idi,
         )
 
-        with dask_util.start_dask(self.num_workers, "relabel dataset", logger):
+        with dask_util.start_dask(num_workers, "relabel dataset", logger):
             with io_util.Timing_Messager("Relabeling dataset", logger):
-                dask_computer(b, self.num_workers, **self.compute_args)
+                dask_computer(b, num_workers, **compute_args)
 
     @staticmethod
     def delete_chunks(block_coords, tmp_blockwise_ds_path):
@@ -446,40 +533,101 @@ class ConnectedComponents:
                 # if it is the highest level then we also remove the pkl file
                 os.system(f"rm -rf {delete_name}.pkl")
 
-    def delete_tmp_dataset(self):
+    @staticmethod
+    def delete_tmp_dataset(path_to_dataset, blocks, num_workers, compute_args):
         for depth in range(3, 0, -1):
-            all_block_coords = set([block.coords[:depth] for block in self.blocks])
+            all_block_coords = set([block.coords[:depth] for block in blocks])
             b = db.from_sequence(
                 all_block_coords,
-                npartitions=guesstimate_npartitions(self.blocks, self.num_workers),
+                npartitions=guesstimate_npartitions(blocks, num_workers),
             ).map(
                 ConnectedComponents.delete_chunks,
-                self.connected_components_blockwise_ds_path,
+                path_to_dataset,
             )
 
             with dask_util.start_dask(
-                self.num_workers,
+                num_workers,
                 f"delete blockwise depth: {depth}",
                 logger,
             ):
                 with io_util.Timing_Messager(
                     f"Deleting blockwise depth: {depth}", logger
                 ):
-                    dask_computer(b, self.num_workers, **self.compute_args)
+                    dask_computer(b, num_workers, **compute_args)
 
-        base_path, _ = split_dataset_path(self.connected_components_blockwise_ds_path)
-        os.system(
-            f"rm -rf {base_path}/{get_name_from_path(self.connected_components_blockwise_ds_path)}"
-        )
+        base_path, _ = split_dataset_path(path_to_dataset)
+        os.system(f"rm -rf {base_path}/{get_name_from_path(path_to_dataset)}")
 
-    def calculate_full_connected_components(self):
+    def get_connected_components(self):
         self.calculate_connected_comopnents_blockwise()
         self.merge_connected_components_across_blocks()
 
     def merge_connected_components_across_blocks(self):
+        # get blockwise connected component information
         self.get_connected_component_information()
+        # get final connected components necessary for relabeling, including volume filtering
         self.get_final_connected_components()
-        self.write_out_block_objects()
-        self.relabel_dataset()
+        # write out block information
+        ConnectedComponents.write_out_block_objects(
+            self.connected_components_blockwise_idi.path,
+            self.blocks,
+            self.num_local_threads_available,
+            self.local_config,
+            self.num_workers,
+            self.compute_args,
+        )
+        self.relabel_dataset(
+            self.connected_components_blockwise_idi,
+            self.output_path,
+            self.blocks,
+            self.roi,
+            self.new_dtype,
+            self.num_workers,
+            self.compute_args,
+        )
         if self.delete_tmp:
-            self.delete_tmp_dataset()
+            ConnectedComponents.delete_tmp_dataset(
+                self.connected_components_blockwise_idi.path,
+                self.blocks,
+                self.num_workers,
+                self.compute_args,
+            )
+
+        if self.fill_holes:
+            from .fill_holes import FillHoles
+
+            fh = FillHoles(
+                input_path=self.output_path + "/s0",
+                output_path=self.output_path + "_filled",
+                num_workers=self.num_workers,
+                roi=self.roi,
+                connectivity=self.connectivity,
+                delete_tmp=self.delete_tmp,
+            )
+            fh.fill_holes()
+
+
+# import yaml
+# from yaml import SafeLoader
+
+# with open(
+#     "/groups/cellmap/cellmap/ackermand/cellmap-analyze-scripts/connected_components/jrc_mus-liver-zon-2/canoliculi/run-config.yaml"
+# ) as file:
+#     config = yaml.load(file, Loader=SafeLoader)
+
+# print(config)
+# cc = ConnectedComponents(num_workers=1, **config)
+# cc.get_connected_component_information()
+
+
+# ConnectedComponents.relabel_block(
+#     (19, 9, 0),
+#     ImageDataInterface(
+#         "/nrs/cellmap/ackermand/cellmap/jrc_mus-liver-zon-2/jrc_mus-liver-zon-2.zarr/canoliculi_cc_filled_holes_blockwise/s0"
+#     ),
+#     dtype=np.uint8,
+#     output_idi=None,
+# )
+
+
+# %%
