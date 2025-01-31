@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 class DaskBlock:
     index: int
     id: int
+    full_block_size: Coordinate
     coords: tuple
     read_roi: Roi
     write_roi: Roi
@@ -69,6 +70,7 @@ def create_block(
     return DaskBlock(
         index,
         block_id,
+        block_size,
         coords,
         read_roi,
         write_roi,
@@ -80,10 +82,10 @@ def create_block_from_index(
     idi: ImageDataInterface,
     index,
     padding=0,
-    roi=None,
+    roi: Roi = None,
     block_size=None,
     read_beyond_roi=True,
-):
+) -> DaskBlock:
     if not roi:
         roi = idi.roi
 
@@ -167,7 +169,7 @@ def dask_computer(b, num_workers, **kwargs):
             interval = "30s"
         else:
             interval = "150s"
-        progress(b, interval=interval)  # watch progress
+        # progress(b, interval=interval)  # watch progress
         return b.compute(**kwargs)
 
 

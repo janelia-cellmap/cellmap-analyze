@@ -169,8 +169,8 @@ class ContactSites:
         organelle_1 = organelle_1_idi.to_ndarray_ts(block.read_roi)
         organelle_2 = organelle_2_idi.to_ndarray_ts(block.read_roi)
         global_id_offset = block_index * np.prod(
-            block.write_roi.shape / contact_sites_blockwise_idi.voxel_size[0]
-        )
+            block.full_block_size / contact_sites_blockwise_idi.voxel_size[0]
+        )  # have to use full_block_size since before if we use write_roi, blocks on the end will be smaller and will have incorrect offsets
         contact_sites = ContactSites.get_ndarray_contact_sites(
             organelle_1, organelle_2, contact_distance_voxels
         )
@@ -180,7 +180,9 @@ class ContactSites:
         )
 
     def calculate_contact_sites_blockwise(self):
-        num_blocks = dask_util.get_num_blocks(self.contact_sites_blockwise_idi)
+        num_blocks = dask_util.get_num_blocks(
+            self.contact_sites_blockwise_idi, self.roi
+        )
         block_indexes = list(range(num_blocks))
         b = db.from_sequence(
             block_indexes,
@@ -206,8 +208,8 @@ class ContactSites:
         self.calculate_contact_sites_blockwise()
 
         cc = ConnectedComponents(
-            tmp_blockwise_ds_path=self.output_path_blockwise + "/s0",
-            output_ds_path=self.output_path,
+            connected_components_blockwise_path=self.output_path_blockwise + "/s0",
+            output_path=self.output_path,
             roi=self.roi,
             num_workers=self.num_workers,
             minimum_volume_nm_3=self.minimum_volume_nm_3,

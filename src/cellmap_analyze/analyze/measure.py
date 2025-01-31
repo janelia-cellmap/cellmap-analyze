@@ -243,4 +243,5 @@ class Measure:
     def get_measurements(self):
         self.measure()
         if self.output_path:
-            self.write_measurements()
+            with io_util.Timing_Messager("Writing object information", logger):
+                self.write_measurements()
