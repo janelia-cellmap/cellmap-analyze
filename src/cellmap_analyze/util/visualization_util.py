@@ -8,16 +8,21 @@ def view_in_neuroglancer(**kwargs):
     viewer = neuroglancer.Viewer()
     with viewer.txn() as s:
         for array_name, array in kwargs.items():
-            if array.dtype not in (float, np.float32):
-                s.layers[array_name] = neuroglancer.SegmentationLayer(
-                    source=neuroglancer.LocalVolume(
-                        data=array,
-                    ),
-                )
-            else:
+            if (
+                array.dtype in (float, np.float32)
+                or "raw" in array_name
+                or "__img" in array_name
+            ):
                 s.layers[array_name] = neuroglancer.ImageLayer(
                     source=neuroglancer.LocalVolume(
                         data=array,
                     ),
                 )
+            else:
+                s.layers[array_name] = neuroglancer.SegmentationLayer(
+                    source=neuroglancer.LocalVolume(
+                        data=array,
+                    ),
+                )
+
     print(viewer.get_viewer_url())

@@ -180,7 +180,9 @@ class ContactSites:
         )
 
     def calculate_contact_sites_blockwise(self):
-        num_blocks = dask_util.get_num_blocks(self.contact_sites_blockwise_idi)
+        num_blocks = dask_util.get_num_blocks(
+            self.contact_sites_blockwise_idi, self.roi
+        )
         block_indexes = list(range(num_blocks))
         b = db.from_sequence(
             block_indexes,
@@ -206,8 +208,8 @@ class ContactSites:
         self.calculate_contact_sites_blockwise()
 
         cc = ConnectedComponents(
-            connected_components_blockwise_ds_path=self.output_path_blockwise + "/s0",
-            output_ds_path=self.output_path,
+            connected_components_blockwise_path=self.output_path_blockwise + "/s0",
+            output_path=self.output_path,
             roi=self.roi,
             num_workers=self.num_workers,
             minimum_volume_nm_3=self.minimum_volume_nm_3,

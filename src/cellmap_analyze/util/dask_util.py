@@ -82,10 +82,10 @@ def create_block_from_index(
     idi: ImageDataInterface,
     index,
     padding=0,
-    roi=None,
+    roi: Roi = None,
     block_size=None,
     read_beyond_roi=True,
-):
+) -> DaskBlock:
     if not roi:
         roi = idi.roi
 
@@ -169,7 +169,7 @@ def dask_computer(b, num_workers, **kwargs):
             interval = "30s"
         else:
             interval = "150s"
-        progress(b, interval=interval)  # watch progress
+        # progress(b, interval=interval)  # watch progress
         return b.compute(**kwargs)
 
 

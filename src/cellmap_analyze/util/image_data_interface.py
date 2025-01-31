@@ -6,28 +6,39 @@ from funlib.geometry import Roi
 
 from cellmap_analyze.util.io_util import split_dataset_path
 from funlib.persistence import open_ds
+from skimage.measure import block_reduce
 
 # Much below taken from flyemflows: https://github.com/janelia-flyem/flyemflows/blob/master/flyemflows/util/util.py
 logging.basicConfig(format="%(levelname)s:%(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def open_ds_tensorstore(dataset_path: str, mode="r"):
+def open_ds_tensorstore(dataset_path: str, mode="r", concurrency_limit=None):
     # open with zarr or n5 depending on extension
     filetype = (
         "zarr" if dataset_path.rfind(".zarr") > dataset_path.rfind(".n5") else "n5"
     )
-    spec = {
-        "driver": filetype,
-        # "context": {
-        #     "data_copy_concurrency": {"limit": 1},
-        #     "file_io_concurrency": {"limit": 1},
-        # },
-        "kvstore": {
-            "driver": "file",
-            "path": dataset_path,
-        },
-    }
+    if concurrency_limit:
+        spec = {
+            "driver": filetype,
+            "context": {
+                "data_copy_concurrency": {"limit": concurrency_limit},
+                "file_io_concurrency": {"limit": concurrency_limit},
+            },
+            "kvstore": {
+                "driver": "file",
+                "path": dataset_path,
+            },
+        }
+    else:
+        spec = {
+            "driver": filetype,
+            "kvstore": {
+                "driver": "file",
+                "path": dataset_path,
+            },
+        }
+
     if mode == "r":
         dataset_future = ts.open(spec, read=True, write=False)
     else:
@@ -43,6 +54,7 @@ def to_ndarray_tensorstore(
     offset=None,
     output_voxel_size=None,
     swap_axes=False,
+    custom_fill_value=None,
 ):
     """Read a region of a tensorstore dataset and return it as a numpy array
 
@@ -61,7 +73,8 @@ def to_ndarray_tensorstore(
             offset = Coordinate(offset[::-1])
 
     if roi is None:
-        return dataset.read().result()
+        with ts.Transaction() as txn:
+            return dataset.with_transaction(txn).read().result()
 
     if offset is None:
         offset = Coordinate(np.zeros(roi.dims, dtype=int))
@@ -97,36 +110,72 @@ def to_ndarray_tensorstore(
     )
 
     # Create an array to hold the requested data, filled with a default value (e.g., zeros)
-    output_shape = [s.stop - s.start for s in roi_slices]
+    # output_shape = [s.stop - s.start for s in roi_slices]
 
     if not dataset.fill_value:
         fill_value = 0
-    padded_data = np.ones(output_shape, dtype=dataset.dtype.numpy_dtype) * fill_value
-    padded_slices = tuple(
-        slice(valid_slice.start - s.start, valid_slice.stop - s.start)
+    if custom_fill_value:
+        fill_value = custom_fill_value
+    with ts.Transaction() as txn:
+        data = dataset.with_transaction(txn)[valid_slices].read().result()
+    pad_width = [
+        [valid_slice.start - s.start, s.stop - valid_slice.stop]
         for s, valid_slice in zip(roi_slices, valid_slices)
-    )
+    ]
+    if np.any(np.array(pad_width)):
+        if fill_value == "edge":
+            data = np.pad(
+                data,
+                pad_width=pad_width,
+                mode="edge",
+            )
+        else:
+            data = np.pad(
+                data,
+                pad_width=pad_width,
+                mode="constant",
+                constant_values=fill_value,
+            )
+    # else:
+    #     padded_data = (
+    #         np.ones(output_shape, dtype=dataset.dtype.numpy_dtype) * fill_value
+    #     )
+    #     padded_slices = tuple(
+    #         slice(valid_slice.start - s.start, valid_slice.stop - s.start)
+    #         for s, valid_slice in zip(roi_slices, valid_slices)
+    #     )
 
-    # Read the region of interest from the dataset
-    padded_data[padded_slices] = dataset[valid_slices].read().result()
+    #     # Read the region of interest from the dataset
+    #     padded_data[padded_slices] = dataset[valid_slices].read().result()
 
     if rescale_factor > 1:
         rescale_factor = voxel_size[0] / output_voxel_size[0]
-        padded_data = (
-            padded_data.repeat(rescale_factor, 0)
+        data = (
+            data.repeat(rescale_factor, 0)
             .repeat(rescale_factor, 1)
             .repeat(rescale_factor, 2)
         )
-        padded_data = padded_data[snapped_slices]
+        data = data[snapped_slices]
+
+    elif rescale_factor < 1:
+        data = block_reduce(data, block_size=int(1 / rescale_factor), func=np.median)
+        data = data[snapped_slices]
 
     if swap_axes:
-        padded_data = np.swapaxes(padded_data, 0, 2)
+        data = np.swapaxes(data, 0, 2)
 
-    return padded_data
+    return data
 
 
 class ImageDataInterface:
-    def __init__(self, dataset_path, mode="r", output_voxel_size=None):
+    def __init__(
+        self,
+        dataset_path,
+        mode="r",
+        output_voxel_size=None,
+        custom_fill_value=None,
+        concurrency_limit=1,
+    ):
         self.path = dataset_path
         filename, dataset = split_dataset_path(dataset_path)
         self.ds = open_ds(filename, dataset, mode=mode)
@@ -139,6 +188,8 @@ class ImageDataInterface:
         self.chunk_shape = self.ds.chunk_shape
         self.roi = self.ds.roi
         self.offset = self.ds.roi.offset
+        self.custom_fill_value = custom_fill_value
+        self.concurrency_limit = concurrency_limit
         if output_voxel_size is not None:
             self.output_voxel_size = output_voxel_size
         else:
@@ -146,16 +197,20 @@ class ImageDataInterface:
 
     def to_ndarray_ts(self, roi=None):
         if not self.ts:
-            self.ts = open_ds_tensorstore(self.path)
-
-        return to_ndarray_tensorstore(
+            self.ts = open_ds_tensorstore(
+                self.path, concurrency_limit=self.concurrency_limit
+            )
+        res = to_ndarray_tensorstore(
             self.ts,
             roi,
             self.voxel_size,
             self.offset,
             self.output_voxel_size,
             self.swap_axes,
+            self.custom_fill_value,
         )
+        self.ts = None
+        return res
 
     def to_ndarray_ds(self, roi=None):
         return self.ds.to_ndarray(roi)

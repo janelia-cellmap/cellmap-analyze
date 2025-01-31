@@ -23,6 +23,16 @@ class RunProperties:
         self.run_config["num_workers"] = args.num_workers
 
 
+def connected_components():
+    from cellmap_analyze.process.connected_components import ConnectedComponents
+
+    rp = RunProperties()
+    with io_util.tee_streams(rp.logpath):
+        os.chdir(rp.execution_directory)
+        contact_sites = ConnectedComponents(**rp.run_config)
+        contact_sites.get_connected_components()
+
+
 def contact_sites():
     from cellmap_analyze.process.contact_sites import ContactSites
 

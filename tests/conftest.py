@@ -4,6 +4,7 @@ from funlib.geometry import Roi
 from skimage import measure
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset
 import os
+from scipy import ndimage
 
 # pytest_plugins = [
 #     "fixtures.measure",
@@ -18,6 +19,53 @@ def image_shape():
 @pytest.fixture(scope="session")
 def chunk_size():
     return np.array((4, 4, 4))
+
+
+@pytest.fixture(scope="session")
+def image_with_holes(image_shape):
+    seg = np.zeros(image_shape, dtype=np.uint64)
+
+    # corner cube
+    seg[:3, :3, :3] = 1
+    seg[0, 0, 0] = 0  # shouldnt be filled since it is on border
+    seg[1, 1, 1] = 0  # should be filled
+
+    # hole spanning chunk
+    seg[3:7, 3:7, 3:7] = 2
+    seg[4:6, 4:6, 4:6] = 0
+
+    # two rectangles on top of eachother
+    seg[7:11, 7:11, 7:9] = 3
+    seg[7:11, 7:11, 9:11] = 4
+    seg[8:10, 8:10, 8:10] = 0  # hole between objects should be kept as a hole
+
+    return seg
+
+
+@pytest.fixture(scope="session")
+def mask_one(image_shape):
+    mask = np.zeros(image_shape, dtype=np.uint64)
+    mask[:3, :3, :3] = 1
+    mask[4:6, 2:3, 4:6] = 2
+    return mask
+
+
+@pytest.fixture(scope="session")
+def mask_two(image_shape):
+    mask = np.zeros(image_shape, dtype=np.uint64)
+    mask[7:11, 7:11, 7:9] = 1
+    mask[7:11, 7:11, 9:11] = 2
+    return mask
+
+
+@pytest.fixture(scope="session")
+def image_with_holes_filled(image_with_holes):
+    filled = np.zeros_like(image_with_holes)
+    for id in np.unique(image_with_holes[image_with_holes > 0]):
+        filled += (
+            ndimage.binary_fill_holes(image_with_holes == id).astype(np.uint64)
+        ) * id
+    return filled
 
 
 @pytest.fixture(scope="session")
@@ -56,7 +104,7 @@ def intensity_image(image_shape, chunk_size):
 
 @pytest.fixture(scope="session")
 def connected_components(intensity_image):
-    seg = measure.label(intensity_image > 0)
+    seg = measure.label(intensity_image > 0, connectivity=1)
     return seg
 
 
@@ -264,6 +312,10 @@ def tmp_zarr(tmpdir_factory):
 def test_image_dict(
     blockwise_connected_components,
     intensity_image,
+    image_with_holes,
+    image_with_holes_filled,
+    mask_one,
+    mask_two,
     segmentation_1,
     segmentation_2,
     segmentation_1_downsampled,
@@ -274,6 +326,10 @@ def test_image_dict(
     dict = {
         "blockwise_connected_components": blockwise_connected_components,
         "intensity_image": intensity_image,
+        "image_with_holes": image_with_holes,
+        "image_with_holes_filled": image_with_holes_filled,
+        "mask_one": mask_one,
+        "mask_two": mask_two,
         "segmentation_1": segmentation_1,
         "segmentation_1_downsampled": segmentation_1_downsampled,
         "segmentation_2": segmentation_2,
@@ -304,3 +360,37 @@ def write_zarrs(tmp_zarr, test_image_dict, voxel_size, chunk_size):
             write_size=chunk_size * current_voxel_size,
         )
         ds.data[:] = data
+
+
+# %%
+# import numpy as np
+# from scipy import ndimage
+
+# seg = np.zeros((11, 11, 11), dtype=np.uint64)
+
+# # corner cube
+# seg[:3, :3, :3] = 1
+# seg[0, 0, 0] = 0  # shouldnt be filled since it is on border
+# seg[1, 1, 1] = 0  # should be filled
+
+# # hole spanning chunk
+# seg[3:7, 3:7, 3:7] = 2
+# seg[4:6, 4:6, 4:6] = 0
+
+# # two rectangles on top of eachother
+# seg[7:11, 7:11, 7:9] = 3
+# seg[7:11, 7:11, 9:11] = 4
+# seg[8:10, 8:10, 8:10] = 0  # hole between objects should be kept as a hole
+
+# filled = np.zeros_like(seg)
+# for id in np.unique(seg[seg > 0]):
+#     filled += (ndimage.binary_fill_holes(seg == id).astype(np.uint64)) * id
+#     print(np.amax(filled))
+# import cellmap_analyze.util.visualization_util
+# from importlib import reload
+
+# reload(cellmap_analyze.util.visualization_util)
+# from cellmap_analyze.util.visualization_util import view_in_neuroglancer
+
+# view_in_neuroglancer(seg=seg, filled=filled)
+# %%
