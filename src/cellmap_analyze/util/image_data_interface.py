@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 import tensorstore as ts
 import numpy as np
 from funlib.geometry import Coordinate
@@ -176,6 +177,7 @@ class ImageDataInterface:
         custom_fill_value=None,
         concurrency_limit=1,
     ):
+        dataset_path = str(Path(dataset_path).resolve())
         self.path = dataset_path
         filename, dataset = split_dataset_path(dataset_path)
         self.ds = open_ds(filename, dataset, mode=mode)

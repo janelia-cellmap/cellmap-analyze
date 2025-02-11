@@ -32,6 +32,7 @@ def split_on_last_scale(string):
         # Return the original string if no match is found
         return string
 
+
 def get_name_from_path(path):
     _, data_name = split_dataset_path(path)
     if data_name.startswith("/"):
@@ -62,6 +63,9 @@ def split_dataset_path(dataset_path, scale=None) -> tuple[str, str]:
     # include scale if present
     if scale is not None:
         dataset += f"/s{scale}"
+
+    if dataset.startswith("/"):
+        dataset = dataset[1:]
 
     return filename + splitter, dataset
 
