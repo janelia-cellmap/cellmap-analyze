@@ -1,6 +1,10 @@
 import numpy as np
 from scipy.ndimage import binary_dilation, binary_erosion
 
+from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.dask_util import DaskBlock
+from funlib.segment.arrays import replace_values
+
 # SELEM = np.ones((3, 3, 3), dtype=bool)
 
 
@@ -26,13 +30,32 @@ def dilation(block, iterations, structuring_element):
     return block
 
 
-# %%
-import numpy as np
-from scipy.ndimage import binary_dilation, binary_erosion
+def relabel_block(
+    block: DaskBlock,
+    input_idi: ImageDataInterface,
+    output_idi: ImageDataInterface,
+    global_relabeling_dict=None,  # do this if you are passing dataset-wide relabeling dict
+):
+    # All ids must be accounted for in the relabeling dict
+    data = input_idi.to_ndarray_ts(
+        block.write_roi,
+    )
+    if global_relabeling_dict:
+        unique_ids = np.unique(data[data > 0])
+        block.relabeling_dict = {
+            id: global_relabeling_dict.get(id, 0) for id in unique_ids
+        }
 
-SELEM = np.ones((3, 3, 3), dtype=bool)
-a = np.zeros((7, 7), dtype=int)
-a[:6, :5] = 1
-binary_erosion(a, iterations=1)
+    if len(block.relabeling_dict) > 0:
+        try:
+            # couldn't do it inplace for large uint types because it was converting to floats
+            relabeled = np.zeros_like(data, dtype=output_idi.ds.dtype)
+            keys, values = zip(*block.relabeling_dict.items())
+            replace_values(data, list(keys), list(values), out_array=relabeled)
+            data = relabeled
+        except:
+            raise Exception(
+                f"Error in relabel_block {block.write_roi}, {list(keys)}, {list(values)}"
+            )
 
-# %%
+    output_idi.ds[block.write_roi] = data

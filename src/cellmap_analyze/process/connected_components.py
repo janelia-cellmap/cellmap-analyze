@@ -1,5 +1,3 @@
-# %%
-
 from collections import defaultdict
 import pickle
 import types
@@ -7,6 +5,7 @@ import numpy as np
 from tqdm import tqdm
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util import io_util
+from cellmap_analyze.util.block_util import relabel_block
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
     dask_computer,
@@ -28,7 +27,6 @@ import os
 from cellmap_analyze.util.mask_util import MasksFromConfig
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset
 import skimage
-from skimage.segmentation import find_boundaries
 
 
 logging.basicConfig(
@@ -462,40 +460,26 @@ class ConnectedComponents:
             del relabeling_dict
 
     @staticmethod
-    def relabel_block(
+    def relabel_block_from_path(
         block_coords,
-        connected_components_blockwise_idi: ImageDataInterface,
-        dtype,
+        input_idi: ImageDataInterface,
         output_idi: ImageDataInterface,
     ):
         # read block from pickle file
         block_coords_string = "/".join([str(c) for c in block_coords])
-        with open(
-            f"{connected_components_blockwise_idi.path}/{block_coords_string}.pkl", "rb"
-        ) as handle:
+        with open(f"{input_idi.path}/{block_coords_string}.pkl", "rb") as handle:
             block = pickle.load(handle)
-        # print_with_datetime(block.relabeling_dict, logger)
-        data = connected_components_blockwise_idi.to_ndarray_ts(
-            block.write_roi,
-        )
-
-        if len(block.relabeling_dict) > 0:
-            try:
-                # couldn't do it inplace for large uint types because it was converting to floats
-                relabeled = np.zeros_like(data, dtype=dtype)
-                keys, values = zip(*block.relabeling_dict.items())
-                replace_values(data, list(keys), list(values), out_array=relabeled)
-                data = relabeled
-            except:
-                raise Exception(
-                    f"Error in relabel_block {block_coords}, {list(keys)}, {list(values)}"
-                )
-
-        output_idi.ds[block.write_roi] = data
+        relabel_block(block, input_idi, output_idi)
 
     @staticmethod
     def relabel_dataset(
-        original_idi, output_path, blocks, roi, dtype, num_workers, compute_args
+        original_idi,
+        output_path,
+        blocks,
+        roi,
+        dtype,
+        num_workers,
+        compute_args,
     ):
         create_multiscale_dataset(
             output_path,
@@ -511,9 +495,8 @@ class ConnectedComponents:
             block_coords,
             npartitions=guesstimate_npartitions(blocks, num_workers),
         ).map(
-            ConnectedComponents.relabel_block,
+            ConnectedComponents.relabel_block_from_path,
             original_idi,
-            dtype,
             output_idi,
         )
 
@@ -605,29 +588,3 @@ class ConnectedComponents:
                 delete_tmp=self.delete_tmp,
             )
             fh.fill_holes()
-
-
-# import yaml
-# from yaml import SafeLoader
-
-# with open(
-#     "/groups/cellmap/cellmap/ackermand/cellmap-analyze-scripts/connected_components/jrc_mus-liver-zon-2/canoliculi/run-config.yaml"
-# ) as file:
-#     config = yaml.load(file, Loader=SafeLoader)
-
-# print(config)
-# cc = ConnectedComponents(num_workers=1, **config)
-# cc.get_connected_component_information()
-
-
-# ConnectedComponents.relabel_block(
-#     (19, 9, 0),
-#     ImageDataInterface(
-#         "/nrs/cellmap/ackermand/cellmap/jrc_mus-liver-zon-2/jrc_mus-liver-zon-2.zarr/canoliculi_cc_filled_holes_blockwise/s0"
-#     ),
-#     dtype=np.uint8,
-#     output_idi=None,
-# )
-
-
-# %%
