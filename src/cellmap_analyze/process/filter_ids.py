@@ -52,7 +52,7 @@ class FilterIDs:
             if type(self.ids_to_keep) == str:
                 if os.path.exists(self.ids_to_keep):
                     self.ids_to_keep = pd.read_csv(self.ids_to_keep)[
-                        "Object IDs"
+                        "Object ID"
                     ].tolist()
                 else:
                     self.ids_to_keep = [int(i) for i in self.ids_to_keep.split(",")]
