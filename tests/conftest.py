@@ -5,10 +5,7 @@ from skimage import measure
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset
 import os
 from scipy import ndimage
-
-# pytest_plugins = [
-#     "fixtures.measure",
-# ]
+import pandas as pd
 
 
 @pytest.fixture(scope="session")
@@ -299,13 +296,40 @@ def contact_sites_distance_3(image_shape):
     return cs
 
 
+import pytest
+
+
 @pytest.fixture(scope="session")
-def tmp_zarr(tmpdir_factory):
+def shared_tmpdir(tmpdir_factory):
+    """Create a shared temporary directory for all test functions."""
+    return tmpdir_factory.mktemp("tmp")
+
+
+@pytest.fixture(scope="session")
+def tmp_zarr(shared_tmpdir):
     # do it this way otherwise it appends 0 to the end of the zarr
-    base_path = tmpdir_factory.mktemp("tmp")
-    output_path = base_path + "/tmp.zarr"
+    output_path = shared_tmpdir + "/tmp.zarr"
     os.makedirs(name=output_path, exist_ok=True)
     return str(output_path)
+
+
+@pytest.fixture(
+    scope="session",
+    autouse=True,
+)
+def tmp_object_information_csv(shared_tmpdir):
+    # do it this way otherwise it appends 0 to the end of the zarr
+    output_path = shared_tmpdir + "/csvs/"
+    os.makedirs(name=output_path, exist_ok=True)
+    df = pd.DataFrame(
+        {
+            "Object ID": [1, 4],
+            "Volume (nm^3)": [100, 400],
+            "Surface Area (nm^2)": [100, 400],
+        }
+    )
+    df.to_csv(output_path + "/objects.csv", index=False)
+    return str(output_path + "/objects.csv")
 
 
 @pytest.fixture(scope="session")
@@ -360,37 +384,3 @@ def write_zarrs(tmp_zarr, test_image_dict, voxel_size, chunk_size):
             write_size=chunk_size * current_voxel_size,
         )
         ds.data[:] = data
-
-
-# %%
-# import numpy as np
-# from scipy import ndimage
-
-# seg = np.zeros((11, 11, 11), dtype=np.uint64)
-
-# # corner cube
-# seg[:3, :3, :3] = 1
-# seg[0, 0, 0] = 0  # shouldnt be filled since it is on border
-# seg[1, 1, 1] = 0  # should be filled
-
-# # hole spanning chunk
-# seg[3:7, 3:7, 3:7] = 2
-# seg[4:6, 4:6, 4:6] = 0
-
-# # two rectangles on top of eachother
-# seg[7:11, 7:11, 7:9] = 3
-# seg[7:11, 7:11, 9:11] = 4
-# seg[8:10, 8:10, 8:10] = 0  # hole between objects should be kept as a hole
-
-# filled = np.zeros_like(seg)
-# for id in np.unique(seg[seg > 0]):
-#     filled += (ndimage.binary_fill_holes(seg == id).astype(np.uint64)) * id
-#     print(np.amax(filled))
-# import cellmap_analyze.util.visualization_util
-# from importlib import reload
-
-# reload(cellmap_analyze.util.visualization_util)
-# from cellmap_analyze.util.visualization_util import view_in_neuroglancer
-
-# view_in_neuroglancer(seg=seg, filled=filled)
-# %%
