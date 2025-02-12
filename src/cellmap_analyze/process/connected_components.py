@@ -113,6 +113,11 @@ class ConnectedComponents:
                 self.connected_components_blockwise_path
             )
         self.output_path = output_path
+
+        # evaluate minimum_volume_nm_3 voxels if it is a string
+        if type(minimum_volume_nm_3) == str:
+            minimum_volume_nm_3 = float(minimum_volume_nm_3)
+
         self.minimum_volume_voxels = minimum_volume_nm_3 / np.prod(self.voxel_size)
 
         self.mask = None

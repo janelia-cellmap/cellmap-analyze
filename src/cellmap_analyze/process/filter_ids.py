@@ -8,7 +8,7 @@ from cellmap_analyze.util import io_util
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
     dask_computer,
-    guesstimate_npartitions,
+    guesstimate_npartitions
 )
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.io_util import (
