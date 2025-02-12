@@ -60,21 +60,6 @@ class FillHoles:
             self.output_path = input_path + "_filled"
 
         self.holes_path = self.output_path + "_holes"
-        # holes_blockwise_path = holes_path + "_blockwise"
-
-        # for hole_ds in [holes_path, holes_blockwise_path]:
-        #     create_multiscale_dataset(
-        #         hole_ds,
-        #         dtype=np.uint64,
-        #         voxel_size=self.voxel_size,
-        #         total_roi=self.roi,
-        #         write_size=self.input_idi.chunk_shape * self.voxel_size,
-        #     )
-        # self.holes_idi = ImageDataInterface(holes_path + "/s0", mode="r+")
-        # self.holes_blockwise_idi = ImageDataInterface(
-        #     holes_blockwise_path + "/s0", mode="r+"
-        # )
-
         self.num_workers = num_workers
         self.compute_args = {}
         if self.num_workers == 1:
@@ -282,6 +267,18 @@ class FillHoles:
             compute_args=self.compute_args,
         )
         self.relabel_dataset()
+        ConnectedComponents.delete_tmp_dataset(
+            self.holes_path + "/s0",
+            self.blocks,
+            self.num_workers,
+            self.compute_args,
+        )
+        ConnectedComponents.delete_tmp_dataset(
+            self.holes_path + "_blockwise/s0",
+            self.blocks,
+            self.num_workers,
+            self.compute_args,
+        )
 
 
 # # %%
