@@ -104,7 +104,7 @@ class FilterIDs:
             }
 
     @staticmethod
-    def get_filtered_object_ids_blockwise(block_index, input_idi: ImageDataInterface):
+    def get_object_ids_blockwise(block_index, input_idi: ImageDataInterface):
         block = create_block_from_index(
             input_idi,
             block_index,
@@ -125,14 +125,14 @@ class FilterIDs:
                 blocks += block
         return blocks
 
-    def get_filtered_object_ids(self):
+    def get_object_ids(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi)
         block_indexes = list(range(num_blocks))
         b = db.from_sequence(
             block_indexes,
             npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
         ).map(
-            FilterIDs.get_filtered_object_ids_blockwise,
+            FilterIDs.get_object_ids_blockwise,
             self.input_idi,
         )
 
@@ -158,8 +158,7 @@ class FilterIDs:
         del self.global_relabeling_dict
 
     def get_filtered_ids(self):
-        self.get_filtered_object_ids()
-        print(self.blocks)
+        self.get_object_ids()
         ConnectedComponents.write_out_block_objects(
             self.temp_block_info_path,
             self.blocks,
