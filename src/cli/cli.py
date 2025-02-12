@@ -1,8 +1,6 @@
 import os
 from cellmap_analyze.util import dask_util, io_util
 import logging
-import sys
-import importlib
 import os
 from dataclasses import dataclass
 
@@ -41,6 +39,16 @@ def contact_sites():
         os.chdir(rp.execution_directory)
         contact_sites = ContactSites(**rp.run_config)
         contact_sites.get_contact_sites()
+
+
+def filter_ids():
+    from cellmap_analyze.process.filter_ids import FilterIDs
+
+    rp = RunProperties()
+    with io_util.tee_streams(rp.logpath):
+        os.chdir(rp.execution_directory)
+        filter_ids = FilterIDs(**rp.run_config)
+        filter_ids.get_filtered_ids()
 
 
 def measure():

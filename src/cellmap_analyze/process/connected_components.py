@@ -395,10 +395,14 @@ class ConnectedComponents:
         local_config,
         num_workers,
         compute_args,
+        use_new_temp_dir=False,
     ):
-        def write_out_block_object(block, tmp_path):
+        def write_out_block_object(block, tmp_path, use_new_temp_dir=False):
             block_coords_string = "/".join([str(c) for c in block.coords])
             output_path = f"{tmp_path}/{block_coords_string}.pkl"
+            if use_new_temp_dir:
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
             # write relabeling dict to pkl file
             with open(f"{output_path}", "wb") as handle:
                 pickle.dump(block, handle, protocol=pickle.HIGHEST_PROTOCOL)
@@ -414,7 +418,7 @@ class ConnectedComponents:
                 b = db.from_sequence(
                     blocks,
                     npartitions=guesstimate_npartitions(blocks, num_workers),
-                ).map(write_out_block_object, path)
+                ).map(write_out_block_object, path, use_new_temp_dir)
                 dask_computer(b, num_local_threads_available, **compute_args)
 
     def get_final_connected_components(self):
@@ -464,10 +468,13 @@ class ConnectedComponents:
         block_coords,
         input_idi: ImageDataInterface,
         output_idi: ImageDataInterface,
+        block_info_basepath=None,
     ):
+        if block_info_basepath is None:
+            block_info_basepath = input_idi.path
         # read block from pickle file
         block_coords_string = "/".join([str(c) for c in block_coords])
-        with open(f"{input_idi.path}/{block_coords_string}.pkl", "rb") as handle:
+        with open(f"{block_info_basepath}/{block_coords_string}.pkl", "rb") as handle:
             block = pickle.load(handle)
         relabel_block(block, input_idi, output_idi)
 
@@ -480,6 +487,7 @@ class ConnectedComponents:
         dtype,
         num_workers,
         compute_args,
+        block_info_basepath=None,
     ):
         create_multiscale_dataset(
             output_path,
@@ -498,6 +506,7 @@ class ConnectedComponents:
             ConnectedComponents.relabel_block_from_path,
             original_idi,
             output_idi,
+            block_info_basepath,
         )
 
         with dask_util.start_dask(num_workers, "relabel dataset", logger):
@@ -538,8 +547,8 @@ class ConnectedComponents:
                 ):
                     dask_computer(b, num_workers, **compute_args)
 
-        base_path, _ = split_dataset_path(path_to_dataset)
-        os.system(f"rm -rf {base_path}/{get_name_from_path(path_to_dataset)}")
+        basepath, _ = split_dataset_path(path_to_dataset)
+        os.system(f"rm -rf {basepath}/{get_name_from_path(path_to_dataset)}")
 
     def get_connected_components(self):
         self.calculate_connected_comopnents_blockwise()

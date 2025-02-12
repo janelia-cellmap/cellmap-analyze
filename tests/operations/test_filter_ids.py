@@ -15,7 +15,7 @@ def test_filter_ids(ids_to_keep, tmp_zarr, image_with_holes_filled, request):
         ids_to_keep=ids_to_keep,
         num_workers=1,
     )
-    fi.filter_ids()
+    fi.get_filtered_ids()
     if type(ids_to_keep) == str:
         ids_to_keep = pd.read_csv(ids_to_keep)["Object ID"].to_list()
 

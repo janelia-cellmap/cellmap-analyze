@@ -1,6 +1,8 @@
 from typing import List, Union
 import distributed
 import numpy as np
+from tqdm import tqdm
+from cellmap_analyze.process.connected_components import ConnectedComponents
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util import io_util
 from cellmap_analyze.util.dask_util import (
@@ -56,11 +58,11 @@ class FilterIDs:
                     ].tolist()
                 else:
                     self.ids_to_keep = [int(i) for i in self.ids_to_keep.split(",")]
-            new_dtype = np.min_scalar_type(len(self.ids_to_keep))
+            self.new_dtype = np.min_scalar_type(len(self.ids_to_keep))
         if self.ids_to_remove:
             raise NotImplementedError("ids_to_remove not implemented yet")
 
-        self.relabeling_dict = dict(
+        self.global_relabeling_dict = dict(
             zip(self.ids_to_keep, range(1, len(self.ids_to_keep) + 1))
         )
 
@@ -79,18 +81,7 @@ class FilterIDs:
         output_ds_name = get_name_from_path(self.output_path)
         output_ds_basepath = split_dataset_path(self.output_path)[0]
         self.output_ds_path = f"{output_ds_basepath}/{output_ds_name}_filteredIDs"
-
-        create_multiscale_dataset(
-            self.output_ds_path,
-            dtype=new_dtype,
-            voxel_size=self.voxel_size,
-            total_roi=self.roi,
-            write_size=self.input_idi.chunk_shape * self.voxel_size,
-        )
-        self.output_idi = ImageDataInterface(
-            self.output_ds_path + "/s0",
-            mode="r+",
-        )
+        self.temp_block_info_path = self.output_ds_path + "_blocks_tmp"
 
         self.num_workers = num_workers
         self.compute_args = {}
@@ -113,45 +104,84 @@ class FilterIDs:
             }
 
     @staticmethod
-    def filter_ids_blockwise(block_index, input_idi, output_idi, relabeling_dict):
+    def get_filtered_object_ids_blockwise(block_index, input_idi: ImageDataInterface):
         block = create_block_from_index(
             input_idi,
             block_index,
         )
-        if isinstance(relabeling_dict, distributed.Future):
-            global_relabeling_dict = relabeling_dict.result()
-        else:
-            global_relabeling_dict = relabeling_dict
-        relabel_block(
-            block,
-            input_idi,
-            output_idi,
-            global_relabeling_dict=global_relabeling_dict,
-        )
+        data = input_idi.to_ndarray_ts(block.read_roi)
+        block.relabeling_dict = {id: 0 for id in np.unique(data[data > 0])}
+        return [block]
 
-    def filter_ids(self):
+    @staticmethod
+    def __combine_results(results):
+        if type(results) != list:
+            results = list(results)
+
+        for idx, block in enumerate(tqdm(results)):
+            if idx == 0:
+                blocks = block
+            else:
+                blocks += block
+        return blocks
+
+    def get_filtered_object_ids(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi)
         block_indexes = list(range(num_blocks))
+        b = db.from_sequence(
+            block_indexes,
+            npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
+        ).map(
+            FilterIDs.get_filtered_object_ids_blockwise,
+            self.input_idi,
+        )
 
         with dask_util.start_dask(
             self.num_workers,
-            "filter ids",
+            "calculate object ids",
             logger,
-        ) as client:
-            if client is not None:
-                # Client is none if doing testing
-                relabeling_dict = client.scatter(self.relabeling_dict, broadcast=True)
-            else:
-                relabeling_dict = self.relabeling_dict
+        ):
+            with io_util.Timing_Messager("Calculating object ids", logger):
+                bagged_results = dask_computer(b, self.num_workers, **self.compute_args)
 
-            b = db.from_sequence(
-                block_indexes,
-                npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
-            ).map(
-                FilterIDs.filter_ids_blockwise,
-                self.input_idi,
-                self.output_idi,
-                relabeling_dict,
-            )
-            with io_util.Timing_Messager("Filtering IDs", logger):
-                dask_computer(b, self.num_workers, **self.compute_args)
+        # moved this out of dask, seems fast enough without having to daskify
+        with io_util.Timing_Messager("Combining bagged results", logger):
+            blocks = FilterIDs.__combine_results(bagged_results)
+
+        self.blocks = [None] * num_blocks
+        for block in blocks:
+            block.relabeling_dict = {
+                id: self.global_relabeling_dict.get(id, 0)
+                for id in block.relabeling_dict.keys()
+            }
+            self.blocks[block.index] = block
+        del self.global_relabeling_dict
+
+    def get_filtered_ids(self):
+        self.get_filtered_object_ids()
+        print(self.blocks)
+        ConnectedComponents.write_out_block_objects(
+            self.temp_block_info_path,
+            self.blocks,
+            self.num_local_threads_available,
+            self.local_config,
+            self.num_workers,
+            self.compute_args,
+            use_new_temp_dir=True,
+        )
+        ConnectedComponents.relabel_dataset(
+            self.input_idi,
+            self.output_ds_path,
+            self.blocks,
+            self.roi,
+            self.new_dtype,
+            self.num_workers,
+            self.compute_args,
+            self.temp_block_info_path,
+        )
+        ConnectedComponents.delete_tmp_dataset(
+            self.temp_block_info_path,
+            self.blocks,
+            self.num_workers,
+            self.compute_args,
+        )

@@ -34,18 +34,11 @@ def relabel_block(
     block: DaskBlock,
     input_idi: ImageDataInterface,
     output_idi: ImageDataInterface,
-    global_relabeling_dict=None,  # do this if you are passing dataset-wide relabeling dict
 ):
     # All ids must be accounted for in the relabeling dict
     data = input_idi.to_ndarray_ts(
         block.write_roi,
     )
-    if global_relabeling_dict:
-        unique_ids = np.unique(data[data > 0])
-        block.relabeling_dict = {
-            id: global_relabeling_dict.get(id, 0) for id in unique_ids
-        }
-
     if len(block.relabeling_dict) > 0:
         try:
             # couldn't do it inplace for large uint types because it was converting to floats
