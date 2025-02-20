@@ -8,7 +8,7 @@ from cellmap_analyze.util import io_util
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
     dask_computer,
-    guesstimate_npartitions
+    guesstimate_npartitions,
 )
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.io_util import (
@@ -37,6 +37,7 @@ class FilterIDs:
         output_path=None,
         ids_to_keep: Union[List, str] = None,
         ids_to_remove: Union[List, str] = None,
+        binarize=False,
         roi=None,
         num_workers=10,
     ):
@@ -58,13 +59,21 @@ class FilterIDs:
                     ].tolist()
                 else:
                     self.ids_to_keep = [int(i) for i in self.ids_to_keep.split(",")]
-            self.new_dtype = np.min_scalar_type(len(self.ids_to_keep))
+            if binarize:
+                self.new_dtype = np.uint8
+            else:
+                self.new_dtype = np.min_scalar_type(len(self.ids_to_keep))
         if self.ids_to_remove:
             raise NotImplementedError("ids_to_remove not implemented yet")
 
-        self.global_relabeling_dict = dict(
-            zip(self.ids_to_keep, range(1, len(self.ids_to_keep) + 1))
-        )
+        if binarize:
+            self.global_relabeling_dict = dict(
+                zip(self.ids_to_keep, [1] * len(self.ids_to_keep))
+            )
+        else:
+            self.global_relabeling_dict = dict(
+                zip(self.ids_to_keep, range(1, len(self.ids_to_keep) + 1))
+            )
 
         self.input_path = input_path
         self.input_idi = ImageDataInterface(self.input_path)
