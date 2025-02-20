@@ -68,7 +68,7 @@ class FilterIDs:
 
         if binarize:
             self.global_relabeling_dict = dict(
-                zip(self.ids_to_keep, [1] * len(ids_to_keep))
+                zip(self.ids_to_keep, [1] * len(self.ids_to_keep))
             )
         else:
             self.global_relabeling_dict = dict(
