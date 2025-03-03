@@ -149,44 +149,44 @@ class MasksFromConfig:
 # )
 
 
-mask_config = {
-    "cells": {
-        "path": "/nrs/cellmap/data/jrc_mus-liver-zon-2/jrc_mus-liver-zon-2.zarr/recon-1/labels/inference/segmentations/cell/s0",
-        "operation": "erosion",
-        "mask_type": "exclusive",
-        "iterations": 4,
-    },
-    "ecs": {
-        "path": "/nrs/cellmap/zouinkhim/liver_zonation/jrc_mus-liver-zon-2_postprocessed_uint8.zarr/s5",
-        "mask_type": "exclusive",
-        "operation": ["erosion", "dilation"],
-        "iterations": [3, 5],
-    },
-    "raw": {
-        "path": "/nrs/cellmap/data/jrc_mus-liver-zon-2/jrc_mus-liver-zon-2.zarr/recon-1/em/fibsem-uint8/s4",
-        "mask_type": "exclusive",
-        "mask_value": 0,
-        "operation": "dilation",
-        "iterations": 10,
-    },
-}
-import numpy as np
+# mask_config = {
+#     "cells": {
+#         "path": "/nrs/cellmap/data/jrc_mus-liver-zon-2/jrc_mus-liver-zon-2.zarr/recon-1/labels/inference/segmentations/cell/s0",
+#         "operation": "erosion",
+#         "mask_type": "exclusive",
+#         "iterations": 4,
+#     },
+#     "ecs": {
+#         "path": "/nrs/cellmap/zouinkhim/liver_zonation/jrc_mus-liver-zon-2_postprocessed_uint8.zarr/s5",
+#         "mask_type": "exclusive",
+#         "operation": ["erosion", "dilation"],
+#         "iterations": [3, 5],
+#     },
+#     "raw": {
+#         "path": "/nrs/cellmap/data/jrc_mus-liver-zon-2/jrc_mus-liver-zon-2.zarr/recon-1/em/fibsem-uint8/s4",
+#         "mask_type": "exclusive",
+#         "mask_value": 0,
+#         "operation": "dilation",
+#         "iterations": 10,
+#     },
+# }
+# import numpy as np
 
-roi = Roi((32160, 40385, 19425), (128 * 200, 128 * 200, 128 * 200))
-masks = MasksFromConfig(mask_config, output_voxel_size=Coordinate(128, 128, 128))
-block = masks.process_block(roi).astype(np.uint8)
-from cellmap_analyze.util.visualization_util import view_in_neuroglancer
+# roi = Roi((32160, 40385, 19425), (128 * 200, 128 * 200, 128 * 200))
+# masks = MasksFromConfig(mask_config, output_voxel_size=Coordinate(128, 128, 128))
+# block = masks.process_block(roi).astype(np.uint8)
+# from cellmap_analyze.util.visualization_util import view_in_neuroglancer
 
-raw = ImageDataInterface(
-    "/nrs/cellmap/data/jrc_mus-liver-zon-2/jrc_mus-liver-zon-2.zarr/recon-1/em/fibsem-uint8/s4"
-)
-view_in_neuroglancer(
-    raw=raw.to_ndarray_ts(roi),
-    block=block,
-    cells=masks.mask_dict["cells"].idi.to_ndarray_ts(roi),
-    ecs=masks.mask_dict["ecs"].idi.to_ndarray_ts(roi),
-    thresholded=masks.mask_dict["raw"].process_block(roi=roi).astype(np.uint8),
-)
+# raw = ImageDataInterface(
+#     "/nrs/cellmap/data/jrc_mus-liver-zon-2/jrc_mus-liver-zon-2.zarr/recon-1/em/fibsem-uint8/s4"
+# )
+# view_in_neuroglancer(
+#     raw=raw.to_ndarray_ts(roi),
+#     block=block,
+#     cells=masks.mask_dict["cells"].idi.to_ndarray_ts(roi),
+#     ecs=masks.mask_dict["ecs"].idi.to_ndarray_ts(roi),
+#     thresholded=masks.mask_dict["raw"].process_block(roi=roi).astype(np.uint8),
+# )
 
 # %%
 # import numpy as np

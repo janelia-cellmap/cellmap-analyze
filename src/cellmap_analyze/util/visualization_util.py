@@ -26,3 +26,5 @@ def view_in_neuroglancer(**kwargs):
                 )
 
     print(viewer.get_viewer_url())
+    while True:
+        pass

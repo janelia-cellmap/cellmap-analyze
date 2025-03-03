@@ -10,19 +10,33 @@ from cellmap_analyze.util.image_data_interface import (
 )
 
 
-@pytest.mark.parametrize("minimum_volume_voxels", [0, 1, 7, 9, 64, 65])
+@pytest.mark.parametrize(
+    "minimum_volume_voxels, maximum_volume_voxels",
+    [
+        (0, np.inf),
+        (1, np.inf),
+        (7, np.inf),
+        (9, np.inf),
+        (64, np.inf),
+        (65, np.inf),
+        (4, 63),
+    ],
+)
 def test_connected_components(
     tmp_zarr,
     connected_components,
     minimum_volume_voxels,
+    maximum_volume_voxels,
     voxel_size,
 ):
     minimum_volume_nm_3 = minimum_volume_voxels * voxel_size**3
+    maximum_volume_nm_3 = maximum_volume_voxels * voxel_size**3
     cc = ConnectedComponents(
         input_path=f"{tmp_zarr}/intensity_image/s0",
-        output_path=f"{tmp_zarr}/test_connected_components_minimum_volume_nm_3_{minimum_volume_nm_3}",
+        output_path=f"{tmp_zarr}/test_connected_components_minimum_volume_nm_3_{minimum_volume_nm_3}_maximum_volume_nm_3_{maximum_volume_nm_3}",
         intensity_threshold_minimum=127,
         minimum_volume_nm_3=minimum_volume_nm_3,
+        maximum_volume_nm_3=maximum_volume_nm_3,
         num_workers=1,
         connectivity=1,
     )
@@ -33,11 +47,13 @@ def test_connected_components(
     relabeling_dict = dict(zip(uniques, [0] * len(uniques)))
     counts = counts[uniques > 0]
     uniques = uniques[uniques > 0]
-    uniques = uniques[counts >= minimum_volume_voxels]
+    uniques = uniques[
+        (counts >= minimum_volume_voxels) & (counts < maximum_volume_voxels)
+    ]
     relabeling_dict.update({k: i + 1 for i, k in enumerate(uniques)})
     ground_truth = np.vectorize(relabeling_dict.get)(ground_truth)
     test_data = ImageDataInterface(
-        f"{tmp_zarr}/test_connected_components_minimum_volume_nm_3_{minimum_volume_nm_3}/s0"
+        f"{tmp_zarr}/test_connected_components_minimum_volume_nm_3_{minimum_volume_nm_3}_maximum_volume_nm_3_{maximum_volume_nm_3}/s0"
     ).to_ndarray_ts()
     assert np.array_equal(
         test_data,
