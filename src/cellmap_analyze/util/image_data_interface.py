@@ -112,7 +112,7 @@ def to_ndarray_tensorstore(
 
     # Create an array to hold the requested data, filled with a default value (e.g., zeros)
     # output_shape = [s.stop - s.start for s in roi_slices]
-
+    # valid_slices = (slice(None),) + valid_slices, channel stuff
     if not dataset.fill_value:
         fill_value = 0
     if custom_fill_value:

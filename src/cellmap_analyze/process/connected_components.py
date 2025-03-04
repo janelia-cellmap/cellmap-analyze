@@ -48,6 +48,7 @@ class ConnectedComponents:
         connected_components_blockwise_path=None,
         roi=None,
         minimum_volume_nm_3=0,
+        maximum_volume_nm_3=np.inf,
         num_workers=10,
         connectivity=2,
         delete_tmp=False,
@@ -117,8 +118,11 @@ class ConnectedComponents:
         # evaluate minimum_volume_nm_3 voxels if it is a string
         if type(minimum_volume_nm_3) == str:
             minimum_volume_nm_3 = float(minimum_volume_nm_3)
+        if type(maximum_volume_nm_3) == str:
+            maximum_volume_nm_3 = float(maximum_volume_nm_3)
 
         self.minimum_volume_voxels = minimum_volume_nm_3 / np.prod(self.voxel_size)
+        self.maximum_volume_voxels = maximum_volume_nm_3 / np.prod(self.voxel_size)
 
         self.mask = None
         if mask_config:
@@ -212,7 +216,7 @@ class ConnectedComponents:
 
         connected_components_blockwise_idi.ds[block.write_roi] = connected_components
 
-    def calculate_connected_comopnents_blockwise(self):
+    def calculate_connected_components_blockwise(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
         block_indexes = list(range(num_blocks))
         b = db.from_sequence(
@@ -281,13 +285,13 @@ class ConnectedComponents:
 
     @staticmethod
     def volume_filter_connected_ids(
-        connected_ids, id_to_volume_dict, minimum_volume_voxels
+        connected_ids, id_to_volume_dict, minimum_volume_voxels, maximum_volume_voxels
     ):
         kept_ids = []
         removed_ids = []
         for current_connected_ids in connected_ids:
             volume = sum([id_to_volume_dict[id] for id in current_connected_ids])
-            if volume >= minimum_volume_voxels:
+            if volume >= minimum_volume_voxels and volume <= maximum_volume_voxels:
                 kept_ids.append(current_connected_ids)
             else:
                 removed_ids.append(current_connected_ids)
@@ -338,7 +342,7 @@ class ConnectedComponents:
         return dict1
 
     @staticmethod
-    def __combine_results(results):
+    def _combine_results(results):
         if type(results) is tuple:
             results = [results]
         elif isinstance(results, types.GeneratorType):
@@ -385,7 +389,7 @@ class ConnectedComponents:
         # moved this out of dask, seems fast enough without having to daskify
         with io_util.Timing_Messager("Combining bagged results", logger):
             blocks_with_dict, self.id_to_volume_dict, self.touching_ids = (
-                ConnectedComponents.__combine_results(bagged_results)
+                ConnectedComponents._combine_results(bagged_results)
             )
 
         self.blocks = [None] * num_blocks
@@ -432,12 +436,13 @@ class ConnectedComponents:
                 self.id_to_volume_dict.keys(), self.touching_ids
             )
 
-        if self.minimum_volume_voxels > 0:
+        if self.minimum_volume_voxels > 0 or self.maximum_volume_voxels < np.inf:
             with io_util.Timing_Messager("Volume filter connected", logger):
                 connected_ids, _ = ConnectedComponents.volume_filter_connected_ids(
                     connected_ids,
                     self.id_to_volume_dict,
                     self.minimum_volume_voxels,
+                    self.maximum_volume_voxels,
                 )
 
         if self.calculating_holes:
@@ -556,7 +561,7 @@ class ConnectedComponents:
         os.system(f"rm -rf {basepath}/{get_name_from_path(path_to_dataset)}")
 
     def get_connected_components(self):
-        self.calculate_connected_comopnents_blockwise()
+        self.calculate_connected_components_blockwise()
         self.merge_connected_components_across_blocks()
 
     def merge_connected_components_across_blocks(self):

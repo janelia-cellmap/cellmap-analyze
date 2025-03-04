@@ -7,6 +7,7 @@ from funlib.segment.arrays import replace_values
 
 # SELEM = np.ones((3, 3, 3), dtype=bool)
 
+# Probably want to replace this by fastmorph
 
 def erosion(block, iterations, structuring_element):
     # Erode each region, has to be done like this in case regions touch

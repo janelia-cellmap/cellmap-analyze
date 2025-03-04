@@ -31,6 +31,18 @@ def connected_components():
         contact_sites.get_connected_components()
 
 
+def clean_connected_components():
+    from cellmap_analyze.process.clean_connected_components import (
+        CleanConnectedComponents,
+    )
+
+    rp = RunProperties()
+    with io_util.tee_streams(rp.logpath):
+        os.chdir(rp.execution_directory)
+        contact_sites = CleanConnectedComponents(**rp.run_config)
+        contact_sites.clean_connected_components()
+
+
 def contact_sites():
     from cellmap_analyze.process.contact_sites import ContactSites
 
