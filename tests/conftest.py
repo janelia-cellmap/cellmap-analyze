@@ -335,6 +335,7 @@ def tmp_object_information_csv(shared_tmpdir):
 @pytest.fixture(scope="session")
 def test_image_dict(
     blockwise_connected_components,
+    connected_components,
     intensity_image,
     image_with_holes,
     image_with_holes_filled,
@@ -349,6 +350,7 @@ def test_image_dict(
 ):
     dict = {
         "blockwise_connected_components": blockwise_connected_components,
+        "connected_components": connected_components,
         "intensity_image": intensity_image,
         "image_with_holes": image_with_holes,
         "image_with_holes_filled": image_with_holes_filled,
