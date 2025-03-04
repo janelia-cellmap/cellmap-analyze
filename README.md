@@ -3,9 +3,10 @@
 This repository is a set of tools for processing and analyzing terabyte size 3D segmentation datasets using Dask. Processing tools involve reading in dataset(s) and outputting another - processed - dataset. These processing tools include the calculation of:
 
 1. `Connected Components`: includes thresholding and masking
-2. `Contact Sites`: includes setting a distance for contact sites
-3. `Filling holes`: fills holes in segmentations
-4. `Filtering ids`: filters segmented ids to remove unwanted ones.
+2. `Clean Connected Components`: tools for cleaning up an existing segmentation
+3. `Contact Sites`: includes setting a distance for contact sites
+4. `Filling holes`: fills holes in segmentations
+5. `Filtering ids`: filters segmented ids to remove unwanted ones.
 
 In addition, there are also tools for analysis of the 3D datasets including:
 
