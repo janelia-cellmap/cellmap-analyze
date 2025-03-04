@@ -55,6 +55,7 @@ def test_connected_components(
     test_data = ImageDataInterface(
         f"{tmp_zarr}/test_connected_components_minimum_volume_nm_3_{minimum_volume_nm_3}_maximum_volume_nm_3_{maximum_volume_nm_3}/s0"
     ).to_ndarray_ts()
+    print(test_data.flatten(), ground_truth.flatten())
     assert np.array_equal(
         test_data,
         ground_truth,
@@ -102,13 +103,15 @@ def test_connected_components_filled(
 
 # view_in_neuroglancer(
 #     image=ImageDataInterface(
-#         f"/tmp/pytest-of-ackermand/pytest-current/tmp0/tmp.zarr/image_with_holes/s0"
+#         f"/tmp/pytest-of-ackermand/pytest-current/tmp0/tmp.zarr/connected_components/s0"
 #     ).to_ndarray_ts(),
 #     cc=ImageDataInterface(
-#         f"/tmp/pytest-of-ackermand/pytest-current/tmp0/tmp.zarr/test_connected_components_hole_filling/s0"
+#         f"/tmp/pytest-of-ackermand/pytest-current/tmp0/tmp.zarr/test_connected_components_minimum_volume_nm_3_0_maximum_volume_nm_3_inf/s0"
 #     ).to_ndarray_ts(),
-#     new_filled=ImageDataInterface(
-#         f"/tmp/pytest-of-ackermand/pytest-current/tmp0/tmp.zarr/test_connected_components_hole_filling_filled/s0"
-#     ).to_ndarray_ts(),
+#     # new_filled=ImageDataInterface(
+#     #     f"/tmp/pytest-of-ackermand/pytest-current/tmp0/tmp.zarr/test_connected_components_hole_filling_filled/s0"
+#     # ).to_ndarray_ts(),
 # )
+# # %%
+
 # %%

@@ -27,7 +27,7 @@ from funlib.segment.arrays import replace_values
 import os
 from cellmap_analyze.util.mask_util import MasksFromConfig
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset
-import skimage
+import fastremap
 
 
 logging.basicConfig(
@@ -140,14 +140,15 @@ class CleanConnectedComponents:
             data = connected_components_blockwise_idi.to_ndarray_ts(
                 block.read_roi,
             )
-
+            # need to get these premask since during relabeling we have to assing em to zero
+            unique_ids = fastremap.unique(data)
             if mask:
                 mask_block = mask.process_block(roi=block.read_roi)
-                data &= mask_block
+                data *= mask_block
 
             # get information only from actual block(not including padding)
             id_to_volume_dict = ConnectedComponents.get_object_sizes(data)
-            block.relabeling_dict = {id: 0 for id in id_to_volume_dict.keys()}
+            block.relabeling_dict = {id: 0 for id in unique_ids}
         except:
             raise Exception(
                 f"Error in get_connected_component_information_blockwise {block_index}, {connected_components_blockwise_idi.voxel_size}"
@@ -174,6 +175,7 @@ class CleanConnectedComponents:
         ).map(
             CleanConnectedComponents.get_connected_component_information_blockwise,
             self.input_idi,
+            self.mask,
         )
 
         with dask_util.start_dask(
@@ -207,7 +209,6 @@ class CleanConnectedComponents:
                     self.minimum_volume_voxels,
                     self.maximum_volume_voxels,
                 )
-                print(old_ids)
 
         del self.id_to_volume_dict
 
@@ -252,6 +253,7 @@ class CleanConnectedComponents:
             self.num_workers,
             self.compute_args,
             block_info_basepath=self.temp_block_info_path,
+            mask=self.mask,
         )
         if self.delete_tmp:
             ConnectedComponents.delete_tmp_dataset(

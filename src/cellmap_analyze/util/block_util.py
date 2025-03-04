@@ -9,6 +9,7 @@ from funlib.segment.arrays import replace_values
 
 # Probably want to replace this by fastmorph
 
+
 def erosion(block, iterations, structuring_element):
     # Erode each region, has to be done like this in case regions touch
     eroded_image = np.zeros_like(block)
@@ -35,11 +36,16 @@ def relabel_block(
     block: DaskBlock,
     input_idi: ImageDataInterface,
     output_idi: ImageDataInterface,
+    mask=None,
 ):
     # All ids must be accounted for in the relabeling dict
     data = input_idi.to_ndarray_ts(
         block.write_roi,
     )
+    if mask:
+        mask_block = mask.process_block(roi=block.write_roi)
+        data *= mask_block
+
     if len(block.relabeling_dict) > 0:
         try:
             # couldn't do it inplace for large uint types because it was converting to floats

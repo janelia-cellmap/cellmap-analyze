@@ -6,19 +6,20 @@ from cellmap_analyze.util.zarr_util import create_multiscale_dataset
 import os
 from scipy import ndimage
 import pandas as pd
+import copy
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def image_shape():
     return np.array((11, 11, 11))
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def chunk_size():
     return np.array((4, 4, 4))
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def image_with_holes(image_shape):
     seg = np.zeros(image_shape, dtype=np.uint64)
 
@@ -39,7 +40,7 @@ def image_with_holes(image_shape):
     return seg
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def mask_one(image_shape):
     mask = np.zeros(image_shape, dtype=np.uint64)
     mask[:3, :3, :3] = 1
@@ -47,7 +48,7 @@ def mask_one(image_shape):
     return mask
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def mask_two(image_shape):
     mask = np.zeros(image_shape, dtype=np.uint64)
     mask[7:11, 7:11, 7:9] = 1
@@ -55,7 +56,7 @@ def mask_two(image_shape):
     return mask
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def image_with_holes_filled(image_with_holes):
     filled = np.zeros_like(image_with_holes)
     for id in np.unique(image_with_holes[image_with_holes > 0]):
@@ -65,7 +66,7 @@ def image_with_holes_filled(image_with_holes):
     return filled
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def blockwise_connected_components(image_shape, chunk_size):
     seg = np.zeros(image_shape, dtype=np.uint64)
     # single voxel
@@ -83,7 +84,7 @@ def blockwise_connected_components(image_shape, chunk_size):
     return seg
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def intensity_image(image_shape, chunk_size):
     seg = np.zeros(image_shape, dtype=np.uint8)
     # single voxel
@@ -99,26 +100,26 @@ def intensity_image(image_shape, chunk_size):
     return seg
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def connected_components(intensity_image):
     seg = measure.label(intensity_image > 0, connectivity=1)
     return seg
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def segmentation_1(image_shape):
     seg = np.zeros(image_shape, dtype=np.uint8)
     seg[:2, 2:10, 2:10] = 1
     return seg
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def segmentation_1_downsampled(segmentation_1):
     # take every other pixel
     return segmentation_1[::2, ::2, ::2]
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def segmentation_2(image_shape):
     seg = np.zeros(image_shape, dtype=np.uint8)
     seg[3:5, 2:5, 4:6] = 1
@@ -126,13 +127,13 @@ def segmentation_2(image_shape):
     return seg
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def contact_sites_distance_1(image_shape):
     cs = np.zeros(image_shape, dtype=np.uint64)
     return cs
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def contact_sites_distance_2(image_shape):
     cs = np.zeros(image_shape, dtype=np.uint64)
     cs[1:4, 2:5, 4:6] = 1
@@ -140,7 +141,7 @@ def contact_sites_distance_2(image_shape):
     return cs
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def contact_sites_distance_3(image_shape):
     cs = np.zeros(image_shape, dtype=np.uint64)
     nonzeros = [
@@ -299,13 +300,13 @@ def contact_sites_distance_3(image_shape):
 import pytest
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def shared_tmpdir(tmpdir_factory):
     """Create a shared temporary directory for all test functions."""
     return tmpdir_factory.mktemp("tmp")
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def tmp_zarr(shared_tmpdir):
     # do it this way otherwise it appends 0 to the end of the zarr
     output_path = shared_tmpdir + "/tmp.zarr"
@@ -314,7 +315,6 @@ def tmp_zarr(shared_tmpdir):
 
 
 @pytest.fixture(
-    scope="session",
     autouse=True,
 )
 def tmp_object_information_csv(shared_tmpdir):
@@ -332,7 +332,7 @@ def tmp_object_information_csv(shared_tmpdir):
     return str(output_path + "/objects.csv")
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def test_image_dict(
     blockwise_connected_components,
     connected_components,
@@ -366,12 +366,14 @@ def test_image_dict(
     return dict
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def voxel_size():
     return 8
 
 
-@pytest.fixture(autouse=True, scope="session")
+@pytest.fixture(
+    autouse=True,
+)
 def write_zarrs(tmp_zarr, test_image_dict, voxel_size, chunk_size):
     for data_name, data in test_image_dict.items():
         current_voxel_size = (
