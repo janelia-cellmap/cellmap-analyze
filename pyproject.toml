@@ -14,8 +14,8 @@ readme = "README.md"
 license = {file = "LICENSE.txt"}
 
 [project.scripts]
-connected-components = "cli.cli:clean_connected_components"
 connected-components = "cli.cli:connected_components"
+clean-connected-components = "cli.cli:clean_connected_components"
 contact-sites = "cli.cli:contact_sites"
 filter-ids = "cli.cli:filter_ids"
 measure = "cli.cli:measure"
