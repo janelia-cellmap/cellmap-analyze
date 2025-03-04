@@ -479,6 +479,7 @@ class ConnectedComponents:
         input_idi: ImageDataInterface,
         output_idi: ImageDataInterface,
         block_info_basepath=None,
+        mask: MasksFromConfig = None,
     ):
         if block_info_basepath is None:
             block_info_basepath = input_idi.path
@@ -486,7 +487,7 @@ class ConnectedComponents:
         block_coords_string = "/".join([str(c) for c in block_coords])
         with open(f"{block_info_basepath}/{block_coords_string}.pkl", "rb") as handle:
             block = pickle.load(handle)
-        relabel_block(block, input_idi, output_idi)
+        relabel_block(block, input_idi, output_idi, mask)
 
     @staticmethod
     def relabel_dataset(
@@ -498,6 +499,7 @@ class ConnectedComponents:
         num_workers,
         compute_args,
         block_info_basepath=None,
+        mask=None,
     ):
         create_multiscale_dataset(
             output_path,
@@ -517,6 +519,7 @@ class ConnectedComponents:
             original_idi,
             output_idi,
             block_info_basepath,
+            mask=mask,
         )
 
         with dask_util.start_dask(num_workers, "relabel dataset", logger):

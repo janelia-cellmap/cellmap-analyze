@@ -1,15 +1,8 @@
 # %%
 from scipy import ndimage
-import cellmap_analyze.util.image_data_interface
-from importlib import reload
-import cellmap_analyze.util.block_util
-
-reload(cellmap_analyze.util.image_data_interface)
-reload(cellmap_analyze.util.block_util)
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.block_util import erosion, dilation
 from functools import partial
-from funlib.geometry import Roi, Coordinate
 
 
 class Mask:
