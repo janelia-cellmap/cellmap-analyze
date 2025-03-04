@@ -114,7 +114,7 @@ def simple_contact_site_information_dict(
     return contact_site_information_dict
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def contact_site_information_dict_contact_distance_1(
     segmentation_1, segmentation_2, contact_sites_distance_1, voxel_size
 ):
@@ -123,7 +123,7 @@ def contact_site_information_dict_contact_distance_1(
     )
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def contact_site_information_dict_contact_distance_2(
     segmentation_1, segmentation_2, contact_sites_distance_2, voxel_size
 ):
@@ -132,7 +132,7 @@ def contact_site_information_dict_contact_distance_2(
     )
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def contact_site_information_dict_contact_distance_3(
     segmentation_1, segmentation_2, contact_sites_distance_3, voxel_size
 ):
