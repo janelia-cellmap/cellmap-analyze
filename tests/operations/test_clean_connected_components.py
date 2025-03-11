@@ -46,7 +46,7 @@ def test_clean_connected_components(
     )
     ccc.clean_connected_components()
 
-    ground_truth = connected_components
+    ground_truth = connected_components.copy()
     if use_mask:
         ground_truth *= mask_one > 0
 

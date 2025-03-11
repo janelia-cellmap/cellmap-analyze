@@ -42,7 +42,7 @@ def test_connected_components(
     )
     cc.get_connected_components()
 
-    ground_truth = connected_components
+    ground_truth = connected_components.copy()
     uniques, counts = np.unique(ground_truth, return_counts=True)
     relabeling_dict = dict(zip(uniques, [0] * len(uniques)))
     counts = counts[uniques > 0]
