@@ -71,3 +71,15 @@ def measure():
         os.chdir(rp.execution_directory)
         measure = Measure(**rp.run_config)
         measure.get_measurements()
+
+
+def fit_lines_to_segmentations():
+    from cellmap_analyze.analyze.fit_lines_to_segmentations import (
+        FitLinesToSegmentations,
+    )
+
+    rp = RunProperties()
+    with io_util.tee_streams(rp.logpath):
+        os.chdir(rp.execution_directory)
+        fit_lines = FitLinesToSegmentations(**rp.run_config)
+        fit_lines.get_fit_lines_to_segmentations()

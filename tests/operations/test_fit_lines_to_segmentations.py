@@ -1,4 +1,4 @@
-from cellmap_analyze.analyze.fit_lines_to_segmentation import FitLinesToSegmentations
+from cellmap_analyze.analyze.fit_lines_to_segmentations import FitLinesToSegmentations
 
 import numpy as np
 import pandas as pd
@@ -15,7 +15,7 @@ def test_fit_lines_to_segmentations(
 
     cc = FitLinesToSegmentations(
         input_csv=tmp_cylinders_information_csv,
-        segmentation_ds_path=f"{tmp_zarr}/segmentation_cylinders/s0",
+        input_path=f"{tmp_zarr}/segmentation_cylinders/s0",
         output_annotations_dir=f"{shared_tmpdir}/annotations/",
         num_workers=1,
     )

@@ -25,13 +25,13 @@ class FitLinesToSegmentations:
     def __init__(
         self,
         input_csv,
-        segmentation_ds_path,
+        input_path,
         output_csv=None,
         output_annotations_dir=None,
         num_workers=8,
     ):
         self.df = pd.read_csv(input_csv)  # , nrows=1000)
-        self.segmentation_idi = ImageDataInterface(segmentation_ds_path)
+        self.segmentation_idi = ImageDataInterface(input_path)
         self.voxel_size = self.segmentation_idi.voxel_size
         self.num_workers = num_workers
         self.output_csv = output_csv
