@@ -1,12 +1,17 @@
-from funlib.persistence import open_ds
+# %%
 from funlib.geometry import Roi
 import numpy as np
-from cellmap_analyze.util import dask_util
+from cellmap_analyze.util.dask_util import (
+    dask_computer,
+    guesstimate_npartitions,
+    start_dask,
+)
 from cellmap_analyze.util import io_util
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 import logging
 import pandas as pd
 import dask.dataframe as dd
+from cellmap_analyze.util.neuroglancer_util import write_out_annotations
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -16,11 +21,27 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class FitLinesToSegmentation:
-    def __init__(self, input_csv, segmentation_ds_path, num_workers=8):
+class FitLinesToSegmentations:
+    def __init__(
+        self,
+        input_csv,
+        segmentation_ds_path,
+        output_csv=None,
+        output_annotations_dir=None,
+        num_workers=8,
+    ):
         self.df = pd.read_csv(input_csv)  # , nrows=1000)
         self.segmentation_idi = ImageDataInterface(segmentation_ds_path)
+        self.voxel_size = self.segmentation_idi.voxel_size
         self.num_workers = num_workers
+        self.output_csv = output_csv
+        if self.output_csv is None:
+            self.output_csv = input_csv.replace(".csv", "_lines.csv")
+
+        self.output_annotations_dir = output_annotations_dir
+        self.compute_args = {}
+        if self.num_workers == 1:
+            self.compute_args = {"scheduler": "single-threaded"}
 
     @staticmethod
     def find_min_max_projected_points(points, line_point, line_direction):
@@ -50,14 +71,14 @@ class FitLinesToSegmentation:
         )
 
     @staticmethod
-    def fit_line_to_points(points, voxel_size, offset, line_origin=0):
+    def fit_line_to_points(points, voxel_size, offset, line_origin):
         # fit line to object voxels
         _, _, vv = np.linalg.svd(points - np.mean(points, axis=0), full_matrices=False)
         line_direction = vv[0]
 
         # find endpoints of line segment so that we can write it as neuroglancer annotations
-        start_point, end_point = FitLinesToSegmentation.find_min_max_projected_points(
-            points * voxel_size - voxel_size / 2 + offset,
+        start_point, end_point = FitLinesToSegmentations.find_min_max_projected_points(
+            points * voxel_size + offset,
             line_origin,
             line_direction,
         )
@@ -67,7 +88,7 @@ class FitLinesToSegmentation:
     @staticmethod
     def fit_line_to_object(data, id, voxel_size, offset, com):
         points = np.column_stack(np.where(data == id))
-        start_point, end_point = FitLinesToSegmentation.fit_line_to_points(
+        start_point, end_point = FitLinesToSegmentations.fit_line_to_points(
             points, voxel_size, offset, com
         )
         return start_point, end_point
@@ -84,7 +105,7 @@ class FitLinesToSegmentation:
                 box_min - self.voxel_size, (box_max - box_min) + self.voxel_size * 2
             )
             data = self.segmentation_idi.to_ndarray_ts(roi)
-            line_start, line_end = FitLinesToSegmentation.fit_line_to_object(
+            line_start, line_end = FitLinesToSegmentations.fit_line_to_object(
                 data, id, self.voxel_size, roi.offset, com=com
             )
             result_df = pd.DataFrame([row])
@@ -99,19 +120,32 @@ class FitLinesToSegmentation:
         results_df = pd.concat(results_df, ignore_index=True)
         return results_df
 
-    def get_fit_lines_to_objects(self):
+    def get_fit_lines_to_segmentations(self):
         # append column with default values to df
         for s_e in ["Start", "End"]:
             for dim in ["Z", "Y", "X"]:
                 self.df[f"Line {s_e} {dim} (nm)"] = np.NaN
 
-        ddf = dd.from_pandas(self.df, npartitions=self.num_workers * 10)
+        ddf = dd.from_pandas(
+            self.df, npartitions=guesstimate_npartitions(self.df, self.num_workers)
+        )
 
         meta = pd.DataFrame(columns=self.df.columns)
         ddf_out = ddf.map_partitions(self.fit_lines_to_objects, meta=meta)
-        with dask_util.start_dask(
-            min(len(self.df), self.num_workers), "line fits", logger
-        ):
+        with start_dask(self.num_workers, "line fits", logger):
             with io_util.Timing_Messager("Fitting lines", logger):
-                results = ddf_out.compute()
-        self.results = results
+                # results = ddf_out.compute()
+                df = dask_computer(ddf_out, self.num_workers, **self.compute_args)
+
+        df.to_csv(self.output_csv, index=False)
+
+        if self.output_annotations_dir is not None:
+            with io_util.Timing_Messager("Writing annotations", logger):
+                cols = [f"Line Start {d} (nm)" for d in ["Z", "Y", "X"]] + [
+                    f"Line End {d} (nm)" for d in ["Z", "Y", "X"]
+                ]
+                write_out_annotations(
+                    self.output_annotations_dir,
+                    df["Object ID"].values,
+                    df[cols].to_numpy(),
+                )

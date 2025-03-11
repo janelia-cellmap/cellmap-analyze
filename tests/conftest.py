@@ -6,20 +6,40 @@ from cellmap_analyze.util.zarr_util import create_multiscale_dataset
 import os
 from scipy import ndimage
 import pandas as pd
-import copy
+from tests.operations.test_measure import simple_object_information_dict
 
 
-@pytest.fixture()
+@pytest.fixture(autouse=True, scope="session")
+def voxel_size():
+    return 8
+
+
+@pytest.fixture(scope="session")
+def horizontal_cylinder_endpoints(voxel_size):
+    return np.array([[46, 3, 3], [46, 3, 40]]) * 8 + 0.5 * voxel_size
+
+
+@pytest.fixture(scope="session")
+def vertical_cylinder_endpoints(voxel_size):
+    return np.array([[2, 2, 2], [2, 48, 2]]) * voxel_size + 0.5 * voxel_size
+
+
+@pytest.fixture(scope="session")
+def diagonal_cylinder_endpoints(voxel_size):
+    return np.array([[45, 45, 5], [5, 5, 45]]) * voxel_size + 0.5 * voxel_size
+
+
+@pytest.fixture(scope="session")
 def image_shape():
     return np.array((11, 11, 11))
 
 
-@pytest.fixture()
+@pytest.fixture(scope="session")
 def chunk_size():
     return np.array((4, 4, 4))
 
 
-@pytest.fixture()
+@pytest.fixture(scope="session")
 def image_with_holes(image_shape):
     seg = np.zeros(image_shape, dtype=np.uint64)
 
@@ -40,7 +60,7 @@ def image_with_holes(image_shape):
     return seg
 
 
-@pytest.fixture()
+@pytest.fixture(scope="session")
 def mask_one(image_shape):
     mask = np.zeros(image_shape, dtype=np.uint64)
     mask[:3, :3, :3] = 1
@@ -48,7 +68,7 @@ def mask_one(image_shape):
     return mask
 
 
-@pytest.fixture()
+@pytest.fixture(scope="session")
 def mask_two(image_shape):
     mask = np.zeros(image_shape, dtype=np.uint64)
     mask[7:11, 7:11, 7:9] = 1
@@ -56,7 +76,7 @@ def mask_two(image_shape):
     return mask
 
 
-@pytest.fixture()
+@pytest.fixture(scope="session")
 def image_with_holes_filled(image_with_holes):
     filled = np.zeros_like(image_with_holes)
     for id in np.unique(image_with_holes[image_with_holes > 0]):
@@ -66,7 +86,7 @@ def image_with_holes_filled(image_with_holes):
     return filled
 
 
-@pytest.fixture()
+@pytest.fixture(scope="session")
 def blockwise_connected_components(image_shape, chunk_size):
     seg = np.zeros(image_shape, dtype=np.uint64)
     # single voxel
@@ -84,7 +104,7 @@ def blockwise_connected_components(image_shape, chunk_size):
     return seg
 
 
-@pytest.fixture()
+@pytest.fixture(scope="session")
 def intensity_image(image_shape, chunk_size):
     seg = np.zeros(image_shape, dtype=np.uint8)
     # single voxel
@@ -100,26 +120,111 @@ def intensity_image(image_shape, chunk_size):
     return seg
 
 
-@pytest.fixture()
+@pytest.fixture(scope="session")
 def connected_components(intensity_image):
     seg = measure.label(intensity_image > 0, connectivity=1)
     return seg
 
 
-@pytest.fixture()
+@pytest.fixture(scope="session")
+def segmentation_cylinders(
+    horizontal_cylinder_endpoints,
+    vertical_cylinder_endpoints,
+    diagonal_cylinder_endpoints,
+    voxel_size,
+):
+    def fill_in_cylinder(seg, endpoints, radius, id):
+        # subtract 0.5 so that an annotation centered at a voxel matches to eg 0,0,0
+        end_2 = endpoints[0] - 0.5
+        end_1 = endpoints[1] - 0.5
+        # https://stackoverflow.com/questions/56463412/distance-from-a-point-to-a-line-segment-in-3d-python
+        # normalized tangent vector
+        d = np.divide(end_2 - end_1, np.linalg.norm(end_2 - end_1))
+
+        # possible points
+        mins = np.floor(np.minimum(end_1, end_2)).astype(int) - (
+            np.ceil(radius).astype(int) + 1
+        )  # 1s for padding
+        maxs = np.ceil(np.maximum(end_1, end_2)).astype(int) + (
+            np.ceil(radius).astype(int) + 1
+        )
+
+        z, y, x = [list(range(mins[i], maxs[i] + 1, 1)) for i in range(3)]
+        p = np.array(np.meshgrid(z, y, x)).T.reshape((-1, 3))
+
+        # signed parallel distance components
+        s = np.dot(end_1 - p, d)
+        t = np.dot(p - end_2, d)
+
+        # clamped parallel distance
+        h = np.maximum.reduce([s, t, np.zeros_like(s)])
+
+        # perpendicular distance component
+        c = np.linalg.norm(np.cross(p - end_1, d), axis=1)
+
+        is_in_cylinder = (h == 0) & (c <= radius)
+        voxels_in_cylinder = p[is_in_cylinder]
+        seg[
+            voxels_in_cylinder[:, 0], voxels_in_cylinder[:, 1], voxels_in_cylinder[:, 2]
+        ] = id
+
+    # need to use larger to get better chance of fitting
+    seg = np.zeros((50, 50, 50), dtype=np.uint8)
+    # horizontal cylinder
+    fill_in_cylinder(seg, horizontal_cylinder_endpoints / voxel_size, 1, 1)
+    # vertical cylinder
+    fill_in_cylinder(seg, vertical_cylinder_endpoints / voxel_size, 1.5, 2)
+    # diagonal
+    fill_in_cylinder(seg, diagonal_cylinder_endpoints / voxel_size, 2, 3)
+
+    return seg
+
+
+@pytest.fixture(autouse=True, scope="session")
+def tmp_cylinders_information_csv(segmentation_cylinders, shared_tmpdir, voxel_size):
+    output_path = shared_tmpdir + "/csvs/"
+    os.makedirs(name=output_path, exist_ok=True)
+    cylinder_information_dict = simple_object_information_dict(
+        segmentation_cylinders, voxel_size
+    )
+    # create dataframe
+    columns = ["Object ID", "Volume (nm^3)", "Surface Area (nm^2)"]
+    for category in ["COM", "MIN", "MAX"]:
+        for d in ["X", "Y", "Z"]:
+            columns.append(f"{category} {d} (nm)")
+    df = pd.DataFrame(
+        index=np.arange(len(cylinder_information_dict)),
+        columns=columns,
+    )
+    for i, (id, oi) in enumerate(cylinder_information_dict.items()):
+        row = [
+            id,
+            oi.volume,
+            oi.surface_area,
+            *oi.com[::-1],
+            *oi.bounding_box[:3][::-1],
+            *oi.bounding_box[3:][::-1],
+        ]
+        df.loc[i] = row
+
+    df.to_csv(output_path + "/cylinders.csv", index=False)
+    return str(output_path + "/cylinders.csv")
+
+
+@pytest.fixture(scope="session")
 def segmentation_1(image_shape):
     seg = np.zeros(image_shape, dtype=np.uint8)
     seg[:2, 2:10, 2:10] = 1
     return seg
 
 
-@pytest.fixture()
+@pytest.fixture(scope="session")
 def segmentation_1_downsampled(segmentation_1):
     # take every other pixel
     return segmentation_1[::2, ::2, ::2]
 
 
-@pytest.fixture()
+@pytest.fixture(scope="session")
 def segmentation_2(image_shape):
     seg = np.zeros(image_shape, dtype=np.uint8)
     seg[3:5, 2:5, 4:6] = 1
@@ -127,13 +232,13 @@ def segmentation_2(image_shape):
     return seg
 
 
-@pytest.fixture()
+@pytest.fixture(scope="session")
 def contact_sites_distance_1(image_shape):
     cs = np.zeros(image_shape, dtype=np.uint64)
     return cs
 
 
-@pytest.fixture()
+@pytest.fixture(scope="session")
 def contact_sites_distance_2(image_shape):
     cs = np.zeros(image_shape, dtype=np.uint64)
     cs[1:4, 2:5, 4:6] = 1
@@ -141,7 +246,7 @@ def contact_sites_distance_2(image_shape):
     return cs
 
 
-@pytest.fixture()
+@pytest.fixture(scope="session")
 def contact_sites_distance_3(image_shape):
     cs = np.zeros(image_shape, dtype=np.uint64)
     nonzeros = [
@@ -300,13 +405,13 @@ def contact_sites_distance_3(image_shape):
 import pytest
 
 
-@pytest.fixture()
+@pytest.fixture(scope="session")
 def shared_tmpdir(tmpdir_factory):
     """Create a shared temporary directory for all test functions."""
     return tmpdir_factory.mktemp("tmp")
 
 
-@pytest.fixture()
+@pytest.fixture(scope="session")
 def tmp_zarr(shared_tmpdir):
     # do it this way otherwise it appends 0 to the end of the zarr
     output_path = shared_tmpdir + "/tmp.zarr"
@@ -314,9 +419,7 @@ def tmp_zarr(shared_tmpdir):
     return str(output_path)
 
 
-@pytest.fixture(
-    autouse=True,
-)
+@pytest.fixture(autouse=True, scope="session")
 def tmp_object_information_csv(shared_tmpdir):
     # do it this way otherwise it appends 0 to the end of the zarr
     output_path = shared_tmpdir + "/csvs/"
@@ -332,7 +435,7 @@ def tmp_object_information_csv(shared_tmpdir):
     return str(output_path + "/objects.csv")
 
 
-@pytest.fixture()
+@pytest.fixture(scope="session")
 def test_image_dict(
     blockwise_connected_components,
     connected_components,
@@ -343,6 +446,7 @@ def test_image_dict(
     mask_two,
     segmentation_1,
     segmentation_2,
+    segmentation_cylinders,
     segmentation_1_downsampled,
     contact_sites_distance_1,
     contact_sites_distance_2,
@@ -357,6 +461,7 @@ def test_image_dict(
         "mask_one": mask_one,
         "mask_two": mask_two,
         "segmentation_1": segmentation_1,
+        "segmentation_cylinders": segmentation_cylinders,
         "segmentation_1_downsampled": segmentation_1_downsampled,
         "segmentation_2": segmentation_2,
         "contact_sites_distance_1": contact_sites_distance_1,
@@ -366,25 +471,24 @@ def test_image_dict(
     return dict
 
 
-@pytest.fixture()
-def voxel_size():
-    return 8
-
-
-@pytest.fixture(
-    autouse=True,
-)
+@pytest.fixture(autouse=True, scope="session")
 def write_zarrs(tmp_zarr, test_image_dict, voxel_size, chunk_size):
     for data_name, data in test_image_dict.items():
         current_voxel_size = (
             voxel_size if "downsampled" not in data_name else 2 * voxel_size
         )
         data_path = f"{tmp_zarr}/{data_name}"
+
+        # use larger chunk size for segmentation_cylinders since we had to make it bigger
         ds = create_multiscale_dataset(
             data_path,
             dtype=np.uint8,
             voxel_size=(3 * [current_voxel_size]),
             total_roi=Roi((0, 0, 0), np.array(data.shape) * current_voxel_size),
-            write_size=chunk_size * current_voxel_size,
+            write_size=(
+                chunk_size * current_voxel_size
+                if data_name is not "segmentation_cylinders"
+                else np.array((20, 20, 20)) * voxel_size
+            ),
         )
         ds.data[:] = data
