@@ -66,6 +66,12 @@ def to_ndarray_tensorstore(
     Returns:
         Numpy array of the region
     """
+
+    if output_voxel_size is None:
+        output_voxel_size = voxel_size
+
+    rescale_factor = voxel_size[0] / output_voxel_size[0]
+
     if swap_axes:
         print("Swapping axes")
         if roi:
@@ -75,20 +81,22 @@ def to_ndarray_tensorstore(
 
     if roi is None:
         with ts.Transaction() as txn:
-            return dataset.with_transaction(txn).read().result()
+            data = dataset.with_transaction(txn).read().result()
+        if rescale_factor > 1:
+            data = (
+                data.repeat(rescale_factor, 0)
+                .repeat(rescale_factor, 1)
+                .repeat(rescale_factor, 2)
+            )
+        return data
 
     if offset is None:
         offset = Coordinate(np.zeros(roi.dims, dtype=int))
 
-    if output_voxel_size is None:
-        output_voxel_size = voxel_size
-
-    rescale_factor = 1
     if voxel_size != output_voxel_size:
         # in the case where there is a mismatch in voxel sizes, we may need to extra pad to ensure that the output is a multiple of the output voxel size
         original_roi = roi
         roi = original_roi.snap_to_grid(voxel_size)
-        rescale_factor = voxel_size[0] / output_voxel_size[0]
         snapped_offset = (original_roi.begin - roi.begin) / output_voxel_size
         snapped_end = (original_roi.end - roi.begin) / output_voxel_size
         snapped_slices = tuple(
