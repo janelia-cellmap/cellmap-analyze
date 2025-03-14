@@ -26,8 +26,7 @@ from funlib.segment.arrays import replace_values
 import os
 from cellmap_analyze.util.mask_util import MasksFromConfig
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset
-import skimage
-
+import cc3d
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -189,13 +188,16 @@ class ConnectedComponents:
             mask_block = mask.process_block(roi=block.read_roi)
             thresholded &= mask_block
 
-        connected_components = skimage.measure.label(
-            thresholded, connectivity=connectivity
+        connected_components = cc3d.connected_components(
+            thresholded,
+            connectivity=6 + 12 * (connectivity >= 2) + 8 * (connectivity >= 3),
+            binary_image=True,
         )
 
         global_id_offset = block_index * np.prod(
             block.full_block_size / connected_components_blockwise_idi.voxel_size[0]
         )
+
         connected_components[connected_components > 0] += global_id_offset
 
         if calculating_holes and block.read_roi.shape != block.read_roi.intersect(

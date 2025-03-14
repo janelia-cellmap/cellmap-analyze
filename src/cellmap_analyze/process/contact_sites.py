@@ -19,6 +19,7 @@ from cellmap_analyze.util.measure_util import trim_array
 from cellmap_analyze.util.zarr_util import (
     create_multiscale_dataset,
 )
+import cc3d
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -144,8 +145,10 @@ class ContactSites:
 
         if found_contact_voxels:
             # need connectivity of 3 due to bresenham allowing diagonals
-            current_pair_contact_sites = measure.label(
-                current_pair_contact_sites, connectivity=3
+            current_pair_contact_sites = cc3d.connected_components(
+                current_pair_contact_sites,
+                connectivity=26,
+                binary_image=True,
             )
 
         if zero_pad:
