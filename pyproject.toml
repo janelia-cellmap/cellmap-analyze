@@ -1,13 +1,16 @@
+[build-system]
+requires = ["setuptools>=61", "wheel", "Cython>=0.29"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "cellmap-analyze"
 version = "0.0.1"
-
 requires-python = ">=3.10"
 authors = [
-  {name = "David Ackerman", email = "ackermand@janelia.hhmi.org"},
+    {name = "David Ackerman", email = "ackermand@janelia.hhmi.org"},
 ]
 maintainers = [
-  {name = "David Ackerman", email = "ackermand@janelia.hhmi.org"},
+    {name = "David Ackerman", email = "ackermand@janelia.hhmi.org"},
 ]
 description = "Code to perform analysis on segmentations like those produced by CellMap"
 readme = "README.md"
@@ -20,4 +23,3 @@ contact-sites = "cli.cli:contact_sites"
 filter-ids = "cli.cli:filter_ids"
 measure = "cli.cli:measure"
 fit-lines-to-segmentations = "cli.cli:fit_lines_to_segmentations"
-
