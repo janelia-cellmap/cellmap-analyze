@@ -198,6 +198,12 @@ class ImageDataInterface:
         self.chunk_shape = self.ds.chunk_shape
         self.roi = self.ds.roi
         self.offset = self.ds.roi.offset
+
+        if "voxel_size" in self.ds.data.attrs:
+            self.voxel_size = Coordinate(self.ds.data.attrs["voxel_size"])
+            self.roi *= self.voxel_size
+            self.offset *= self.voxel_size
+
         self.custom_fill_value = custom_fill_value
         self.concurrency_limit = concurrency_limit
         if output_voxel_size is not None:

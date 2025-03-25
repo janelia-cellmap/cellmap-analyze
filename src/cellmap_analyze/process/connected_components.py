@@ -82,10 +82,12 @@ class ConnectedComponents:
         self.voxel_size = template_idi.voxel_size
 
         self.do_full_connected_components = False
+        output_ds_name = get_name_from_path(output_path)
+        output_ds_basepath = split_dataset_path(output_path)[0]
+        os.makedirs(output_ds_basepath, exist_ok=True)
+
         if input_path:
             self.input_path = input_path
-            output_ds_name = get_name_from_path(output_path)
-            output_ds_basepath = split_dataset_path(output_path)[0]
             self.connected_components_blockwise_path = (
                 output_ds_basepath + "/" + output_ds_name + "_blockwise"
             )
@@ -192,6 +194,7 @@ class ConnectedComponents:
             thresholded,
             connectivity=6 + 12 * (connectivity >= 2) + 8 * (connectivity >= 3),
             binary_image=True,
+            out_dtype=np.uint64,
         )
 
         global_id_offset = block_index * np.prod(
