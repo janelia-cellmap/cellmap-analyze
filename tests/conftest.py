@@ -487,7 +487,7 @@ def write_zarrs(tmp_zarr, test_image_dict, voxel_size, chunk_size):
             total_roi=Roi((0, 0, 0), np.array(data.shape) * current_voxel_size),
             write_size=(
                 chunk_size * current_voxel_size
-                if data_name is not "segmentation_cylinders"
+                if data_name != "segmentation_cylinders"
                 else np.array((20, 20, 20)) * voxel_size
             ),
         )
