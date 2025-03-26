@@ -172,6 +172,7 @@ def segmentation_cylinders(
     seg = np.zeros((50, 50, 50), dtype=np.uint8)
     # horizontal cylinder
     fill_in_cylinder(seg, horizontal_cylinder_endpoints / voxel_size, 1, 1)
+    seg[0, 0, 0] = 1  # add apurious voxel
     # vertical cylinder
     fill_in_cylinder(seg, vertical_cylinder_endpoints / voxel_size, 1.5, 2)
     # diagonal

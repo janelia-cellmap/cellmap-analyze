@@ -12,6 +12,8 @@ import logging
 import pandas as pd
 import dask.dataframe as dd
 from cellmap_analyze.util.neuroglancer_util import write_out_annotations
+import fastremap
+import cc3d
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -86,8 +88,13 @@ class FitLinesToSegmentations:
         return start_point, end_point
 
     @staticmethod
-    def fit_line_to_object(data, id, voxel_size, offset, com):
+    def fit_line_to_object(data, id, voxel_size, offset):
+        # only take largest component
+        data = cc3d.connected_components(data == id, connectivity=6, binary_image=True)
+        ids, counts = fastremap.unique(data[data > 0], return_counts=True)
+        id = ids[np.argmax(counts)]
         points = np.column_stack(np.where(data == id))
+        com = np.mean(points, axis=0) * voxel_size + offset
         start_point, end_point = FitLinesToSegmentations.fit_line_to_points(
             points, voxel_size, offset, com
         )
@@ -99,14 +106,13 @@ class FitLinesToSegmentations:
             id = row["Object ID"]
             box_min = np.array([row[f"MIN {d} (nm)"] for d in ["Z", "Y", "X"]])
             box_max = np.array([row[f"MAX {d} (nm)"] for d in ["Z", "Y", "X"]])
-            com = np.array([row[f"COM {d} (nm)"] for d in ["Z", "Y", "X"]])
             # define an roi to actually ecompass the bounding box
             roi = Roi(
                 box_min - self.voxel_size, (box_max - box_min) + self.voxel_size * 2
             )
             data = self.segmentation_idi.to_ndarray_ts(roi)
             line_start, line_end = FitLinesToSegmentations.fit_line_to_object(
-                data, id, self.voxel_size, roi.offset, com=com
+                data, id, self.voxel_size, roi.offset
             )
             result_df = pd.DataFrame([row])
 
