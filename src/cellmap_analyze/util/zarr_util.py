@@ -99,10 +99,9 @@ def create_multiscale_dataset(
         total_roi=total_roi,
         write_size=write_size,
         force_exact_write_size=True,
-        multiscales_metadata=True,
+        multiscales_metadata=False,
         delete=mode == "w",
     )
-
     write_multiscales_metadata(
         filename + "/" + dataset.rsplit(f"/s{scale}")[0],
         f"s{scale}",
