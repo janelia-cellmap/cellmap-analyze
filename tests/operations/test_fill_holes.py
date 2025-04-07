@@ -1,4 +1,3 @@
-import pytest
 from cellmap_analyze.process.fill_holes import FillHoles
 
 import numpy as np

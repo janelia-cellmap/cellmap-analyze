@@ -6,7 +6,6 @@ import getpass
 import tempfile
 import shutil
 
-from distributed import progress
 
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from .io_util import Timing_Messager, print_with_datetime

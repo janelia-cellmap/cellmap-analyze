@@ -22,7 +22,7 @@ from skimage.graph import pixel_graph
 import networkx as nx
 import dask.bag as db
 import itertools
-from funlib.segment.arrays import replace_values
+import fastremap
 import os
 from cellmap_analyze.util.mask_util import MasksFromConfig
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset
@@ -198,7 +198,8 @@ class ConnectedComponents:
         )
 
         global_id_offset = block_index * np.prod(
-            block.full_block_size / connected_components_blockwise_idi.voxel_size[0]
+            block.full_block_size / connected_components_blockwise_idi.voxel_size[0],
+            dtype=np.uint64,
         )
 
         connected_components[connected_components > 0] += global_id_offset
@@ -208,16 +209,18 @@ class ConnectedComponents:
         ):
             idxs = np.where(input == oob_value)
             if len(idxs) > 0:
-                # couldnt do inplace for large uint types because it was converting to floats
-                relabeled = connected_components.copy()
-                ids_to_set_to_zero = np.unique(connected_components[idxs])
-                replace_values(
+                ids_to_set_to_zero = fastremap.unique(connected_components[idxs])
+                fastremap.remap(
                     connected_components,
-                    list(ids_to_set_to_zero),
-                    [oob_value] * len(ids_to_set_to_zero),
-                    out_array=relabeled,
+                    dict(
+                        zip(
+                            list(ids_to_set_to_zero),
+                            [oob_value] * len(ids_to_set_to_zero),
+                        )
+                    ),
+                    preserve_missing_labels=True,
+                    in_place=True,
                 )
-                connected_components = relabeled
 
         connected_components_blockwise_idi.ds[block.write_roi] = connected_components
 

@@ -1,5 +1,4 @@
 from typing import List, Union
-import distributed
 import numpy as np
 from tqdm import tqdm
 from cellmap_analyze.process.connected_components import ConnectedComponents
@@ -18,9 +17,7 @@ from cellmap_analyze.util.io_util import (
 import logging
 import dask.bag as db
 import os
-from cellmap_analyze.util.zarr_util import create_multiscale_dataset
 import pandas as pd
-from cellmap_analyze.util.block_util import relabel_block
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",

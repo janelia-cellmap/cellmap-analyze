@@ -1,3 +1,6 @@
+![CI](https://github.com/janelia-cellmap/cellmap-analyze/actions/workflows/python.yml/badge.svg)
+[![codecov](https://codecov.io/gh/janelia-cellmap/cellmap-analyze/branch/refactor_for_release/graph/badge.svg)](https://codecov.io/gh/janelia-cellmap/cellmap-analyze)
+
 # Tools For Analyzing Large 3D Datasets
 
 This repository is a set of tools for processing and analyzing terabyte size 3D segmentation datasets using Dask. Processing tools involve reading in dataset(s) and outputting another - processed - dataset. These processing tools include the calculation of:

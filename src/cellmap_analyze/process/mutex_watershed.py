@@ -286,7 +286,8 @@ class MutexWatershed:
         )
 
         global_id_offset = block_index * np.prod(
-            block.full_block_size / connected_components_blockwise_idi.voxel_size[0]
+            block.full_block_size / connected_components_blockwise_idi.voxel_size[0],
+            dtype=np.uint64,
         )
         segmentation[segmentation > 0] += global_id_offset
         connected_components_blockwise_idi.ds[block.write_roi] = segmentation[

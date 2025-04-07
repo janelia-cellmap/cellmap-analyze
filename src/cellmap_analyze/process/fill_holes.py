@@ -1,4 +1,3 @@
-from collections import defaultdict
 import pickle
 import types
 import numpy as np
@@ -12,20 +11,12 @@ from cellmap_analyze.util.dask_util import (
     guesstimate_npartitions,
 )
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
-from cellmap_analyze.util.io_util import (
-    get_name_from_path,
-    split_dataset_path,
-)
 
 import logging
-from skimage.graph import pixel_graph
-import networkx as nx
 import dask.bag as db
-import itertools
-from funlib.segment.arrays import replace_values
+import fastremap
 import os
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset
-import skimage
 from skimage.segmentation import find_boundaries
 from .connected_components import ConnectedComponents
 
@@ -208,11 +199,12 @@ class FillHoles:
         holes = holes_idi.to_ndarray_ts(block.write_roi)
 
         if len(block.relabeling_dict) > 0:
-            # couldnt do inplace for large uint types because it was converting to floats
-            relabeled = np.zeros_like(input)
-            keys, values = zip(*block.relabeling_dict.items())
-            replace_values(holes, list(keys), list(values), out_array=relabeled)
-            holes = relabeled
+            fastremap.remap(
+                holes,
+                block.relabeling_dict,
+                preserve_missing_labels=True,
+                in_place=True,
+            )
         output_idi.ds[block.write_roi] = input + holes
 
     def relabel_dataset(self):
