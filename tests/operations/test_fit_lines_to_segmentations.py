@@ -22,7 +22,6 @@ def test_fit_lines_to_segmentations(
     cc.get_fit_lines_to_segmentations()
     df = pd.read_csv(tmp_cylinders_information_csv.replace(".csv", "_lines.csv"))
 
-    fit_properly = True
     # should be in order 1,2,3 which is horizontal, vertical and diagonal cylinders
     for i, endpoints in enumerate(
         [
@@ -34,11 +33,11 @@ def test_fit_lines_to_segmentations(
         row = df.iloc[i]
         start = np.array([row[f"Line Start {d} (nm)"] for d in ["Z", "Y", "X"]])
         end = np.array([row[f"Line End {d} (nm)"] for d in ["Z", "Y", "X"]])
-        fit_properly &= np.allclose(
+        assert np.allclose(
             np.vstack([start, end]),
             endpoints,
         ) or np.allclose(
             np.vstack([end, start]),
             endpoints,
         )
-    assert fit_properly
+    # assert fit_properly

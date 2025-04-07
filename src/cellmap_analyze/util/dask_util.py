@@ -108,7 +108,10 @@ def create_block_from_index(
 
 def get_num_blocks(idi, roi=None, block_size=None):
     if not block_size:
-        block_size = idi.chunk_shape * idi.voxel_size
+        chunk_shape = idi.chunk_shape
+        if len(chunk_shape) == 4:
+            chunk_shape = Coordinate(chunk_shape[1:])
+        block_size = chunk_shape * idi.voxel_size
     if not roi:
         roi = idi.roi
     num_blocks = int(
