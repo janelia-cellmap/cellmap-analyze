@@ -53,6 +53,16 @@ def contact_sites():
         contact_sites.get_contact_sites()
 
 
+def mutex_watershed():
+    from cellmap_analyze.process.mutex_watershed import MutexWatershed
+
+    rp = RunProperties()
+    with io_util.tee_streams(rp.logpath):
+        os.chdir(rp.execution_directory)
+        mws = MutexWatershed(**rp.run_config)
+        mws.get_connected_components()
+
+
 def filter_ids():
     from cellmap_analyze.process.filter_ids import FilterIDs
 
