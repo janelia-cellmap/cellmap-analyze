@@ -1,5 +1,10 @@
 [build-system]
-requires = ["setuptools>=61", "wheel", "Cython>=0.29"]
+requires = [
+  "setuptools>=61",
+  "wheel",
+  "Cython>=0.29",
+  "numpy"
+]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -19,6 +24,7 @@ license = {file = "LICENSE.txt"}
 dependencies = [
     "fastremap",
     "funlib.geometry",
+    "funlib.persistence==0.3.0",
     "numpy",
     "pandas",
     "connected-components-3d",
@@ -36,6 +42,9 @@ dependencies = [
     "pyarrow",
     "neuroglancer",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest"]
 
 [project.scripts]
 connected-components = "cli.cli:connected_components"
