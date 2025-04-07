@@ -7,20 +7,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.12'
 
-      - name: Upgrade pip and install build tools
+      - name: Upgrade pip and install build dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install build
+          pip install Cython setuptools wheel build
 
-      - name: Install project with dependencies
+      - name: Install project
         run: pip install .
 
       - name: Install test dependencies
@@ -28,4 +27,3 @@ jobs:
 
       - name: Run tests
         run: pytest
-
