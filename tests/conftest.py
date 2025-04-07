@@ -7,6 +7,7 @@ import os
 from scipy import ndimage
 import pandas as pd
 from tests.operations.test_measure import simple_object_information_dict
+from funlib.persistence import prepare_ds
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -172,13 +173,75 @@ def segmentation_cylinders(
     seg = np.zeros((50, 50, 50), dtype=np.uint8)
     # horizontal cylinder
     fill_in_cylinder(seg, horizontal_cylinder_endpoints / voxel_size, 1, 1)
-    seg[0, 0, 0] = 1  # add apurious voxel
+    seg[0, 0, 0] = 1  # add spurious voxel
     # vertical cylinder
     fill_in_cylinder(seg, vertical_cylinder_endpoints / voxel_size, 1.5, 2)
     # diagonal
     fill_in_cylinder(seg, diagonal_cylinder_endpoints / voxel_size, 2, 3)
 
     return seg
+
+
+@pytest.fixture(scope="session")
+def affinities_offsets():
+    return [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+        [3, 0, 0],
+        [0, 3, 0],
+        [0, 0, 3],
+        [9, 0, 0],
+        [0, 9, 0],
+        [0, 0, 9],
+    ]
+
+
+@pytest.fixture(scope="session")
+def affinities_cylinders(segmentation_cylinders, affinities_offsets):
+    """
+    Create a new array with shape (num_offsets, *seg.shape) where each channel
+    is 1 if the pixel at the offset from the current pixel belongs to the same object,
+    and 0 otherwise.
+
+    Parameters:
+      seg: numpy array of shape (D, H, W) containing segmentation labels.
+      offsets: list of tuples, e.g. [(1,0,0), (0,1,0), ...] representing the offsets.
+
+    Returns:
+      out: numpy array of shape (len(offsets), D, H, W)
+    """
+    shape = segmentation_cylinders.shape
+    num_offsets = len(affinities_offsets)
+    out = np.zeros((num_offsets,) + shape, dtype=np.uint8)
+
+    for idx, (dx, dy, dz) in enumerate(affinities_offsets):
+        # Create an array for the shifted segmentation; fill with -1 to mark invalid areas.
+        shifted = np.zeros(shape, dtype=segmentation_cylinders.dtype)
+
+        # Compute slices for the valid region in the source and destination.
+        src_slice = [
+            slice(max(dx, 0), shape[0] + min(dx, 0)),
+            slice(max(dy, 0), shape[1] + min(dy, 0)),
+            slice(max(dz, 0), shape[2] + min(dz, 0)),
+        ]
+
+        dst_slice = [
+            slice(max(-dx, 0), shape[0] + min(-dx, 0)),
+            slice(max(-dy, 0), shape[1] + min(-dy, 0)),
+            slice(max(-dz, 0), shape[2] + min(-dz, 0)),
+        ]
+
+        # Shift the segmentation array.
+        shifted[tuple(dst_slice)] = segmentation_cylinders[tuple(src_slice)]
+
+        # For each pixel, assign 1 if the label matches that of the shifted pixel.
+        out[idx] = (
+            (segmentation_cylinders == shifted).astype(np.uint8)
+            * (segmentation_cylinders > 0)
+            * 255
+        )
+    return out
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -448,6 +511,7 @@ def test_image_dict(
     segmentation_1,
     segmentation_2,
     segmentation_cylinders,
+    affinities_cylinders,
     segmentation_1_downsampled,
     contact_sites_distance_1,
     contact_sites_distance_2,
@@ -463,6 +527,7 @@ def test_image_dict(
         "mask_two": mask_two,
         "segmentation_1": segmentation_1,
         "segmentation_cylinders": segmentation_cylinders,
+        "affinities_cylinders": affinities_cylinders,
         "segmentation_1_downsampled": segmentation_1_downsampled,
         "segmentation_2": segmentation_2,
         "contact_sites_distance_1": contact_sites_distance_1,
@@ -480,16 +545,39 @@ def write_zarrs(tmp_zarr, test_image_dict, voxel_size, chunk_size):
         )
         data_path = f"{tmp_zarr}/{data_name}"
 
-        # use larger chunk size for segmentation_cylinders since we had to make it bigger
-        ds = create_multiscale_dataset(
-            data_path,
-            dtype=np.uint8,
-            voxel_size=(3 * [current_voxel_size]),
-            total_roi=Roi((0, 0, 0), np.array(data.shape) * current_voxel_size),
-            write_size=(
-                chunk_size * current_voxel_size
-                if data_name != "segmentation_cylinders"
-                else np.array((20, 20, 20)) * voxel_size
-            ),
+        ds_voxel_size = 3 * [current_voxel_size]
+        data_shape = data.shape
+        if len(data_shape) == 4:
+            data_shape = data_shape[1:]
+
+        total_roi = Roi((0, 0, 0), np.array(data_shape) * current_voxel_size)
+        write_size = (
+            chunk_size * current_voxel_size
+            if (
+                data_name != "segmentation_cylinders"
+                and data_name != "affinities_cylinders"
+            )
+            else np.array((20, 20, 20)) * current_voxel_size
         )
+
+        if "affinities" in data_name:
+            ds = prepare_ds(
+                tmp_zarr,
+                data_name,
+                total_roi=total_roi,
+                write_size=write_size,
+                voxel_size=ds_voxel_size,
+                dtype=np.uint8,
+                num_channels=np.shape(data)[0],
+            )
+        else:
+            # use larger chunk size for segmentation_cylinders since we had to make it bigger
+            ds = create_multiscale_dataset(
+                data_path,
+                dtype=np.uint8,
+                voxel_size=ds_voxel_size,
+                total_roi=total_roi,
+                write_size=write_size,
+            )
+
         ds.data[:] = data
