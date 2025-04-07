@@ -20,6 +20,7 @@ license = {file = "LICENSE.txt"}
 connected-components = "cli.cli:connected_components"
 clean-connected-components = "cli.cli:clean_connected_components"
 contact-sites = "cli.cli:contact_sites"
+mutex-watershed = "cli.cli:mutex_watershed"
 filter-ids = "cli.cli:filter_ids"
 measure = "cli.cli:measure"
 fit-lines-to-segmentations = "cli.cli:fit_lines_to_segmentations"
