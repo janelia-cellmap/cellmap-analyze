@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from scipy.ndimage import find_objects
 from funlib.evaluate.detection import find_centers
-from funlib.segment.arrays import replace_values
+import fastremap
 
 
 # probably move the following elsewhere
@@ -83,7 +83,7 @@ def get_region_properties(data, voxel_edge_length=1, trim=1):
     surface_areas = get_surface_areas(data, voxel_face_area=voxel_face_area, trim=trim)
     surface_areas = surface_areas.values()
     data = trim_array(data, trim)
-    ids, counts = np.unique(data[data > 0], return_counts=True)
+    ids, counts = fastremap.unique(data[data > 0], return_counts=True)
     if len(ids) == 0:
         return None
     volumes = counts * voxel_volume
@@ -96,7 +96,12 @@ def get_region_properties(data, voxel_edge_length=1, trim=1):
 
     find_objects_array = data.copy()
     find_objects_ids = list(range(1, len(ids) + 1))
-    replace_values(find_objects_array, ids, find_objects_ids, inplace=True)
+    fastremap.remap(
+        find_objects_array,
+        dict(zip(ids, find_objects_ids)),
+        preserve_missing_labels=True,
+        in_place=True,
+    )
 
     bounding_boxes = find_objects(find_objects_array)
     bounding_boxes_coords = []

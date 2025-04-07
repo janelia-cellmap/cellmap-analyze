@@ -130,7 +130,7 @@ class FitLinesToSegmentations:
         # append column with default values to df
         for s_e in ["Start", "End"]:
             for dim in ["Z", "Y", "X"]:
-                self.df[f"Line {s_e} {dim} (nm)"] = np.NaN
+                self.df[f"Line {s_e} {dim} (nm)"] = np.nan
 
         ddf = dd.from_pandas(
             self.df, npartitions=guesstimate_npartitions(self.df, self.num_workers)
