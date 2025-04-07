@@ -16,6 +16,27 @@ description = "Code to perform analysis on segmentations like those produced by 
 readme = "README.md"
 license = {file = "LICENSE.txt"}
 
+dependencies = [
+    "fastremap",
+    "funlib.geometry",
+    "numpy",
+    "pandas",
+    "connected-components-3d",
+    "dask[distributed]",
+    "fastmorph",
+    "scipy",
+    "scikit-image",
+    "tensorstore",
+    "tqdm",
+    "pytest",
+    "zarr==2.18.5",
+    "numcodecs==0.13.0",
+    "funlib.evaluate @ git+https://github.com/funkelab/funlib.evaluate.git",
+    "mwatershed @ git+https://github.com/pattonw/mwatershed",
+    "pyarrow",
+    "neuroglancer",
+]
+
 [project.scripts]
 connected-components = "cli.cli:connected_components"
 clean-connected-components = "cli.cli:clean_connected_components"
