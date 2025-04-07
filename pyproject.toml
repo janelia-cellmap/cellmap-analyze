@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "cellmap-analyze"
 version = "0.0.1"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.13"
 authors = [
     {name = "David Ackerman", email = "ackermand@janelia.hhmi.org"},
 ]
@@ -34,7 +34,6 @@ dependencies = [
     "scikit-image",
     "tensorstore",
     "tqdm",
-    "pytest",
     "zarr==2.18.5",
     "numcodecs==0.13.0",
     "funlib.evaluate @ git+https://github.com/funkelab/funlib.evaluate.git",
@@ -44,7 +43,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "coverage"
+]
 
 [project.scripts]
 connected-components = "cli.cli:connected_components"
