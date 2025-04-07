@@ -1,3 +1,4 @@
+# %%
 import logging
 from pathlib import Path
 import tensorstore as ts
@@ -79,14 +80,22 @@ def to_ndarray_tensorstore(
         if offset:
             offset = Coordinate(offset[::-1])
 
+    channel_offset = 0
+    domain = dataset.domain
+    if len(domain) > 3:
+        # Determine how many dimensions to skip (channels dimension exists if channels > 0)
+        channel_offset = 1
+        channels = slice(domain[0].inclusive_min, domain[0].exclusive_max)
+        domain = domain[1:]
+
     if roi is None:
         with ts.Transaction() as txn:
             data = dataset.with_transaction(txn).read().result()
         if rescale_factor > 1:
             data = (
-                data.repeat(rescale_factor, 0)
-                .repeat(rescale_factor, 1)
-                .repeat(rescale_factor, 2)
+                data.repeat(rescale_factor, axis=0 + channel_offset)
+                .repeat(rescale_factor, 1 + channel_offset)
+                .repeat(rescale_factor, 2 + channel_offset)
             )
         return data
 
@@ -112,7 +121,6 @@ def to_ndarray_tensorstore(
     # Specify the range
     roi_slices = roi.to_slices()
 
-    domain = dataset.domain
     # Compute the valid range
     valid_slices = tuple(
         slice(max(s.start, inclusive_min), min(s.stop, exclusive_max))
@@ -120,6 +128,15 @@ def to_ndarray_tensorstore(
             roi_slices, domain.inclusive_min, domain.exclusive_max
         )
     )
+
+    pad_width = [
+        [valid_slice.start - s.start, s.stop - valid_slice.stop]
+        for s, valid_slice in zip(roi_slices, valid_slices)
+    ]
+
+    if channel_offset > 0:
+        pad_width = [[0, 0]] + pad_width
+        valid_slices = (channels,) + valid_slices
 
     # Create an array to hold the requested data, filled with a default value (e.g., zeros)
     # output_shape = [s.stop - s.start for s in roi_slices]
@@ -130,10 +147,7 @@ def to_ndarray_tensorstore(
         fill_value = custom_fill_value
     with ts.Transaction() as txn:
         data = dataset.with_transaction(txn)[valid_slices].read().result()
-    pad_width = [
-        [valid_slice.start - s.start, s.stop - valid_slice.stop]
-        for s, valid_slice in zip(roi_slices, valid_slices)
-    ]
+
     if np.any(np.array(pad_width)):
         if fill_value == "edge":
             data = np.pad(
@@ -160,21 +174,27 @@ def to_ndarray_tensorstore(
     #     # Read the region of interest from the dataset
     #     padded_data[padded_slices] = dataset[valid_slices].read().result()
 
-    if rescale_factor > 1:
-        rescale_factor = voxel_size[0] / output_voxel_size[0]
-        data = (
-            data.repeat(rescale_factor, 0)
-            .repeat(rescale_factor, 1)
-            .repeat(rescale_factor, 2)
-        )
-        data = data[snapped_slices]
+    # Create a slicing tuple that preserves the channel dimension (if present) and applies snapped_slices to the spatial axes
+    if rescale_factor != 1:
+        slices = (slice(None),) * channel_offset + snapped_slices
+        if rescale_factor > 1:
+            # Compute the upsampling factor based on the first spatial dimension
+            factor = voxel_size[0] / output_voxel_size[0]
+            # Upsample only along the spatial axes
+            data = (
+                data.repeat(factor, axis=channel_offset)
+                .repeat(factor, axis=channel_offset + 1)
+                .repeat(factor, axis=channel_offset + 2)
+            )
+        elif rescale_factor < 1:
+            # Create block_size that leaves the channel dimension unchanged and scales the spatial ones
+            block_size = (1,) * channel_offset + (int(1 / rescale_factor),) * 3
+            data = block_reduce(data, block_size=block_size, func=np.median)
 
-    elif rescale_factor < 1:
-        data = block_reduce(data, block_size=int(1 / rescale_factor), func=np.median)
-        data = data[snapped_slices]
+        data = data[slices]
 
     if swap_axes:
-        data = np.swapaxes(data, 0, 2)
+        data = np.swapaxes(data, 0 + channel_offset, 2 + channel_offset)
 
     return data
 
@@ -233,3 +253,159 @@ class ImageDataInterface:
 
     def to_ndarray_ds(self, roi=None):
         return self.ds.to_ndarray(roi)
+
+
+# idi = ImageDataInterface(
+#     "/nrs/cellmap/ackermand/predictions/cellmap_experiments/jrc_22ak351-leaf-3m/jrc_22ak351-leaf-3m.zarr/predictions/2025-02-15_3m/plasmodesmata_affs_lsds/0__affs"
+# )
+# 1402, 3818, 1336, 176, 101, 510
+# 56816, 41197, 2076, 176, 101, 510
+# roi = Roi(np.array([2076, 41197, 56816]), 3 * [8 * 216])
+
+
+# from scipy.ndimage import measurements, gaussian_filter
+# import mwatershed as mws
+# import fastremap
+
+
+# def filter_fragments(
+#     affs_data: np.ndarray, fragments_data: np.ndarray, filter_val: float
+# ) -> None:
+#     """Allows filtering of MWS fragments based on mean value of affinities & fragments. Will filter and update the fragment array in-place.
+
+#     Args:
+#         aff_data (``np.ndarray``):
+#             An array containing affinity data.
+
+#         fragments_data (``np.ndarray``):
+#             An array containing fragment data.
+
+#         filter_val (``float``):
+#             Threshold to filter if the average value falls below.
+#     """
+
+#     average_affs: float = np.mean(affs_data.data, axis=0)
+
+#     filtered_fragments: list = []
+
+#     fragment_ids: np.ndarray = np.unique(fragments_data)
+
+#     for fragment, mean in zip(
+#         fragment_ids, measurements.mean(average_affs, fragments_data, fragment_ids)
+#     ):
+#         if mean < filter_val:
+#             filtered_fragments.append(fragment)
+
+#     filtered_fragments: np.ndarray = np.array(
+#         filtered_fragments, dtype=fragments_data.dtype
+#     )
+#     # replace: np.ndarray = np.zeros_like(filtered_fragments)
+#     fastremap.mask(fragments_data, filtered_fragments, in_place=True)
+
+
+# neighborhood = [
+#     [1, 0, 0],
+#     [0, 1, 0],
+#     [0, 0, 1],
+#     [3, 0, 0],
+#     [0, 3, 0],
+#     [0, 0, 3],
+#     [9, 0, 0],
+#     [0, 9, 0],
+#     [0, 0, 9],
+# ]
+# # neighborhood = [[0,0,1],[0,1,0],[1,0,0],[0,0,3],[0,3,0],[3,0,0],[0,0,9],[0,9,0],[9,0,0]]
+# import time
+
+
+# def mutex_watershed_blockwise(
+#     data, adjacent_edge_bias=-0.4, lr_bias_ratio=-0.08, filter_val=0.5
+# ):
+#     if data.dtype == np.uint8:
+#         logger.info("Assuming affinities are in [0,255]")
+#         max_affinity_value: float = 255.0
+#         data = data.astype(np.float64)
+#     else:
+#         data = data.astype(np.float64)
+#         max_affinity_value: float = 1.0
+
+#     data /= max_affinity_value
+
+#     if data.max() < 1e-3:
+#         segmentation = np.zeros(data.shape, dtype=np.uint64)
+#         return data
+
+#     t0 = time.time()
+#     random_noise = np.random.randn(*data.shape) * 0.0001
+#     smoothed_affs = (
+#         gaussian_filter(data, sigma=(0, *(np.amax(neighborhood, axis=0) / 3))) - 0.5
+#     ) * 0.001
+#     shift: np.ndarray = np.array(
+#         [
+#             (
+#                 adjacent_edge_bias
+#                 if max(offset) <= 1
+#                 else np.linalg.norm(offset) * lr_bias_ratio
+#             )
+#             for offset in neighborhood
+#         ]
+#     ).reshape((-1, *((1,) * (len(data.shape) - 1))))
+
+#     # raise Exception(data.max(), data.min(), self.neighborhood)
+
+#     # segmentation = mws.agglom(
+#     #     data.astype(np.float64) - self.bias,
+#     #     self.neighborhood,
+#     # )
+
+#     # filter fragments
+#     t1 = time.time()
+#     segmentation = mws.agglom(
+#         data + shift + random_noise + smoothed_affs,
+#         offsets=neighborhood,
+#     )
+#     t2 = time.time()
+
+#     if filter_val > 0.0:
+#         filter_fragments(data, segmentation, filter_val)
+#     t3 = time.time()
+#     # fragment_ids = fastremap.unique(segmentation[segmentation > 0])
+#     # fastremap.mask_except(segmentation, filtered_fragments, in_place=True)
+#     fastremap.renumber(segmentation, in_place=True)
+#     t4 = time.time()
+#     print(f"{t1-t0},{t2-t1}, {t3-t2}, {t4-t3}")
+#     return segmentation
+
+
+# import cc3d
+
+
+# def instancewise_instance_segmentation(segmentation):
+#     ids = fastremap.unique(segmentation[segmentation > 0])
+#     output = np.zeros_like(segmentation, dtype=np.uint64)
+#     for id in ids:
+#         cc = cc3d.connected_components(
+#             segmentation == id,
+#             connectivity=6,
+#             binary_image=True,
+#         )
+#         cc[cc > 0] += np.max(output)
+#         output += cc
+#     return output
+
+
+# res = idi.to_ndarray_ts(roi)
+# output = mutex_watershed_blockwise(res)
+# # %%
+# np.unique(output)
+# import matplotlib.pyplot as plt
+# from cellmap_analyze.util.neuroglancer_util import view_in_neuroglancer
+
+# output = instancewise_instance_segmentation(output)
+
+# view_in_neuroglancer(output=output.astype(np.uint16))
+# plt.imshow(output[100, :, :])
+# # %%
+
+
+# # %%
