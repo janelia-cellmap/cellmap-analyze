@@ -1,54 +1,42 @@
-[build-system]
-requires = [
-  "setuptools>=61",
-  "wheel",
-  "Cython>=0.29",
-  "numpy"
-]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "cellmap-analyze"
 version = "0.0.1"
-requires-python = ">=3.10,<3.13"
-authors = [
-    {name = "David Ackerman", email = "ackermand@janelia.hhmi.org"},
-]
-maintainers = [
-    {name = "David Ackerman", email = "ackermand@janelia.hhmi.org"},
-]
 description = "Code to perform analysis on segmentations like those produced by CellMap"
 readme = "README.md"
-license = {file = "LICENSE.txt"}
+license-files = ["LICENSE"]
+requires-python = ">=3.10,<3.13"
+
+authors = [
+  { name = "David Ackerman", email = "ackermand@janelia.hhmi.org" },
+]
+
+maintainers = [
+  { name = "David Ackerman", email = "ackermand@janelia.hhmi.org" },
+]
 
 dependencies = [
-    "fastremap",
-    "funlib.geometry",
-    "funlib.persistence==0.3.0",
-    "numpy",
-    "pandas",
-    "connected-components-3d",
-    "dask[distributed]",
-    "fastmorph",
-    "scipy",
-    "scikit-image",
-    "tensorstore",
-    "tqdm",
-    "zarr==2.18.5",
-    "numcodecs==0.13.0",
-    "funlib.evaluate @ git+https://github.com/funkelab/funlib.evaluate.git",
-    "mwatershed @ git+https://github.com/pattonw/mwatershed",
-    "pyarrow",
-    "neuroglancer",
+  "fastremap",
+  "funlib.geometry",
+  "funlib.persistence==0.3.0",
+  "numpy",
+  "pandas",
+  "connected-components-3d",
+  "dask[distributed]",
+  "fastmorph",
+  "scipy",
+  "scikit-image",
+  "tensorstore",
+  "tqdm",
+  "zarr==2.18.5",
+  "numcodecs==0.13.0",
+  "funlib.evaluate @ git+https://github.com/funkelab/funlib.evaluate.git",
+  "mwatershed @ git+https://github.com/pattonw/mwatershed",
+  "pyarrow",
+  "neuroglancer",
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest",
-    "pytest-cov",
-    "coverage",
-    "build"
-]
+dev = ["pytest", "pytest-cov", "coverage", "build"]
 
 [project.scripts]
 connected-components = "cli.cli:connected_components"
@@ -59,3 +47,18 @@ filter-ids = "cli.cli:filter_ids"
 measure = "cli.cli:measure"
 fit-lines-to-segmentations = "cli.cli:fit_lines_to_segmentations"
 assign-to-cells = "cli.cli:assign_to_cells"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[build-system]
+requires = [
+  "setuptools>=61",
+  "wheel",
+  "Cython>=0.29",
+  "numpy"
+]
+build-backend = "setuptools.build_meta"
