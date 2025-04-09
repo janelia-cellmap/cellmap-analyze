@@ -1,4 +1,4 @@
-![CI](https://github.com/janelia-cellmap/cellmap-analyze/actions/workflows/python.yml/badge.svg)
+![CI](https://github.com/janelia-cellmap/cellmap-analyze/actions/workflows/tests.yml/badge.svg)
 [![codecov](https://codecov.io/gh/janelia-cellmap/cellmap-analyze/branch/refactor_for_release/graph/badge.svg)](https://codecov.io/gh/janelia-cellmap/cellmap-analyze)
 
 # Tools For Analyzing Large 3D Datasets
