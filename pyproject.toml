@@ -22,6 +22,7 @@ dependencies = [
   "pandas",
   "connected-components-3d",
   "dask[distributed]",
+  "dask-jobqueue",
   "fastmorph",
   "scipy",
   "scikit-image",
