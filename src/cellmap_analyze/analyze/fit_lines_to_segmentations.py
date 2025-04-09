@@ -142,7 +142,7 @@ class FitLinesToSegmentations:
             with io_util.Timing_Messager("Fitting lines", logger):
                 # results = ddf_out.compute()
                 df = dask_computer(ddf_out, self.num_workers, **self.compute_args)
-
+        df["Object ID"] = df["Object ID"].astype(int)
         df.to_csv(self.output_csv, index=False)
 
         if self.output_annotations_dir is not None:

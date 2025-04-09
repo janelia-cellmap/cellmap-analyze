@@ -88,7 +88,7 @@ def image_with_holes_filled(image_with_holes):
 
 
 @pytest.fixture(scope="session")
-def blockwise_connected_components(image_shape, chunk_size):
+def blockwise_connected_components(image_shape):
     seg = np.zeros(image_shape, dtype=np.uint64)
     # single voxel
     seg[1, 1, 1] = 1
@@ -106,7 +106,7 @@ def blockwise_connected_components(image_shape, chunk_size):
 
 
 @pytest.fixture(scope="session")
-def intensity_image(image_shape, chunk_size):
+def intensity_image(image_shape):
     seg = np.zeros(image_shape, dtype=np.uint8)
     # single voxel
     seg[1, 1, 1] = 127
@@ -242,6 +242,32 @@ def affinities_cylinders(segmentation_cylinders, affinities_offsets):
             * 255
         )
     return out
+
+
+@pytest.fixture(autouse=True, scope="session")
+def segmentation_cells(image_shape):
+    seg = np.zeros(image_shape, dtype=np.uint8)
+    # assign different values to different corners
+    seg[:2, :2, :2] = 1
+    seg[-2:, -2:, -2:] = 2
+    seg[5:8, 5:8, 5:8] = 3
+    return seg
+
+
+@pytest.fixture(autouse=True, scope="session")
+def tmp_coms_csv(shared_tmpdir, voxel_size):
+    output_path = shared_tmpdir + "/csvs/"
+    os.makedirs(name=output_path, exist_ok=True)
+    df = pd.DataFrame(
+        {
+            "Object ID": [1, 2, 3],
+            "COM X (nm)": (np.array([1.1, 3.1, 11.1]) + 0.5) * voxel_size,
+            "COM Y (nm)": (np.array([1.1, 3.1, 11.1]) + 0.5) * voxel_size,
+            "COM Z (nm)": (np.array([1.1, 3.1, 8.1]) + 0.5) * voxel_size,
+        }
+    )
+    df.to_csv(output_path + "/assignment_coms.csv", index=False)
+    return str(output_path + "/assignment_coms.csv")
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -511,6 +537,7 @@ def test_image_dict(
     segmentation_1,
     segmentation_2,
     segmentation_cylinders,
+    segmentation_cells,
     affinities_cylinders,
     segmentation_1_downsampled,
     contact_sites_distance_1,
@@ -530,6 +557,7 @@ def test_image_dict(
         "affinities_cylinders": affinities_cylinders,
         "segmentation_1_downsampled": segmentation_1_downsampled,
         "segmentation_2": segmentation_2,
+        "segmentation_cells": segmentation_cells,
         "contact_sites_distance_1": contact_sites_distance_1,
         "contact_sites_distance_2": contact_sites_distance_2,
         "contact_sites_distance_3": contact_sites_distance_3,
