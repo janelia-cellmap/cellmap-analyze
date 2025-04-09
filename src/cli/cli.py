@@ -18,7 +18,8 @@ class RunProperties:
         )
         self.logpath = f"{self.execution_directory}/output.log"
         self.run_config = io_util.read_run_config(args.config_path)
-        self.run_config["num_workers"] = args.num_workers
+        if args.num_workers is not None:
+            self.run_config["num_workers"] = args.num_workers
 
 
 def connected_components():
@@ -93,3 +94,13 @@ def fit_lines_to_segmentations():
         os.chdir(rp.execution_directory)
         fit_lines = FitLinesToSegmentations(**rp.run_config)
         fit_lines.get_fit_lines_to_segmentations()
+
+
+def assign_to_cells():
+    from cellmap_analyze.analyze.assign_to_cells import AssignToCells
+
+    rp = RunProperties()
+    with io_util.tee_streams(rp.logpath):
+        os.chdir(rp.execution_directory)
+        atc = AssignToCells(**rp.run_config)
+        atc.get_cell_assignments()

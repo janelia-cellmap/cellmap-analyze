@@ -156,7 +156,7 @@ def parser_params():
         "--num-workers",
         "-n",
         type=int,
-        default=1,
+        default=None,
         help="Number of workers to launch (i.e. each worker is launched with a single bsub command)",
     )
 
