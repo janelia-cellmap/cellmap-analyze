@@ -18,61 +18,6 @@ cdef fused uint_t1:
     unsigned long
     unsigned long long
 
-def find_boundary(
-    uint_t[:, :, :] volume, unsigned char[:,:,:] surface_voxels
-):
-   
-    cdef int x, y, z
-    cdef int nx = volume.shape[0]
-    cdef int ny = volume.shape[1]
-    cdef int nz = volume.shape[2]
-    cdef uint_t voxel_value
-    # Iterate over each voxel in the volume
-    for x in range(1, nx-1):
-        for y in range(1, ny-1):
-            for z in range(1, nz-1):
-                # Get the value of the current voxel
-                voxel_value = volume[x, y, z]
-                
-                # Check the 6 neighbors
-                if voxel_value>0:
-                    if (volume[x-1, y, z] != voxel_value or
-                        volume[x+1, y, z] != voxel_value or
-                        volume[x, y-1, z] != voxel_value or
-                        volume[x, y+1, z] != voxel_value or
-                        volume[x, y, z-1] != voxel_value or
-                        volume[x, y, z+1] != voxel_value):
-                        # Add the surface voxel coordinates to the list
-                        surface_voxels[x, y, z] = 1
-
-
-def find_boundaries(uint_t[:, :, :] volume):
-    cdef int x, y, z
-    cdef int nx = volume.shape[0]
-    cdef int ny = volume.shape[1]
-    cdef int nz = volume.shape[2]
-    cdef uint_t voxel_value
-
-    # Allocate output array with the same type and shape as volume.
-    surface_voxels = np.zeros((nx, ny, nz), dtype=volume.base.dtype)
-    
-    # Iterate over each voxel in the volume, skipping the border.
-    for x in range(1, nx-1):
-        for y in range(1, ny-1):
-            for z in range(1, nz-1):
-                voxel_value = volume[x, y, z]
-                if voxel_value > 0:
-                    # Check the 6-connected neighbors.
-                    if (volume[x-1, y, z] != voxel_value or
-                        volume[x+1, y, z] != voxel_value or
-                        volume[x, y-1, z] != voxel_value or
-                        volume[x, y+1, z] != voxel_value or
-                        volume[x, y, z-1] != voxel_value or
-                        volume[x, y, z+1] != voxel_value):
-                        surface_voxels[x, y, z] = voxel_value
-                        
-    return surface_voxels
-
 def initialize_contact_site_array(
     uint_t[:, :, :] organelle_1, 
     uint_t1[:, :, :] organelle_2, 
