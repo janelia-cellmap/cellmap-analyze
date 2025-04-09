@@ -1,5 +1,5 @@
 ignore/
-
+src/cellmap_analyze/cythonizing/*.c
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

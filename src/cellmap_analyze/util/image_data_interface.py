@@ -239,6 +239,7 @@ class ImageDataInterface:
             self.ts = open_ds_tensorstore(
                 self.path, concurrency_limit=self.concurrency_limit
             )
+            self.domain = self.ts.domain
         res = to_ndarray_tensorstore(
             self.ts,
             roi,
@@ -409,3 +410,5 @@ class ImageDataInterface:
 
 
 # # %%
+
+# %%
