@@ -26,7 +26,7 @@ class AssignToCells:
         self,
         organelle_csvs: Union[str, List[str]],
         cell_ds_path: str,
-        base_output_path: str,
+        output_path: str,
         cell_assignment_type: int = 0,
         iteration_distance_nm=10_000,
     ):
@@ -44,7 +44,7 @@ class AssignToCells:
 
         self.cell_idi = ImageDataInterface(cell_ds_path)
         self.cell_assignment_type = cell_assignment_type
-        self.base_output_path = base_output_path
+        self.output_path = output_path
         self.iteration_distance_nm = iteration_distance_nm
 
     @staticmethod
@@ -190,12 +190,12 @@ class AssignToCells:
 
     def write_updated_csvs(self):
         with io_util.Timing_Messager("Writing out updated dataframes", logger):
-            os.makedirs(self.base_output_path, exist_ok=True)
+            os.makedirs(self.output_path, exist_ok=True)
             for csv, df in self.organelle_info_dict.items():
                 csv_name = os.path.basename(csv.split(".csv")[0])
-                output_path = self.base_output_path
+                output_path = self.output_path
                 if "_to_" in csv_name:
-                    output_path = self.base_output_path + "/contact_sites/"
+                    output_path = self.output_path + "/contact_sites/"
                     os.makedirs(output_path, exist_ok=True)
 
                 if self.cell_assignment_type == 0:
@@ -216,15 +216,15 @@ class AssignToCells:
         self.write_updated_csvs()
 
 
-# # # %%
-# for assignment_type in range(4):
+# # %%
+# for assignment_type in [2]:
 #     atc = AssignToCells(
 #         organelle_csvs=[
 #             "/nrs/cellmap/ackermand/cellmap/analysisResults/leaf-gall/jrc_22ak351-leaf-3r/plasmodesmata_cleaned_lines.csv"
 #         ],
 #         cell_ds_path="/groups/cellmap/cellmap/annotations/amira/jrc_22ak351-leaf-3r/crop361/relabeled.zarr/crop361_relabeled/s0",
 #         cell_assignment_type=assignment_type,
-#         base_output_path="./",
+#         output_path="./",
 #     )
 #     atc.get_cell_assignments()
 #     break
