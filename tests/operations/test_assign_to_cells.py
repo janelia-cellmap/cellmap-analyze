@@ -119,7 +119,7 @@ def test_assign_to_cells(
     atc = AssignToCells(
         organelle_csvs=f"{shared_tmpdir}/csvs/assignment_coms.csv",
         cell_ds_path=f"{tmp_zarr}/segmentation_cells/s0",
-        base_output_path=f"{shared_tmpdir}/csvs/test_mws",
+        base_output_path=f"{shared_tmpdir}/csvs/",
         cell_assignment_type=cell_assignment_type,
     )
     atc.get_cell_assignments()
