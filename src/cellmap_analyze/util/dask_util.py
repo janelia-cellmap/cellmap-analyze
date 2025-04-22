@@ -256,10 +256,13 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
 
     if cluster_type == "local":
         from dask.distributed import LocalCluster
+        import requests
 
+        public_ip = requests.get("https://api.ipify.org").text
         cluster = LocalCluster(
             n_workers=num_workers,
             threads_per_worker=1,
+            host=public_ip,
             # job_script_prologue=job_script_prologue,
         )
     else:
