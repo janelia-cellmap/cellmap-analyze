@@ -256,13 +256,12 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
 
     if cluster_type == "local":
         from dask.distributed import LocalCluster
-        import requests
+        import socket
 
-        public_ip = requests.get("https://api.ipify.org").text
+        hostname = socket.gethostname()
         cluster = LocalCluster(
             n_workers=num_workers,
             threads_per_worker=1,
-            host=public_ip,
             # job_script_prologue=job_script_prologue,
         )
     else:
@@ -285,9 +284,10 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
             logger,
         ):
             client = Client(cluster)
-        print_with_datetime(
-            f"Check {client.cluster.dashboard_link} for {msg} status.", logger
-        )
+        dashboard_link = client.cluster.dashboard_link
+        if cluster_type == "local":
+            dashboard_link = dashboard_link.replace("127.0.0.1", hostname)
+        print_with_datetime(f"Check {dashboard_link} for {msg} status.", logger)
         yield client
     finally:
         client.shutdown()
