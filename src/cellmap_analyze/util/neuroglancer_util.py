@@ -29,8 +29,6 @@ def view_in_neuroglancer(**kwargs):
                 )
 
     print(viewer.get_viewer_url())
-    while True:
-        pass
 
 
 def write_out_annotations(output_directory, annotation_ids, annotations):

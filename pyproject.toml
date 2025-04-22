@@ -15,6 +15,7 @@ maintainers = [
 ]
 
 dependencies = [
+  "bokeh>=3.1.0",
   "fastremap",
   "funlib.geometry",
   "funlib.persistence==0.3.0",
