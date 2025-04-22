@@ -194,7 +194,7 @@ class AssignToCells:
             for csv, df in self.organelle_info_dict.items():
                 csv_name = os.path.basename(csv.split(".csv")[0])
                 output_path = self.output_path
-                if "_to_" in csv_name:
+                if "_to_" in csv_name:  # pragma: no cover
                     output_path = self.output_path + "/contact_sites/"
                     os.makedirs(output_path, exist_ok=True)
 
@@ -214,24 +214,3 @@ class AssignToCells:
     def get_cell_assignments(self):
         self.assign_to_cells()
         self.write_updated_csvs()
-
-
-# # %%
-# for assignment_type in [2]:
-#     atc = AssignToCells(
-#         organelle_csvs=[
-#             "/nrs/cellmap/ackermand/cellmap/analysisResults/leaf-gall/jrc_22ak351-leaf-3r/plasmodesmata_cleaned_lines.csv"
-#         ],
-#         cell_ds_path="/groups/cellmap/cellmap/annotations/amira/jrc_22ak351-leaf-3r/crop361/relabeled.zarr/crop361_relabeled/s0",
-#         cell_assignment_type=assignment_type,
-#         output_path="./",
-#     )
-#     atc.get_cell_assignments()
-#     break
-
-
-# # # # %%
-
-# # %%
-
-# %%
