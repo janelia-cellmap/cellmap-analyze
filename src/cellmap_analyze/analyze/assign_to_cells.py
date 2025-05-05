@@ -194,7 +194,7 @@ class AssignToCells:
             for csv, df in self.organelle_info_dict.items():
                 csv_name = os.path.basename(csv.split(".csv")[0])
                 output_path = self.output_path
-                if "_to_" in csv_name:  # pragma: no cover
+                if csv_name.endswith("contacts"):  # pragma: no cover
                     output_path = self.output_path + "/contact_sites/"
                     os.makedirs(output_path, exist_ok=True)
 
