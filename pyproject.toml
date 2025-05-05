@@ -31,8 +31,7 @@ dependencies = [
   "tqdm",
   "zarr==2.18.5",
   "numcodecs==0.13.0",
-  "funlib.evaluate @ git+https://github.com/funkelab/funlib.evaluate.git",
-  "mwatershed @ git+https://github.com/pattonw/mwatershed",
+  "mwatershed",
   "pyarrow",
   "neuroglancer",
 ]
