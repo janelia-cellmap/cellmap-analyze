@@ -34,11 +34,10 @@ jobs:
           done
 
       - name: Remove original linux_x86_64 wheels
-        run: |
-          rm -f dist/*linux_x86_64.whl
+        run: rm -f dist/*linux_x86_64.whl
 
       - name: Upload Linux distributions
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: package-dist
           path: dist/
@@ -63,7 +62,7 @@ jobs:
         run: python -m build --wheel --no-isolation
 
       - name: Upload macOS wheel
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: macos-wheel
           path: dist/*.whl
@@ -75,13 +74,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download Linux distributions
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: package-dist
           path: dist
 
       - name: Download macOS wheel
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: macos-wheel
           path: dist
