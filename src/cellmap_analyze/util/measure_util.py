@@ -7,7 +7,7 @@ from cellmap_analyze.util.information_holders import (
 import numpy as np
 import pandas as pd
 from scipy.ndimage import find_objects
-from funlib.evaluate.detection import find_centers
+from cellmap_analyze.cythonizing.centers import find_centers
 import fastremap
 
 

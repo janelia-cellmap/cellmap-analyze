@@ -20,16 +20,5 @@ In addition, there are also tools for analysis of the 3D datasets including:
 TODO: Include a detailed description of installation and running the code
 </div>
 
-## Prerequisites for using mwatershed
-
-Mwatershed requires Rust and Cargo. Please ensure you have Rust installed before proceeding with mwatershed.
-
-1. **Install Rust:**
-Visit [rustup.rs](https://rustup.rs/) and follow the instructions to install Rust. This installation will also include Cargo, Rust’s package manager.
-
-2. **Verify Cargo Installation:**
-Open your terminal and run:
-     ```bash
-     cargo --version
-     ```
-You should see the Cargo version output, which confirms that Cargo is installed and accessible.
+### Acknowledgements
+Code for finding centers was taken from [funlib.evaluate](https://github.com/funkelab/funlib.evaluate).
