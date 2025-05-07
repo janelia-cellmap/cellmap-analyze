@@ -18,6 +18,7 @@ import logging
 import dask.bag as db
 import os
 from cellmap_analyze.util.mask_util import MasksFromConfig
+from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset
 import cc3d
 
@@ -34,7 +35,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class MutexWatershed:
+class MutexWatershed(ComputeConfigMixin):
     def __init__(
         self,
         affinities_path,
@@ -62,6 +63,7 @@ class MutexWatershed:
         do_opening=False,
         delete_tmp=False,
     ):
+        super().__init__(num_workers)
         self.neighborhood = neighborhood
         self.affinities_idi = ImageDataInterface(affinities_path)
 
@@ -120,26 +122,6 @@ class MutexWatershed:
 
         self.connectivity = connectivity
         self.delete_tmp = delete_tmp
-
-        self.num_workers = num_workers
-        self.compute_args = {}
-        if self.num_workers == 1:
-            self.compute_args = {"scheduler": "single-threaded"}
-            self.num_local_threads_available = 1
-            self.local_config = None
-        else:
-            self.num_local_threads_available = len(os.sched_getaffinity(0))
-            self.local_config = {
-                "jobqueue": {
-                    "local": {
-                        "ncpus": self.num_local_threads_available,
-                        "processes": self.num_local_threads_available,
-                        "cores": self.num_local_threads_available,
-                        "log-directory": "job-logs",
-                        "name": "dask-worker",
-                    }
-                }
-            }
 
     @staticmethod
     def filter_fragments(

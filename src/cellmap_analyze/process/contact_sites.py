@@ -16,6 +16,7 @@ from cellmap_analyze.process.connected_components import ConnectedComponents
 from scipy.spatial import KDTree
 import dask.bag as db
 from cellmap_analyze.util.measure_util import trim_array
+from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.util.zarr_util import (
     create_multiscale_dataset,
 )
@@ -29,7 +30,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class ContactSites:
+class ContactSites(ComputeConfigMixin):
     def __init__(
         self,
         organelle_1_path,
@@ -40,6 +41,7 @@ class ContactSites:
         num_workers=10,
         roi=None,
     ):
+        super().__init__(num_workers)
         self.organelle_1_idi = ImageDataInterface(organelle_1_path)
         self.organelle_2_idi = ImageDataInterface(organelle_2_path)
         output_voxel_size = min(
@@ -88,10 +90,6 @@ class ContactSites:
         self.contact_sites_blockwise_idi = ImageDataInterface(
             self.output_path_blockwise + "/s0", mode="r+"
         )
-
-        self.compute_args = {}
-        if self.num_workers == 1:
-            self.compute_args = {"scheduler": "single-threaded"}
 
     @staticmethod
     def get_ndarray_contact_sites(

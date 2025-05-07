@@ -16,6 +16,7 @@ import logging
 import dask.bag as db
 import fastremap
 import os
+from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset
 from skimage.segmentation import find_boundaries
 from .connected_components import ConnectedComponents
@@ -28,7 +29,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class FillHoles:
+class FillHoles(ComputeConfigMixin):
     def __init__(
         self,
         input_path,
@@ -39,6 +40,7 @@ class FillHoles:
         delete_tmp=False,
         roi=None,
     ):
+        super().__init__(num_workers)
         self.input_idi = ImageDataInterface(input_path)
         self.roi = roi
         if self.roi is None:
@@ -51,25 +53,6 @@ class FillHoles:
             self.output_path = input_path + "_filled"
 
         self.holes_path = self.output_path + "_holes"
-        self.num_workers = num_workers
-        self.compute_args = {}
-        if self.num_workers == 1:
-            self.compute_args = {"scheduler": "single-threaded"}
-            self.num_local_threads_available = 1
-            self.local_config = None
-        else:
-            self.num_local_threads_available = len(os.sched_getaffinity(0))
-            self.local_config = {
-                "jobqueue": {
-                    "local": {
-                        "ncpus": self.num_local_threads_available,
-                        "processes": self.num_local_threads_available,
-                        "cores": self.num_local_threads_available,
-                        "log-directory": "job-logs",
-                        "name": "dask-worker",
-                    }
-                }
-            }
 
     def get_hole_information_blockwise(
         block_index,

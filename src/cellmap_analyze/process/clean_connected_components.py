@@ -20,6 +20,8 @@ import os
 from cellmap_analyze.util.mask_util import MasksFromConfig
 import fastremap
 
+from cellmap_analyze.util.mixins import ComputeConfigMixin
+
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -29,7 +31,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class CleanConnectedComponents:
+class CleanConnectedComponents(ComputeConfigMixin):
     def __init__(
         self,
         input_path,
@@ -44,6 +46,8 @@ class CleanConnectedComponents:
         fill_holes=False,
         delete_tmp=True,
     ):
+        super().__init__(num_workers)
+
         self.input_path = input_path
         self.input_idi = ImageDataInterface(self.input_path)
         if roi is None:
@@ -82,26 +86,6 @@ class CleanConnectedComponents:
         self.connectivity = connectivity
         self.fill_holes = fill_holes
         self.delete_tmp = delete_tmp
-
-        self.num_workers = num_workers
-        self.compute_args = {}
-        if self.num_workers == 1:
-            self.compute_args = {"scheduler": "single-threaded"}
-            self.num_local_threads_available = 1
-            self.local_config = None
-        else:
-            self.num_local_threads_available = len(os.sched_getaffinity(0))
-            self.local_config = {
-                "jobqueue": {
-                    "local": {
-                        "ncpus": self.num_local_threads_available,
-                        "processes": self.num_local_threads_available,
-                        "cores": self.num_local_threads_available,
-                        "log-directory": "job-logs",
-                        "name": "dask-worker",
-                    }
-                }
-            }
 
     @staticmethod
     def volume_filter_connected_ids(
