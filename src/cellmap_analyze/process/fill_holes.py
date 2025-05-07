@@ -17,7 +17,7 @@ import dask.bag as db
 import fastremap
 import os
 from cellmap_analyze.util.mixins import ComputeConfigMixin
-from cellmap_analyze.util.zarr_util import create_multiscale_dataset
+from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
 from skimage.segmentation import find_boundaries
 from .connected_components import ConnectedComponents
 
@@ -191,14 +191,13 @@ class FillHoles(ComputeConfigMixin):
         output_idi.ds[block.write_roi] = input + holes
 
     def relabel_dataset(self):
-        create_multiscale_dataset(
+        self.output_idi = create_multiscale_dataset_idi(
             self.output_path,
             dtype=self.input_idi.ds.dtype,
             voxel_size=self.voxel_size,
             total_roi=self.roi,
             write_size=self.input_idi.chunk_shape * self.input_idi.voxel_size,
         )
-        self.output_idi = ImageDataInterface(self.output_path + "/s0", mode="r+")
 
         block_coords = [block.coords for block in self.blocks]
         b = db.from_sequence(

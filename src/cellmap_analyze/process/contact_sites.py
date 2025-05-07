@@ -18,7 +18,7 @@ import dask.bag as db
 from cellmap_analyze.util.measure_util import trim_array
 from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.util.zarr_util import (
-    create_multiscale_dataset,
+    create_multiscale_dataset_idi,
 )
 import cc3d
 
@@ -67,7 +67,6 @@ class ContactSites(ComputeConfigMixin):
             )
 
         self.output_path = output_path
-        self.output_path_blockwise = output_path + "_blockwise"
 
         if minimum_volume_nm_3 is None:
             minimum_volume_nm_3 = (
@@ -78,17 +77,12 @@ class ContactSites(ComputeConfigMixin):
         self.num_workers = num_workers
         self.voxel_volume = np.prod(self.voxel_size)
         self.voxel_face_area = self.voxel_size[1] * self.voxel_size[2]
-
-        create_multiscale_dataset(
-            self.output_path_blockwise,
+        self.contact_sites_blockwise_idi = create_multiscale_dataset_idi(
+            output_path + "_blockwise",
             dtype=np.uint64,
             voxel_size=self.voxel_size,
             total_roi=self.roi,
             write_size=self.organelle_1_idi.chunk_shape * self.voxel_size,
-        )
-
-        self.contact_sites_blockwise_idi = ImageDataInterface(
-            self.output_path_blockwise + "/s0", mode="r+"
         )
 
     @staticmethod
@@ -210,7 +204,7 @@ class ContactSites(ComputeConfigMixin):
         self.calculate_contact_sites_blockwise()
 
         cc = ConnectedComponents(
-            connected_components_blockwise_path=self.output_path_blockwise + "/s0",
+            connected_components_blockwise_path=self.contact_sites_blockwise_idi.path,
             output_path=self.output_path,
             roi=self.roi,
             num_workers=self.num_workers,

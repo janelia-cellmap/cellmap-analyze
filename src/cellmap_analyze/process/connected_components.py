@@ -26,7 +26,7 @@ import fastremap
 import os
 from cellmap_analyze.util.mask_util import MasksFromConfig
 from cellmap_analyze.util.mixins import ComputeConfigMixin
-from cellmap_analyze.util.zarr_util import create_multiscale_dataset
+from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
 import cc3d
 
 logging.basicConfig(
@@ -90,31 +90,20 @@ class ConnectedComponents(ComputeConfigMixin):
 
         if input_path:
             self.input_path = input_path
-            self.connected_components_blockwise_path = (
-                output_ds_basepath + "/" + output_ds_name + "_blockwise"
-            )
             self.intensity_threshold_minimum = intensity_threshold_minimum
             self.intensity_threshold_maximum = intensity_threshold_maximum
-            create_multiscale_dataset(
-                self.connected_components_blockwise_path,
+            self.connected_components_blockwise_idi = create_multiscale_dataset_idi(
+                output_ds_basepath + "/" + output_ds_name + "_blockwise",
                 dtype=np.uint64,
                 voxel_size=self.voxel_size,
                 total_roi=self.roi,
                 write_size=template_idi.chunk_shape * self.voxel_size,
-            )
-            self.connected_components_blockwise_idi = ImageDataInterface(
-                self.connected_components_blockwise_path + "/s0",
-                mode="r+",
                 custom_fill_value=self.oob_value,
             )
             self.do_full_connected_components = True
         else:
-            self.connected_components_blockwise_path = (
-                connected_components_blockwise_path
-            )
-
             self.connected_components_blockwise_idi = ImageDataInterface(
-                self.connected_components_blockwise_path
+                connected_components_blockwise_path
             )
         self.output_path = output_path
 
@@ -491,14 +480,13 @@ class ConnectedComponents(ComputeConfigMixin):
         block_info_basepath=None,
         mask=None,
     ):
-        create_multiscale_dataset(
+        output_idi = create_multiscale_dataset_idi(
             output_path,
             dtype=dtype,
             voxel_size=original_idi.voxel_size,
             total_roi=roi,
             write_size=original_idi.chunk_shape * original_idi.voxel_size,
         )
-        output_idi = ImageDataInterface(output_path + "/s0", mode="r+")
 
         block_coords = [block.coords for block in blocks]
         b = db.from_sequence(

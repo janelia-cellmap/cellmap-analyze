@@ -5,6 +5,7 @@ from cellmap_analyze.util.io_util import split_dataset_path
 from funlib.persistence import prepare_ds
 import os
 import shutil
+from cellmap_analyze.util.image_data_interface import ImageDataInterface
 
 
 # From Yuri
@@ -111,3 +112,27 @@ def create_multiscale_dataset(
         ["z", "y", "x"],
     )
     return ds
+
+
+def create_multiscale_dataset_idi(
+    output_path,
+    dtype,
+    voxel_size,
+    total_roi,
+    write_size,
+    scale=0,
+    mode="w",
+    custom_fill_value=None,
+):
+    create_multiscale_dataset(
+        output_path, dtype, voxel_size, total_roi, write_size, scale=scale, mode=mode
+    )
+    if mode == "w":
+        mode = "r+"
+
+    idi = ImageDataInterface(
+        output_path + f"/s{scale}",
+        mode=mode,
+        custom_fill_value=custom_fill_value,
+    )
+    return idi
