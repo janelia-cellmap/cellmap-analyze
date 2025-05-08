@@ -66,23 +66,3 @@ def test_clean_connected_components(
         test_data,
         ground_truth,
     )
-
-
-# %%
-# from cellmap_analyze.util.image_data_interface import ImageDataInterface
-# from cellmap_analyze.util.visualization_util import view_in_neuroglancer
-
-# view_in_neuroglancer(
-#     image=ImageDataInterface(
-#         f"/tmp/pytest-of-ackermand/pytest-current/tmp0/tmp.zarr/connected_components/s0"
-#     ).to_ndarray_ts(),
-#     cc=ImageDataInterface(
-#         f"/tmp/pytest-of-ackermand/pytest-current/tmp0/tmp.zarr/test_clean_connected_components_minimum_volume_nm_3_0_maximum_volume_nm_3_5120_True/s0"
-#     ).to_ndarray_ts(),
-#     # new_filled=ImageDataInterface(
-#     #     f"/tmp/pytest-of-ackermand/pytest-current/tmp0/tmp.zarr/test_clean_connected_components_minimum_volume_nm_3_4608_maximum_volume_nm_3_inf_True/s0"
-#     # ).to_ndarray_ts(),
-# )
-# # %%
-
-# %%

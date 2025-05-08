@@ -40,4 +40,3 @@ def test_fit_lines_to_segmentations(
             np.vstack([end, start]),
             endpoints,
         )
-    # assert fit_properly
