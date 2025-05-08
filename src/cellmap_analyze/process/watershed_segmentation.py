@@ -1,0 +1,439 @@
+# %%
+import cc3d
+import numpy as np
+from cellmap_analyze.process.connected_components import ConnectedComponents
+from cellmap_analyze.util import dask_util
+from cellmap_analyze.util import io_util
+from cellmap_analyze.util.dask_util import (
+    create_block_from_index,
+    dask_computer,
+    guesstimate_npartitions,
+)
+from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.io_util import (
+    get_name_from_path,
+    split_dataset_path,
+)
+
+import logging
+import dask.bag as db
+import numpy as np
+
+from skimage.segmentation import watershed
+from skimage.feature import peak_local_max
+import edt
+import fastremap
+
+from cellmap_analyze.util.measure_util import trim_array
+from cellmap_analyze.util.mixins import ComputeConfigMixin
+from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
+
+logging.basicConfig(
+    format="%(asctime)s %(levelname)-8s %(message)s",
+    level=logging.INFO,
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(__name__)
+
+
+class WatershedSegmentation(ComputeConfigMixin):
+    def __init__(
+        self,
+        input_path,
+        output_path=None,
+        roi=None,
+        delete_tmp=False,
+        num_workers=10,
+        pseudo_neighborhood_radius_nm=100,
+    ):
+        super().__init__(num_workers)
+        self.input_path = input_path
+        self.input_idi = ImageDataInterface(self.input_path)
+        if roi is None:
+            self.roi = self.input_idi.roi
+        else:
+            self.roi = roi
+
+        self.voxel_size = self.input_idi.voxel_size
+        self.pseudo_neighborhood_radius_voxels = int(
+            np.round(pseudo_neighborhood_radius_nm / self.voxel_size[0])
+        )
+
+        output_path = output_path
+        if output_path is None:
+            output_path = self.input_path
+            output_ds_name = get_name_from_path(output_path)
+            output_ds_basepath = split_dataset_path(self.input_path)[0]
+            output_path = f"{output_ds_basepath}/{output_ds_name}_watersheded"
+
+        self.output_path = output_path
+
+        self.distance_transform_idi = create_multiscale_dataset_idi(
+            self.output_path + "_distance_transform",
+            dtype=np.float32,
+            voxel_size=self.voxel_size,
+            total_roi=self.roi,
+            write_size=self.input_idi.chunk_shape * self.voxel_size,
+        )
+        self.watershed_seeds_blockwise_idi = create_multiscale_dataset_idi(
+            self.output_path + "_seeds_blockwise",
+            dtype=np.uint64,
+            voxel_size=self.voxel_size,
+            total_roi=self.roi,
+            write_size=self.input_idi.chunk_shape * self.voxel_size,
+        )
+        self.watershed_seeds_path = self.output_path + "_seeds"
+
+        self.delete_tmp = delete_tmp
+
+    @staticmethod
+    def calculate_distance_transform_blockwise(
+        block_index, input_idi, distance_transform_idi
+    ):
+        block = create_block_from_index(
+            input_idi,
+            block_index,
+        )
+        padding_increment_voxel = block.full_block_size[0] // (
+            2 * input_idi.voxel_size[0]
+        )
+
+        max_face_value = 0
+        padding_voxels = 0
+
+        # (padding_voxels - padding_increment_voxel) is the previous padding value
+        while max_face_value > (padding_voxels - padding_increment_voxel):
+
+            padded_read_roi = block.read_roi.grow(
+                padding_voxels * input_idi.voxel_size[0],
+                padding_voxels * input_idi.voxel_size[0],
+            )
+            input = input_idi.to_ndarray_ts(padded_read_roi)
+            dt = edt.edt(input, black_border=False)
+            dt = trim_array(dt, padding_voxels)
+            # check if we have a big enough padding
+            max_face_value = np.max(
+                [
+                    dt[0].max(),
+                    dt[-1].max(),
+                    dt[:, 0].max(),
+                    dt[:, -1].max(),
+                    dt[:, :, 0].max(),
+                    dt[:, :, -1].max(),
+                ]
+            )
+            padding_voxels += padding_increment_voxel
+        dt *= input_idi.voxel_size[0]
+        input = trim_array(input, padding_voxels - padding_increment_voxel)
+        distance_transform_idi.ds[block.write_roi] = dt
+        return dt.max()
+
+    def calculate_blockwise_watershed_seeds_blockwise(
+        block_index,
+        input_idi: ImageDataInterface,
+        distance_transform_idi: ImageDataInterface,
+        watershed_seeds_blockwise_idi: ImageDataInterface,
+        pseudo_neighborhood_radius_voxels: int,
+    ):
+
+        block = create_block_from_index(
+            input_idi,
+            block_index,
+            padding=input_idi.voxel_size[0] * pseudo_neighborhood_radius_voxels,
+        )
+        distance_transform = distance_transform_idi.to_ndarray_ts(block.read_roi)
+        input = input_idi.to_ndarray_ts(block.read_roi)
+
+        global_id_offset = block_index * np.prod(
+            block.full_block_size / input_idi.voxel_size[0],
+            dtype=np.uint64,
+        )
+        coords = peak_local_max(
+            distance_transform,
+            footprint=np.ones((2 * pseudo_neighborhood_radius_voxels + 1,) * 3),
+            labels=input,
+            exclude_border=False,
+        )
+        plateau_mask = np.zeros_like(distance_transform, dtype=np.uint64)
+        plateau_mask[tuple(coords.T)] = 1
+
+        plateau_mask = trim_array(plateau_mask, pseudo_neighborhood_radius_voxels)
+        input = trim_array(input, pseudo_neighborhood_radius_voxels)
+        plateau_mask[plateau_mask > 0] += input[plateau_mask > 0]
+        plateau_labels = cc3d.connected_components(plateau_mask, connectivity=26)
+        plateau_labels[plateau_labels > 0] += global_id_offset
+        watershed_seeds_blockwise_idi.ds[block.write_roi] = plateau_labels
+
+    def calculate_blockwise_watershed_seeds(self):
+        num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
+        block_indexes = list(range(num_blocks))
+        b = db.from_sequence(
+            block_indexes,
+            npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
+        ).map(
+            WatershedSegmentation.calculate_blockwise_watershed_seeds_blockwise,
+            self.input_idi,
+            self.distance_transform_idi,
+            self.watershed_seeds_blockwise_idi,
+            self.pseudo_neighborhood_radius_voxels,
+        )
+
+        with dask_util.start_dask(
+            self.num_workers,
+            "calculate blockwise watershed seeds",
+            logger,
+        ):
+            with io_util.Timing_Messager(
+                "Calculating blockwise watershed seeds", logger
+            ):
+                dask_computer(b, self.num_workers, **self.compute_args)
+
+    def calculate_distance_transform(self):
+        num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
+        block_indexes = list(range(num_blocks))
+        b = db.from_sequence(
+            block_indexes,
+            npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
+        ).map(
+            WatershedSegmentation.calculate_distance_transform_blockwise,
+            self.input_idi,
+            self.distance_transform_idi,
+        )
+        with dask_util.start_dask(
+            self.num_workers,
+            "calculate distance transform blockwise",
+        ):
+            with io_util.Timing_Messager("Calculating distance transform", logger):
+                global_dt_max = np.ceil(b.max().compute(**self.compute_args))
+                self.global_dt_max_voxels = int(
+                    np.ceil(global_dt_max / self.input_idi.voxel_size[0])
+                )
+
+    @staticmethod
+    def watershed_blockwise(
+        block_index,
+        input_idi: ImageDataInterface,
+        distance_transform_idi: ImageDataInterface,
+        watershed_seeds_idi: ImageDataInterface,
+        watershed_idi: ImageDataInterface,
+        global_dt_max_voxels: int,
+        pseudo_neighborhood_radius_voxels: int,
+    ):
+        # NOTE: Only works for uint32 or less
+        padding_voxels = global_dt_max_voxels + pseudo_neighborhood_radius_voxels
+        block = create_block_from_index(
+            distance_transform_idi,
+            block_index,
+            padding=distance_transform_idi.voxel_size[0] * padding_voxels,
+        )
+        input = input_idi.to_ndarray_ts(block.read_roi)
+        distance_transform = distance_transform_idi.to_ndarray_ts(block.read_roi)
+
+        watershed_seeds = watershed_seeds_idi.to_ndarray_ts(block.read_roi)
+        # For each seed label >0, bump its voxels that many ULPs
+        # for seed_label in fastremap.unique(watershed_seeds):
+        #     if seed_label <= 0:
+        #         continue
+        #     mask = watershed_seeds == seed_label
+        #     # apply nextafter() seed_label times to those voxels
+        #     for _ in range(seed_label):
+        #         distance_transform[mask] = np.nextafter(
+        #             distance_transform[mask],
+        #             np.array(np.inf, dtype=distance_transform.dtype),
+        #             dtype=distance_transform.dtype,
+        #         )
+        labels = np.zeros_like(distance_transform, dtype=np.uint32)
+        for id in fastremap.unique(input):
+            if id == 0:
+                pass
+            mask = input == id
+            distance_transform_masked = distance_transform * mask
+            watershed_seeds_masked = watershed_seeds * mask
+            labels += watershed(
+                -distance_transform_masked,
+                markers=watershed_seeds_masked,
+                mask=distance_transform_masked > 0,
+                connectivity=1,
+            )
+        watershed_idi.ds[block.write_roi] = trim_array(labels, padding_voxels)
+
+    def do_watershed(self):
+        num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
+        block_indexes = list(range(num_blocks))
+        b = db.from_sequence(
+            block_indexes,
+            npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
+        ).map(
+            WatershedSegmentation.watershed_blockwise,
+            self.input_idi,
+            self.distance_transform_idi,
+            self.watershed_seeds_idi,
+            self.watershed_idi,
+            self.global_dt_max_voxels,
+            self.pseudo_neighborhood_radius_voxels,
+        )
+
+        with dask_util.start_dask(
+            self.num_workers,
+            "calculate watershed blockwise",
+            logger,
+        ):
+            with io_util.Timing_Messager("Calculating watershed", logger):
+                dask_computer(b, self.num_workers, **self.compute_args)
+
+    def calculate_watershed_segmentation(self):
+        self.calculate_distance_transform()
+        self.calculate_blockwise_watershed_seeds()
+
+        cc = ConnectedComponents(
+            connected_components_blockwise_path=self.watershed_seeds_blockwise_idi.path,
+            output_path=self.watershed_seeds_path,
+            object_labels_path=self.input_path,
+            num_workers=self.num_workers,
+            connectivity=3,
+            roi=self.roi,
+            delete_tmp=True,
+        )
+        cc.merge_connected_components_across_blocks()
+
+        self.watershed_seeds_idi = ImageDataInterface(
+            self.watershed_seeds_path + "/s0",
+            mode="r+",
+        )
+        self.watershed_idi = create_multiscale_dataset_idi(
+            self.output_path,
+            dtype=self.watershed_seeds_idi.ds.dtype,
+            voxel_size=self.voxel_size,
+            total_roi=self.roi,
+            write_size=self.input_idi.chunk_shape * self.input_idi.voxel_size,
+        )
+        self.do_watershed()
+        dask_util.delete_tmp_dataset(
+            self.watershed_seeds_blockwise_idi.path,
+            cc.blocks,
+            self.num_workers,
+            self.compute_args,
+        )
+        if self.delete_tmp:
+            dask_util.delete_tmp_dataset(
+                self.watershed_seeds_idi.path,
+                cc.blocks,
+                self.num_workers,
+                self.compute_args,
+            )
+            dask_util.delete_tmp_dataset(
+                self.distance_transform_idi.path,
+                cc.blocks,
+                self.num_workers,
+                self.compute_args,
+            )
+
+
+# WatershedSegmentation(
+#     input_path="/tmp/pytest-of-ackermand/pytest-current/tmpcurrent/tmp.zarr/image_with_holes_filled/s0",
+#     output_path="/tmp/pytest-of-ackermand/pytest-current/tmpcurrent/output.zarr/image_with_holes_filled_watershed",
+#     pseudo_neighborhood_radius_nm=20 * 4,
+#     num_workers=1,
+# ).calculate_watershed_segmentation()
+
+# %%
+# from cellmap_analyze.util.image_data_interface import ImageDataInterface
+# from cellmap_analyze.util.neuroglancer_util import view_in_neuroglancer
+# from skimage.feature import peak_local_max
+
+
+# test_case =  "segmentation_spheres" #"image_with_holes_filled"  #
+# radius = 2
+# WatershedSegmentation(
+#     input_path=f"/tmp/pytest-of-ackermand/pytest-current/tmpcurrent/tmp.zarr/{test_case}/s0",
+#     output_path=f"/tmp/pytest-of-ackermand/pytest-current/tmpcurrent/output.zarr/{test_case}_watershed",
+#     pseudo_neighborhood_radius_nm=radius * 8,
+#     num_workers=1,
+#     delete_tmp=False,
+# ).calculate_watershed_segmentation()
+# input = ImageDataInterface(
+#     f"/tmp/pytest-of-ackermand/pytest-current/tmpcurrent/tmp.zarr/{test_case}/s0"
+# ).to_ndarray_ts()
+
+# global_distance = edt.edt(input, black_border=True) * 8.0
+# import time
+
+# t0 = time.time()
+# global_coords = peak_local_max(
+#     global_distance,
+#     footprint=np.ones((2 * radius + 1,) * 3),
+#     labels=input,
+#     exclude_border=False,
+# )
+# print("peak_local_max", time.time() - t0)
+# t0 = time.time()
+# # global_coords = peak_local_max(
+# #     global_distance, footprint=ball(20), labels=input, exclude_border=False
+# # )
+# # print("peak_local_max", time.time() - t0)
+# import time
+
+# t0 = time.time()
+# print("local_maxima", time.time() - t0)
+# global_seeds = np.zeros_like(global_distance, dtype=np.uint64)
+# global_seeds[tuple(global_coords.T)] = 1
+# global_seeds[global_seeds > 0] += input[global_seeds > 0]
+# global_seeds = cc3d.connected_components(global_seeds, connectivity=26)
+# global_watershed = np.zeros_like(global_distance, dtype=np.uint32)
+# for id in fastremap.unique(input):
+#     if id == 0:
+#         pass
+#     mask = input == id
+#     distance_transform_masked = global_distance * mask
+#     watershed_seeds_masked = global_seeds * mask
+#     global_watershed += watershed(
+#         -distance_transform_masked,
+#         markers=watershed_seeds_masked,
+#         mask=distance_transform_masked > 0,
+#         connectivity=1,
+#     )
+# # For each seed label >0, bump its voxels that many ULPs
+# # for seed_label in fastremap.unique(seeds):
+# #     if seed_label <= 0:
+# #         continue
+# #     mask = seeds == seed_label
+# #     # apply nextafter() seed_label times to those voxels
+# #     for _ in range(seed_label):
+# #         global_distance[mask] = np.nextafter(
+# #             global_distance[mask],
+# #             np.array(np.inf, dtype=global_distance.dtype),
+# #             dtype=global_distance.dtype,
+# #         )
+
+# distance = ImageDataInterface(
+#     f"/tmp/pytest-of-ackermand/pytest-current/tmpcurrent/output.zarr/{test_case}_watershed_distance_transform/s0"
+# ).to_ndarray_ts()
+
+
+# view_in_neuroglancer(
+#     input=input,
+#     output=ImageDataInterface(
+#         f"/tmp/pytest-of-ackermand/pytest-current/tmpcurrent/output.zarr/{test_case}_watershed/s0"
+#     ).to_ndarray_ts(),
+#     distance=ImageDataInterface(
+#         f"/tmp/pytest-of-ackermand/pytest-current/tmpcurrent/output.zarr/{test_case}_watershed_distance_transform/s0"
+#     ).to_ndarray_ts(),
+#     seeds=ImageDataInterface(
+#         f"/tmp/pytest-of-ackermand/pytest-current/tmpcurrent/output.zarr/{test_case}_watershed_seeds/s0"
+#     ).to_ndarray_ts(),
+#     # seeds_blockwise=ImageDataInterface(
+#     #     f"/tmp/pytest-of-ackermand/pytest-current/tmpcurrent/output.zarr/{test_case}_watershed_seeds_blockwise/s0"
+#     # ).to_ndarray_ts(),
+#     global_distance=global_distance,
+#     global_seeds=global_seeds,
+#     global_watershed=global_watershed,
+# )
+
+# # %%
+# np.array_equal(
+#     ImageDataInterface(
+#         f"/tmp/pytest-of-ackermand/pytest-current/tmpcurrent/output.zarr/{test_case}_watershed/s0"
+#     ).to_ndarray_ts(),
+#     global_watershed,
+# )
+# # %%
