@@ -241,13 +241,13 @@ class FillHoles(ComputeConfigMixin):
             compute_args=self.compute_args,
         )
         self.relabel_dataset()
-        ConnectedComponents.delete_tmp_dataset(
+        dask_util.delete_tmp_dataset(
             self.holes_path + "/s0",
             self.blocks,
             self.num_workers,
             self.compute_args,
         )
-        ConnectedComponents.delete_tmp_dataset(
+        dask_util.delete_tmp_dataset(
             self.holes_path + "_blockwise/s0",
             self.blocks,
             self.num_workers,

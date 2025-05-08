@@ -167,7 +167,7 @@ class FilterIDs(ComputeConfigMixin):
             self.compute_args,
             self.temp_block_info_path,
         )
-        ConnectedComponents.delete_tmp_dataset(
+        dask_util.delete_tmp_dataset(
             self.temp_block_info_path,
             self.blocks,
             self.num_workers,

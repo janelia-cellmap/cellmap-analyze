@@ -231,7 +231,7 @@ class CleanConnectedComponents(ComputeConfigMixin):
             mask=self.mask,
         )
         if self.delete_tmp:
-            ConnectedComponents.delete_tmp_dataset(
+            dask_util.delete_tmp_dataset(
                 self.temp_block_info_path,
                 self.blocks,
                 self.num_workers,
