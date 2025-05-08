@@ -25,7 +25,8 @@ import itertools
 import fastremap
 import os
 from cellmap_analyze.util.mask_util import MasksFromConfig
-from cellmap_analyze.util.zarr_util import create_multiscale_dataset
+from cellmap_analyze.util.mixins import ComputeConfigMixin
+from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
 import cc3d
 
 logging.basicConfig(
@@ -36,7 +37,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class ConnectedComponents:
+class ConnectedComponents(ComputeConfigMixin):
     def __init__(
         self,
         output_path,
@@ -45,6 +46,7 @@ class ConnectedComponents:
         intensity_threshold_maximum=np.inf,  # exclusive
         mask_config=None,
         connected_components_blockwise_path=None,
+        object_labels_path=None,
         roi=None,
         minimum_volume_nm_3=0,
         maximum_volume_nm_3=np.inf,
@@ -55,6 +57,7 @@ class ConnectedComponents:
         calculating_holes=False,
         fill_holes=False,
     ):
+        super().__init__(num_workers)
         if input_path and connected_components_blockwise_path:
             raise Exception("Cannot provide both input_path and tmp_blockwise_path")
         if not input_path and not connected_components_blockwise_path:
@@ -66,6 +69,10 @@ class ConnectedComponents:
             template_idi = self.connected_components_blockwise_idi = ImageDataInterface(
                 connected_components_blockwise_path
             )
+
+        self.object_labels_idi = None
+        if object_labels_path:
+            self.object_labels_idi = ImageDataInterface(object_labels_path)
 
         if roi is None:
             self.roi = template_idi.roi
@@ -88,31 +95,20 @@ class ConnectedComponents:
 
         if input_path:
             self.input_path = input_path
-            self.connected_components_blockwise_path = (
-                output_ds_basepath + "/" + output_ds_name + "_blockwise"
-            )
             self.intensity_threshold_minimum = intensity_threshold_minimum
             self.intensity_threshold_maximum = intensity_threshold_maximum
-            create_multiscale_dataset(
-                self.connected_components_blockwise_path,
+            self.connected_components_blockwise_idi = create_multiscale_dataset_idi(
+                output_ds_basepath + "/" + output_ds_name + "_blockwise",
                 dtype=np.uint64,
                 voxel_size=self.voxel_size,
                 total_roi=self.roi,
                 write_size=template_idi.chunk_shape * self.voxel_size,
-            )
-            self.connected_components_blockwise_idi = ImageDataInterface(
-                self.connected_components_blockwise_path + "/s0",
-                mode="r+",
                 custom_fill_value=self.oob_value,
             )
             self.do_full_connected_components = True
         else:
-            self.connected_components_blockwise_path = (
-                connected_components_blockwise_path
-            )
-
             self.connected_components_blockwise_idi = ImageDataInterface(
-                self.connected_components_blockwise_path
+                connected_components_blockwise_path
             )
         self.output_path = output_path
 
@@ -137,26 +133,6 @@ class ConnectedComponents:
         self.invert = invert
         self.delete_tmp = delete_tmp
         self.fill_holes = fill_holes
-
-        self.num_workers = num_workers
-        self.compute_args = {}
-        if self.num_workers == 1:
-            self.compute_args = {"scheduler": "single-threaded"}
-            self.num_local_threads_available = 1
-            self.local_config = None
-        else:
-            self.num_local_threads_available = len(os.sched_getaffinity(0))
-            self.local_config = {
-                "jobqueue": {
-                    "local": {
-                        "ncpus": self.num_local_threads_available,
-                        "processes": self.num_local_threads_available,
-                        "cores": self.num_local_threads_available,
-                        "log-directory": "job-logs",
-                        "name": "dask-worker",
-                    }
-                }
-            }
 
     @staticmethod
     def calculate_block_connected_components(
@@ -252,29 +228,56 @@ class ConnectedComponents:
                 dask_computer(b, self.num_workers, **self.compute_args)
 
     @staticmethod
-    def get_touching_ids(data, mask, connectivity=2):
-        # https://stackoverflow.com/questions/72452267/finding-identity-of-touching-labels-objects-masks-in-images-using-python
-        g, nodes = pixel_graph(
-            data,
-            mask=mask,
-            connectivity=connectivity,
-        )
+    def get_touching_ids(data, mask, connectivity=2, object_labels=None):
+        """
+        Find all pairs of different labels in `data` whose pixels touch
+        (with given connectivity), optionally restricted to those within the same object.
 
+        Parameters
+        ----------
+        data : ndarray of int
+            Label image.
+        mask : ndarray of bool
+            Which pixels to consider in building the graph.
+        connectivity : {1, 2}, optional
+            Pixel‐connectivity for the graph (4‐ or 8‐connected in 2D).
+        object_labels : ndarray of int, optional
+            Additional label/image of same shape.  Only touching‐pairs
+            whose object_labels match are kept.
+
+        Returns
+        -------
+        touching_ids : set of tuple(int, int)
+            Each tuple (i, j) with i < j indicates two different `data`-labels that touch.
+        """
+        # initially from here: https://stackoverflow.com/questions/72452267/finding-identity-of-touching-labels-objects-masks-in-images-using-python
+        # build pixel‐adjacency graph
+        g, nodes = pixel_graph(data, mask=mask, connectivity=connectivity)
+
+        # extract all neighbor‐pairs
         coo = g.tocoo()
         center_coords = nodes[coo.row]
         neighbor_coords = nodes[coo.col]
 
-        center_values = data.ravel()[center_coords]
-        neighbor_values = data.ravel()[neighbor_coords]
+        center_vals = data.ravel()[center_coords]
+        neighbor_vals = data.ravel()[neighbor_coords]
 
-        # sort to have lowest pair first
-        touching_ids = np.sort(
-            np.stack([center_values, neighbor_values], axis=1), axis=1
-        )
-        touching_ids = touching_ids[touching_ids[:, 0] != touching_ids[:, 1]]
-        # convert touching_ids to a set of tuples
-        touching_ids = set(map(tuple, touching_ids))
+        # if object_labels given, filter to only same-object contacts
+        if object_labels is not None:
+            obj_center = object_labels.ravel()[center_coords]
+            obj_neighbor = object_labels.ravel()[neighbor_coords]
+            same_object = obj_center == obj_neighbor
+            center_vals = center_vals[same_object]
+            neighbor_vals = neighbor_vals[same_object]
 
+        # remove self‐touches, sort pairs so smaller id comes first
+        pairs = np.stack([center_vals, neighbor_vals], axis=1)
+        unequal = pairs[:, 0] != pairs[:, 1]
+        pairs = pairs[unequal]
+        pairs.sort(axis=1)  # row‐wise sort
+
+        # unique set of tuples
+        touching_ids = {tuple(p) for p in pairs}
         return touching_ids
 
     @staticmethod
@@ -310,6 +313,7 @@ class ConnectedComponents:
         block_index,
         connected_components_blockwise_idi: ImageDataInterface,
         connectivity,
+        object_labels_idi=None,
     ):
         try:
             block = create_block_from_index(
@@ -320,11 +324,14 @@ class ConnectedComponents:
             data = connected_components_blockwise_idi.to_ndarray_ts(
                 block.read_roi,
             )
+            object_labels = None
+            if object_labels_idi is not None:
+                object_labels = object_labels_idi.to_ndarray_ts(block.read_roi)
 
             mask = data.astype(bool)
             mask[2:, 2:, 2:] = False
             touching_ids = ConnectedComponents.get_touching_ids(
-                data, mask=mask, connectivity=connectivity
+                data, mask=mask, connectivity=connectivity, object_labels=object_labels
             )
 
             # get information only from actual block(not including padding)
@@ -382,6 +389,7 @@ class ConnectedComponents:
             ConnectedComponents.get_connected_component_information_blockwise,
             self.connected_components_blockwise_idi,
             self.connectivity,
+            self.object_labels_idi,
         )
 
         with dask_util.start_dask(
@@ -509,14 +517,13 @@ class ConnectedComponents:
         block_info_basepath=None,
         mask=None,
     ):
-        create_multiscale_dataset(
+        output_idi = create_multiscale_dataset_idi(
             output_path,
             dtype=dtype,
             voxel_size=original_idi.voxel_size,
             total_roi=roi,
             write_size=original_idi.chunk_shape * original_idi.voxel_size,
         )
-        output_idi = ImageDataInterface(output_path + "/s0", mode="r+")
 
         block_coords = [block.coords for block in blocks]
         b = db.from_sequence(
@@ -533,43 +540,6 @@ class ConnectedComponents:
         with dask_util.start_dask(num_workers, "relabel dataset", logger):
             with io_util.Timing_Messager("Relabeling dataset", logger):
                 dask_computer(b, num_workers, **compute_args)
-
-    @staticmethod
-    def delete_chunks(block_coords, tmp_blockwise_ds_path):
-        block_coords_string = "/".join([str(c) for c in block_coords])
-        delete_name = f"{tmp_blockwise_ds_path}/{block_coords_string}"
-        if os.path.exists(delete_name) and (
-            os.path.isfile(delete_name) or os.listdir(delete_name) == []
-        ):
-            os.system(f"rm -rf {delete_name}")
-            if len(block_coords) == 3:
-                # if it is the highest level then we also remove the pkl file
-                os.system(f"rm -rf {delete_name}.pkl")
-
-    @staticmethod
-    def delete_tmp_dataset(path_to_dataset, blocks, num_workers, compute_args):
-        for depth in range(3, 0, -1):
-            all_block_coords = set([block.coords[:depth] for block in blocks])
-            b = db.from_sequence(
-                all_block_coords,
-                npartitions=guesstimate_npartitions(blocks, num_workers),
-            ).map(
-                ConnectedComponents.delete_chunks,
-                path_to_dataset,
-            )
-
-            with dask_util.start_dask(
-                num_workers,
-                f"delete blockwise depth: {depth}",
-                logger,
-            ):
-                with io_util.Timing_Messager(
-                    f"Deleting blockwise depth: {depth}", logger
-                ):
-                    dask_computer(b, num_workers, **compute_args)
-
-        basepath, _ = split_dataset_path(path_to_dataset)
-        os.system(f"rm -rf {basepath}/{get_name_from_path(path_to_dataset)}")
 
     def get_connected_components(self):
         self.calculate_connected_components_blockwise()
@@ -599,7 +569,7 @@ class ConnectedComponents:
             self.compute_args,
         )
         if self.delete_tmp:
-            ConnectedComponents.delete_tmp_dataset(
+            dask_util.delete_tmp_dataset(
                 self.connected_components_blockwise_idi.path,
                 self.blocks,
                 self.num_workers,

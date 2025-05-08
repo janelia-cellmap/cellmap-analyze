@@ -1,0 +1,20 @@
+pip install git+https://github.com/pattonw/mwatershed
+fastremap
+funlib.geometry
+numpy
+pandas
+connected-components-3d
+dask[distributed]
+fastmorph
+scipy
+scikit-image
+tensorstore
+tqdm
+pytest
+zarr==2.18.5
+numcodecs==0.13.0
+funlib.evaluate
+cython
+pip install git+https://github.com/funkelab/funlib.evaluate.git
+pyarrow
+neuroglancer

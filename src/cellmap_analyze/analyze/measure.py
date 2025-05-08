@@ -21,6 +21,8 @@ import os
 from tqdm import tqdm
 import time
 
+from cellmap_analyze.util.mixins import ComputeConfigMixin
+
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
     level=logging.INFO,
@@ -29,7 +31,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class Measure:
+class Measure(ComputeConfigMixin):
     def __init__(
         self,
         input_path,
@@ -38,6 +40,7 @@ class Measure:
         num_workers=10,
         **kwargs,
     ):
+        super().__init__(num_workers)
         self.input_path = input_path
         self.input_idi = ImageDataInterface(self.input_path)
         self.output_path = output_path
@@ -80,10 +83,6 @@ class Measure:
         else:
             self.roi = roi
         self.voxel_size = self.input_idi.voxel_size
-        self.num_workers = num_workers
-        self.compute_args = {}
-        if self.num_workers == 1:
-            self.compute_args = {"scheduler": "single-threaded"}
 
     @staticmethod
     def get_measurements_blockwise(

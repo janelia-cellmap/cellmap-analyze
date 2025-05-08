@@ -8,7 +8,12 @@ import shutil
 
 
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
-from .io_util import Timing_Messager, print_with_datetime
+from .io_util import (
+    Timing_Messager,
+    print_with_datetime,
+    split_dataset_path,
+    get_name_from_path,
+)
 from datetime import datetime
 import yaml
 from yaml.loader import SafeLoader
@@ -17,7 +22,7 @@ from funlib.geometry import Coordinate, Roi
 import numpy as np
 import logging
 from contextlib import contextmanager, nullcontext
-
+import dask.bag as db
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -317,3 +322,38 @@ def setup_execution_directory(config_path, logger):
     print_with_datetime(f"Setup working directory as {execution_dir}.", logger)
 
     return execution_dir
+
+
+def delete_chunks(block_coords, tmp_blockwise_ds_path):
+    block_coords_string = "/".join([str(c) for c in block_coords])
+    delete_name = f"{tmp_blockwise_ds_path}/{block_coords_string}"
+    if os.path.exists(delete_name) and (
+        os.path.isfile(delete_name) or os.listdir(delete_name) == []
+    ):
+        os.system(f"rm -rf {delete_name}")
+        if len(block_coords) == 3:
+            # if it is the highest level then we also remove the pkl file
+            os.system(f"rm -rf {delete_name}.pkl")
+
+
+def delete_tmp_dataset(path_to_dataset, blocks, num_workers, compute_args):
+    for depth in range(3, 0, -1):
+        all_block_coords = set([block.coords[:depth] for block in blocks])
+        b = db.from_sequence(
+            all_block_coords,
+            npartitions=guesstimate_npartitions(blocks, num_workers),
+        ).map(
+            delete_chunks,
+            path_to_dataset,
+        )
+
+        with start_dask(
+            num_workers,
+            f"delete blockwise depth: {depth}",
+            logger,
+        ):
+            with Timing_Messager(f"Deleting blockwise depth: {depth}", logger):
+                dask_computer(b, num_workers, **compute_args)
+
+    basepath, _ = split_dataset_path(path_to_dataset)
+    os.system(f"rm -rf {basepath}/{get_name_from_path(path_to_dataset)}")

@@ -11,6 +11,7 @@ from cellmap_analyze.util.image_data_interface import ImageDataInterface
 import logging
 import pandas as pd
 import dask.dataframe as dd
+from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.util.neuroglancer_util import write_out_annotations
 import fastremap
 import cc3d
@@ -23,7 +24,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class FitLinesToSegmentations:
+class FitLinesToSegmentations(ComputeConfigMixin):
     def __init__(
         self,
         input_csv,
@@ -32,6 +33,7 @@ class FitLinesToSegmentations:
         output_annotations_dir=None,
         num_workers=8,
     ):
+        super().__init__(num_workers)
         self.df = pd.read_csv(input_csv)  # , nrows=1000)
         self.segmentation_idi = ImageDataInterface(input_path)
         self.voxel_size = self.segmentation_idi.voxel_size
@@ -41,9 +43,6 @@ class FitLinesToSegmentations:
             self.output_csv = input_csv.replace(".csv", "_lines.csv")
 
         self.output_annotations_dir = output_annotations_dir
-        self.compute_args = {}
-        if self.num_workers == 1:
-            self.compute_args = {"scheduler": "single-threaded"}
 
     @staticmethod
     def find_min_max_projected_points(points, line_point, line_direction):

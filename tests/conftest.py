@@ -183,6 +183,21 @@ def segmentation_cylinders(
 
 
 @pytest.fixture(scope="session")
+def segmentation_spheres(
+    shape=(50, 50, 50),
+    spheres=[((12, 12, 12), 5), ((25, 25, 25), 20), ((40, 40, 40), 8)],
+):
+    seg = np.zeros(shape, dtype=np.uint8)
+    z, y, x = np.indices(shape)
+
+    for label, ((zc, yc, xc), r) in enumerate(spheres, start=1):
+        mask = (z - zc) ** 2 + (y - yc) ** 2 + (x - xc) ** 2 < r**2
+        seg[mask] = label
+    seg[0:6, 15:36, 22:29] = 2
+    return seg
+
+
+@pytest.fixture(scope="session")
 def affinities_offsets():
     return [
         [1, 0, 0],
@@ -537,6 +552,7 @@ def test_image_dict(
     segmentation_1,
     segmentation_2,
     segmentation_cylinders,
+    segmentation_spheres,
     segmentation_cells,
     affinities_cylinders,
     segmentation_1_downsampled,
@@ -554,6 +570,7 @@ def test_image_dict(
         "mask_two": mask_two,
         "segmentation_1": segmentation_1,
         "segmentation_cylinders": segmentation_cylinders,
+        "segmentation_spheres": segmentation_spheres,
         "affinities_cylinders": affinities_cylinders,
         "segmentation_1_downsampled": segmentation_1_downsampled,
         "segmentation_2": segmentation_2,
@@ -584,6 +601,7 @@ def write_zarrs(tmp_zarr, test_image_dict, voxel_size, chunk_size):
             if (
                 data_name != "segmentation_cylinders"
                 and data_name != "affinities_cylinders"
+                and data_name != "segmentation_spheres"
             )
             else np.array((20, 20, 20)) * current_voxel_size
         )

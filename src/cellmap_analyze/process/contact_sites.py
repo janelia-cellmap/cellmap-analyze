@@ -16,8 +16,9 @@ from cellmap_analyze.process.connected_components import ConnectedComponents
 from scipy.spatial import KDTree
 import dask.bag as db
 from cellmap_analyze.util.measure_util import trim_array
+from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.util.zarr_util import (
-    create_multiscale_dataset,
+    create_multiscale_dataset_idi,
 )
 import cc3d
 
@@ -29,7 +30,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class ContactSites:
+class ContactSites(ComputeConfigMixin):
     def __init__(
         self,
         organelle_1_path,
@@ -40,6 +41,7 @@ class ContactSites:
         num_workers=10,
         roi=None,
     ):
+        super().__init__(num_workers)
         self.organelle_1_idi = ImageDataInterface(organelle_1_path)
         self.organelle_2_idi = ImageDataInterface(organelle_2_path)
         output_voxel_size = min(
@@ -65,7 +67,6 @@ class ContactSites:
             )
 
         self.output_path = output_path
-        self.output_path_blockwise = output_path + "_blockwise"
 
         if minimum_volume_nm_3 is None:
             minimum_volume_nm_3 = (
@@ -76,22 +77,13 @@ class ContactSites:
         self.num_workers = num_workers
         self.voxel_volume = np.prod(self.voxel_size)
         self.voxel_face_area = self.voxel_size[1] * self.voxel_size[2]
-
-        create_multiscale_dataset(
-            self.output_path_blockwise,
+        self.contact_sites_blockwise_idi = create_multiscale_dataset_idi(
+            output_path + "_blockwise",
             dtype=np.uint64,
             voxel_size=self.voxel_size,
             total_roi=self.roi,
             write_size=self.organelle_1_idi.chunk_shape * self.voxel_size,
         )
-
-        self.contact_sites_blockwise_idi = ImageDataInterface(
-            self.output_path_blockwise + "/s0", mode="r+"
-        )
-
-        self.compute_args = {}
-        if self.num_workers == 1:
-            self.compute_args = {"scheduler": "single-threaded"}
 
     @staticmethod
     def get_ndarray_contact_sites(
@@ -212,7 +204,7 @@ class ContactSites:
         self.calculate_contact_sites_blockwise()
 
         cc = ConnectedComponents(
-            connected_components_blockwise_path=self.output_path_blockwise + "/s0",
+            connected_components_blockwise_path=self.contact_sites_blockwise_idi.path,
             output_path=self.output_path,
             roi=self.roi,
             num_workers=self.num_workers,

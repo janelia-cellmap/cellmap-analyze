@@ -19,6 +19,8 @@ import dask.bag as db
 import os
 import pandas as pd
 
+from cellmap_analyze.util.mixins import ComputeConfigMixin
+
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
     level=logging.INFO,
@@ -27,7 +29,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class FilterIDs:
+class FilterIDs(ComputeConfigMixin):
     def __init__(
         self,
         input_path,
@@ -38,6 +40,7 @@ class FilterIDs:
         roi=None,
         num_workers=10,
     ):
+        super().__init__(num_workers)
         # must have either ids_to_keep or ids_to_remove not both
         if ids_to_keep is None and ids_to_remove is None:
             raise ValueError("Must provide either ids_to_keep or ids_to_remove")
@@ -88,26 +91,6 @@ class FilterIDs:
         output_ds_basepath = split_dataset_path(self.output_path)[0]
         self.output_ds_path = f"{output_ds_basepath}/{output_ds_name}_filteredIDs"
         self.temp_block_info_path = self.output_ds_path + "_blocks_tmp"
-
-        self.num_workers = num_workers
-        self.compute_args = {}
-        if self.num_workers == 1:
-            self.compute_args = {"scheduler": "single-threaded"}
-            self.num_local_threads_available = 1
-            self.local_config = None
-        else:
-            self.num_local_threads_available = len(os.sched_getaffinity(0))
-            self.local_config = {
-                "jobqueue": {
-                    "local": {
-                        "ncpus": self.num_local_threads_available,
-                        "processes": self.num_local_threads_available,
-                        "cores": self.num_local_threads_available,
-                        "log-directory": "job-logs",
-                        "name": "dask-worker",
-                    }
-                }
-            }
 
     @staticmethod
     def get_object_ids_blockwise(block_index, input_idi: ImageDataInterface):
@@ -184,7 +167,7 @@ class FilterIDs:
             self.compute_args,
             self.temp_block_info_path,
         )
-        ConnectedComponents.delete_tmp_dataset(
+        dask_util.delete_tmp_dataset(
             self.temp_block_info_path,
             self.blocks,
             self.num_workers,
