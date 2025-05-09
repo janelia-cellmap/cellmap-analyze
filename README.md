@@ -12,11 +12,13 @@ A suite of Dask-powered tools for processing and analyzing terabyte-scale 3D seg
 
 | Tool                     | CLI Command                  | Description                                                 |
 | ------------------------ | ---------------------------- | ----------------------------------------------------------- |
-| **Connected Components** | `connected_components`       | Threshold and mask segmentations.                           |
-| **Clean Components**     | `clean_connected_components` | Refine and clean existing segmentations.                    |
-| **Contact Sites**        | `contact_sites`              | Identify object contact regions with configurable contact distance. |
-| **Fill Holes**           | `filling_holes`              | Fill interior gaps in segmented volumes.                    |
-| **Filter IDs**           | `filter_ids`                 | Exclude unwanted segmentation IDs.                          |
+| **Connected Components** | `connected-components`       | Threshold and mask segmentations.                           |
+| **Clean Components**     | `clean-connected-components` | Refine and clean existing segmentations.                    |
+| **Contact Sites**        | `contact-sites`              | Identify object contact regions with configurable contact distance. |
+| **Fill Holes**           | `filling-holes`              | Fill interior gaps in segmented volumes.                    |
+| **Filter IDs**           | `filter-ids`                 | Exclude unwanted segmentation IDs.                          |
+| **Mutex Watershed**           | `mws`                 | Exclude unwanted segmentation IDs.                          |
+
 
 ### Analysis Tools
 
