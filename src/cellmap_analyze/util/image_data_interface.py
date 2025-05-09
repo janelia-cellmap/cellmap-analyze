@@ -223,9 +223,15 @@ class ImageDataInterface:
         self.offset = self.ds.roi.offset
 
         if "voxel_size" in self.ds.data.attrs:
-            self.voxel_size = Coordinate(self.ds.data.attrs["voxel_size"])
-            self.roi *= self.voxel_size
-            self.offset *= self.voxel_size
+            voxel_size = Coordinate(self.ds.data.attrs["voxel_size"])
+            if self.voxel_size != voxel_size:
+                # precedence given to the latter
+                self.roi /= voxel_size
+                self.offset /= voxel_size
+
+                self.voxel_size = Coordinate(self.ds.data.attrs["voxel_size"])
+                self.roi *= self.voxel_size
+                self.offset *= self.voxel_size
 
         self.custom_fill_value = custom_fill_value
         self.concurrency_limit = concurrency_limit
