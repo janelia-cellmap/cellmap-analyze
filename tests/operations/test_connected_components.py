@@ -95,3 +95,45 @@ def test_connected_components_filled(
         test_data,
         ground_truth,
     )
+
+
+def test_connected_components_chunk_shape(
+    tmp_zarr,
+    image_with_holes,
+):
+    original_chunk_shape = ImageDataInterface(
+        f"{tmp_zarr}/test_connected_components_hole_filling_filled/s0"
+    ).chunk_shape
+    cc = ConnectedComponents(
+        input_path=f"{tmp_zarr}/image_with_holes/s0",
+        output_path=f"{tmp_zarr}/test_connected_components_hole_filling",
+        intensity_threshold_minimum=1,
+        num_workers=1,
+        connectivity=1,
+        fill_holes=True,
+        chunk_shape=list(original_chunk_shape * 2),
+    )
+    cc.get_connected_components()
+    test_data_idi = ImageDataInterface(
+        f"{tmp_zarr}/test_connected_components_hole_filling_filled/s0"
+    )
+    test_data = test_data_idi.to_ndarray_ts()
+
+    ground_truth_filled = measure.label(image_with_holes > 0, connectivity=1).astype(
+        np.uint64
+    )
+    ground_truth = np.zeros_like(ground_truth_filled)
+    for id in np.unique(ground_truth_filled[ground_truth_filled > 0]):
+        ground_truth += (
+            ndimage.binary_fill_holes(
+                ground_truth_filled == id, ndimage.generate_binary_structure(3, 1)
+            ).astype(np.uint64)
+            * id
+        )
+    assert (
+        np.array_equal(
+            test_data,
+            ground_truth,
+        )
+        and test_data_idi.chunk_shape == original_chunk_shape * 2
+    )

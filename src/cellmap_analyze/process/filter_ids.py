@@ -39,6 +39,7 @@ class FilterIDs(ComputeConfigMixin):
         binarize=False,
         roi=None,
         num_workers=10,
+        chunk_shape=None,
     ):
         super().__init__(num_workers)
         # must have either ids_to_keep or ids_to_remove not both
@@ -76,7 +77,7 @@ class FilterIDs(ComputeConfigMixin):
             )
 
         self.input_path = input_path
-        self.input_idi = ImageDataInterface(self.input_path)
+        self.input_idi = ImageDataInterface(self.input_path, chunk_shape=chunk_shape)
         if roi is None:
             self.roi = self.input_idi.roi
         else:

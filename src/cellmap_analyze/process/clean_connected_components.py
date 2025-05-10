@@ -45,11 +45,12 @@ class CleanConnectedComponents(ComputeConfigMixin):
         connectivity=2,
         fill_holes=False,
         delete_tmp=True,
+        chunk_shape=None,
     ):
         super().__init__(num_workers)
 
         self.input_path = input_path
-        self.input_idi = ImageDataInterface(self.input_path)
+        self.input_idi = ImageDataInterface(self.input_path, chunk_shape=chunk_shape)
         if roi is None:
             self.roi = self.input_idi.roi
         else:

@@ -40,10 +40,11 @@ class ContactSites(ComputeConfigMixin):
         minimum_volume_nm_3=None,
         num_workers=10,
         roi=None,
+        chunk_shape=None,
     ):
         super().__init__(num_workers)
-        self.organelle_1_idi = ImageDataInterface(organelle_1_path)
-        self.organelle_2_idi = ImageDataInterface(organelle_2_path)
+        self.organelle_1_idi = ImageDataInterface(organelle_1_path, chunk_shape=chunk_shape)
+        self.organelle_2_idi = ImageDataInterface(organelle_2_path, chunk_shape=chunk_shape)
         output_voxel_size = min(
             self.organelle_1_idi.voxel_size, self.organelle_2_idi.voxel_size
         )

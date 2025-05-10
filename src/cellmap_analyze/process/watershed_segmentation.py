@@ -113,10 +113,11 @@ class FlawedWatershedSegmentation(ComputeConfigMixin):
         delete_tmp=False,
         num_workers=10,
         pseudo_neighborhood_radius_nm=100,
+        chunk_shape=None,
     ):
         super().__init__(num_workers)
         self.input_path = input_path
-        self.input_idi = ImageDataInterface(self.input_path)
+        self.input_idi = ImageDataInterface(self.input_path, chunk_shape=chunk_shape)
         if roi is None:
             self.roi = self.input_idi.roi
         else:
