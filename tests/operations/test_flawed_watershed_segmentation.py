@@ -1,5 +1,5 @@
 import pytest
-from cellmap_analyze.process.watershed_segmentation import WatershedSegmentation
+from cellmap_analyze.process.watershed_segmentation import FlawedWatershedSegmentation
 from tests.test_utils import arrays_equal_up_to_id_ordering
 import edt
 import numpy as np
@@ -61,13 +61,13 @@ def test_watershed_segmentation(
     output_path = f"{tmp_zarr}/test_watershed_segmentation_{image_name}"
     voxel_size = ImageDataInterface(input_path).ds.voxel_size[0]
 
-    ws = WatershedSegmentation(
+    ws = FlawedWatershedSegmentation(
         input_path=input_path,
         output_path=output_path,
         pseudo_neighborhood_radius_nm=pseudo_neighborhood_radius_voxels * voxel_size,
         num_workers=1,
     )
-    ws.calculate_watershed_segmentation()
+    ws.get_watershed_segmentation()
 
     test_data = ImageDataInterface(f"{output_path}/s0").to_ndarray_ts()
 

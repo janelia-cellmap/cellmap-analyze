@@ -64,6 +64,18 @@ def mutex_watershed():
         mws.get_connected_components()
 
 
+def watershed_segmentation():
+    from cellmap_analyze.process.watershed_segmentation import (
+        FlawedWatershedSegmentation,
+    )
+
+    rp = RunProperties()
+    with io_util.tee_streams(rp.logpath):
+        os.chdir(rp.execution_directory)
+        mws = FlawedWatershedSegmentation(**rp.run_config)
+        mws.get_watershed_segmentation()
+
+
 def filter_ids():
     from cellmap_analyze.process.filter_ids import FilterIDs
 

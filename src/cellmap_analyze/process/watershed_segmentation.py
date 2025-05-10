@@ -34,9 +34,77 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+# NOTE: Broken blockwise attempt at watershed segmentation; doesn't work because needs to be global, eg in the case of a triangle
+# import numpy as np
+# from scipy import ndimage as ndi
+# from skimage.feature import peak_local_max
+# from skimage.segmentation import watershed
+# import matplotlib.pyplot as plt
+
+# # 1. Create a blank 500×500 image
+# img = np.zeros((500, 500), dtype=np.uint8)
+
+# # 2. Define two circles of different radii
+# r1, r2 = 40, 10
+# center1 = (250, 150)  # (row, col)
+# center2 = (250, 350)
+
+# # 3. Draw the circles
+# Y, X = np.ogrid[:500, :500]
+# mask1 = (Y - center1[0])**2 + (X - center1[1])**2 <= r1**2
+# mask2 = (Y - center2[0])**2 + (X - center2[1])**2 <= r2**2
+# img[mask1] = 255
+# img[mask2] = 255
+
+# # 4. Draw a connecting cone (tapered bar)
+# for col in range(center1[1], center2[1] + 1):
+#     # interpolation factor 0→1
+#     t = (col - center1[1]) / float(center2[1] - center1[1])
+#     # linearly interpolated radius
+#     r = r1 + t * (r2 - r1)
+#     top = int(center1[0] - r)
+#     bottom = int(center1[0] + r)
+#     img[top:bottom + 1, col] = 255
+
+# # 5. Compute the Euclidean distance transform
+# distance = ndi.distance_transform_edt(img)
+
+# # 6. Find the two main peaks in the distance map
+# coords = peak_local_max(
+#     distance,
+#     footprint=np.ones((10, 10)),  # large footprint to detect two wells
+#     labels=img
+# )
+
+# # 7. Create marker image from peak coordinates
+# markers = np.zeros_like(img, dtype=int)
+# for i, (r, c) in enumerate(coords, start=1):
+#     markers[r, c] = i
+
+# # 8. Apply watershed using these markers
+# labels = watershed(-distance, markers, mask=img)
+
+# # 9. Plot everything
+# fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+
+# axes[0].imshow(img, cmap="gray")
+# axes[0].set_title("Original Conebell")
+# axes[0].axis("off")
+
+# axes[1].imshow(distance, cmap="magma")
+# axes[1].plot(coords[:, 1], coords[:, 0], "r.", markersize=12)
+# axes[1].set_title("Distance Transform + Peaks")
+# axes[1].axis("off")
+
+# axes[2].imshow(labels, cmap="nipy_spectral")
+# axes[2].set_title("Watershed Segmentation")
+# axes[2].axis("off")
+
+# plt.tight_layout()
+# plt.show()
 
 
-class WatershedSegmentation(ComputeConfigMixin):
+class FlawedWatershedSegmentation(ComputeConfigMixin):
     def __init__(
         self,
         input_path,
@@ -161,7 +229,9 @@ class WatershedSegmentation(ComputeConfigMixin):
         plateau_mask = trim_array(plateau_mask, pseudo_neighborhood_radius_voxels)
         input = trim_array(input, pseudo_neighborhood_radius_voxels)
         plateau_mask[plateau_mask > 0] += input[plateau_mask > 0]
-        plateau_labels = cc3d.connected_components(plateau_mask, connectivity=26)
+        plateau_labels = cc3d.connected_components(
+            plateau_mask, connectivity=26, out_dtype=np.uint64
+        )
         plateau_labels[plateau_labels > 0] += global_id_offset
         watershed_seeds_blockwise_idi.ds[block.write_roi] = plateau_labels
 
@@ -172,7 +242,7 @@ class WatershedSegmentation(ComputeConfigMixin):
             block_indexes,
             npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
         ).map(
-            WatershedSegmentation.calculate_blockwise_watershed_seeds_blockwise,
+            FlawedWatershedSegmentation.calculate_blockwise_watershed_seeds_blockwise,
             self.input_idi,
             self.distance_transform_idi,
             self.watershed_seeds_blockwise_idi,
@@ -196,13 +266,12 @@ class WatershedSegmentation(ComputeConfigMixin):
             block_indexes,
             npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
         ).map(
-            WatershedSegmentation.calculate_distance_transform_blockwise,
+            FlawedWatershedSegmentation.calculate_distance_transform_blockwise,
             self.input_idi,
             self.distance_transform_idi,
         )
         with dask_util.start_dask(
-            self.num_workers,
-            "calculate distance transform blockwise",
+            self.num_workers, "calculate distance transform blockwise", logger
         ):
             with io_util.Timing_Messager("Calculating distance transform", logger):
                 global_dt_max = np.ceil(b.max().compute(**self.compute_args))
@@ -265,7 +334,7 @@ class WatershedSegmentation(ComputeConfigMixin):
             block_indexes,
             npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
         ).map(
-            WatershedSegmentation.watershed_blockwise,
+            FlawedWatershedSegmentation.watershed_blockwise,
             self.input_idi,
             self.distance_transform_idi,
             self.watershed_seeds_idi,
@@ -282,7 +351,7 @@ class WatershedSegmentation(ComputeConfigMixin):
             with io_util.Timing_Messager("Calculating watershed", logger):
                 dask_computer(b, self.num_workers, **self.compute_args)
 
-    def calculate_watershed_segmentation(self):
+    def get_watershed_segmentation(self):
         self.calculate_distance_transform()
         self.calculate_blockwise_watershed_seeds()
 
@@ -309,12 +378,6 @@ class WatershedSegmentation(ComputeConfigMixin):
             write_size=self.input_idi.chunk_shape * self.input_idi.voxel_size,
         )
         self.do_watershed()
-        dask_util.delete_tmp_dataset(
-            self.watershed_seeds_blockwise_idi.path,
-            cc.blocks,
-            self.num_workers,
-            self.compute_args,
-        )
         if self.delete_tmp:
             dask_util.delete_tmp_dataset(
                 self.watershed_seeds_idi.path,
