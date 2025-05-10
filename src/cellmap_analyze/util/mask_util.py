@@ -15,6 +15,7 @@ class Mask:
         output_voxel_size=None,
         connectivity=2,
         mask_value=None,
+        chunk_shape=None
     ):
         if type(operation) == str:
             operation = [operation]
@@ -30,9 +31,10 @@ class Mask:
                 path,
                 output_voxel_size=output_voxel_size,
                 custom_fill_value="edge",
+                chunk_shape=chunk_shape,
             )
         else:
-            self.idi = ImageDataInterface(path, output_voxel_size=output_voxel_size)
+            self.idi = ImageDataInterface(path, output_voxel_size=output_voxel_size,chunk_shape=chunk_shape)
         self.output_voxel_size = output_voxel_size
         if not self.output_voxel_size:
             self.output_voxel_size = self.idi.voxel_size

@@ -38,11 +38,12 @@ class Measure(ComputeConfigMixin):
         output_path,
         roi=None,
         num_workers=10,
+        chunk_shape=None,
         **kwargs,
     ):
         super().__init__(num_workers)
         self.input_path = input_path
-        self.input_idi = ImageDataInterface(self.input_path)
+        self.input_idi = ImageDataInterface(self.input_path, chunk_shape=chunk_shape)
         self.output_path = output_path
 
         self.contact_sites = False
@@ -59,8 +60,12 @@ class Measure(ComputeConfigMixin):
                 )
             self.organelle_1_path = kwargs["organelle_1_path"]
             self.organelle_2_path = kwargs["organelle_2_path"]
-            self.organelle_1_idi = ImageDataInterface(self.organelle_1_path)
-            self.organelle_2_idi = ImageDataInterface(self.organelle_2_path)
+            self.organelle_1_idi = ImageDataInterface(
+                self.organelle_1_path, chunk_shape=chunk_shape
+            )
+            self.organelle_2_idi = ImageDataInterface(
+                self.organelle_2_path, chunk_shape=chunk_shape
+            )
             output_voxel_size = min(
                 self.organelle_1_idi.voxel_size, self.organelle_2_idi.voxel_size
             )

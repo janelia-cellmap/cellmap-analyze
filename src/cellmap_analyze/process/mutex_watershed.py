@@ -62,10 +62,13 @@ class MutexWatershed(ComputeConfigMixin):
         connectivity=2,
         do_opening=False,
         delete_tmp=False,
+        chunk_shape=None,
     ):
         super().__init__(num_workers)
         self.neighborhood = neighborhood
-        self.affinities_idi = ImageDataInterface(affinities_path)
+        self.affinities_idi = ImageDataInterface(
+            affinities_path, chunk_shape=chunk_shape
+        )
 
         # affinities information
         self.neighborhood = neighborhood
@@ -98,6 +101,7 @@ class MutexWatershed(ComputeConfigMixin):
         self.connected_components_blockwise_idi = ImageDataInterface(
             self.connected_components_blockwise_path + "/s0",
             mode="r+",
+            chunk_shape=chunk_shape,
         )
 
         self.output_path = output_path
