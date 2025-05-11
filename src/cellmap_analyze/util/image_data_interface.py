@@ -219,6 +219,7 @@ class ImageDataInterface:
         self.swap_axes = self.filetype == "n5"
         self.ts = None
         self.voxel_size = self.ds.voxel_size
+        self.dtype = self.ds.dtype
         self.chunk_shape = self.ds.chunk_shape
         if chunk_shape is not None:
             if type(chunk_shape) != Coordinate:
