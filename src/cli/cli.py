@@ -86,6 +86,16 @@ def filter_ids():
         filter_ids.get_filtered_ids()
 
 
+def label_with_mask():
+    from cellmap_analyze.process.label_with_mask import LabelWithMask
+
+    rp = RunProperties()
+    with io_util.tee_streams(rp.logpath):
+        os.chdir(rp.execution_directory)
+        filter_ids = LabelWithMask(**rp.run_config)
+        filter_ids.get_label_with_mask()
+
+
 def measure():
     from cellmap_analyze.analyze.measure import Measure
 
