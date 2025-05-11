@@ -1,4 +1,5 @@
-[![CI Status](https://github.com/janelia-cellmap/cellmap-analyze/actions/workflows/tests.yml/badge.svg)](https://github.com/janelia-cellmap/cellmap-analyze/actions/workflows/tests.yml) [![Codecov](https://codecov.io/gh/janelia-cellmap/cellmap-analyze/branch/refactor_for_release/graph/badge.svg)](https://codecov.io/gh/janelia-cellmap/cellmap-analyze)
+[![CI Status](https://github.com/janelia-cellmap/cellmap-analyze/actions/workflows/tests.yml/badge.svg)](https://github.com/janelia-cellmap/cellmap-analyze/actions/workflows/tests.yml) [![Codecov](https://codecov.io/gh/janelia-cellmap/cellmap-analyze/branch/main/graph/badge.svg)](https://app.codecov.io/gh/janelia-cellmap/cellmap-analyze)
+
 
 # cellmap-analyze
 
