@@ -42,7 +42,7 @@ def chunk_size():
 
 @pytest.fixture(scope="session")
 def image_with_holes(image_shape):
-    seg = np.zeros(image_shape, dtype=np.uint64)
+    seg = np.zeros(image_shape, dtype=np.uint8)
 
     # corner cube
     seg[:3, :3, :3] = 1
@@ -63,7 +63,7 @@ def image_with_holes(image_shape):
 
 @pytest.fixture(scope="session")
 def mask_one(image_shape):
-    mask = np.zeros(image_shape, dtype=np.uint64)
+    mask = np.zeros(image_shape, dtype=np.uint8)
     mask[:3, :3, :3] = 1
     mask[4:6, 2:3, 4:6] = 2
     return mask
@@ -71,9 +71,17 @@ def mask_one(image_shape):
 
 @pytest.fixture(scope="session")
 def mask_two(image_shape):
-    mask = np.zeros(image_shape, dtype=np.uint64)
+    mask = np.zeros(image_shape, dtype=np.uint8)
     mask[7:11, 7:11, 7:9] = 1
     mask[7:11, 7:11, 9:11] = 2
+    return mask
+
+
+@pytest.fixture(scope="session")
+def label_mask(image_shape):
+    mask = np.zeros(image_shape, dtype=np.uint64)
+    mask[:5, :5, :5] = 1_000_000_000
+    mask[6:, 6:, :] = 2_000_000_0000
     return mask
 
 
@@ -82,7 +90,7 @@ def image_with_holes_filled(image_with_holes):
     filled = np.zeros_like(image_with_holes)
     for id in np.unique(image_with_holes[image_with_holes > 0]):
         filled += (
-            ndimage.binary_fill_holes(image_with_holes == id).astype(np.uint64)
+            ndimage.binary_fill_holes(image_with_holes == id).astype(np.uint8)
         ) * id
     return filled
 
@@ -339,13 +347,13 @@ def segmentation_2(image_shape):
 
 @pytest.fixture(scope="session")
 def contact_sites_distance_1(image_shape):
-    cs = np.zeros(image_shape, dtype=np.uint64)
+    cs = np.zeros(image_shape, dtype=np.uint8)
     return cs
 
 
 @pytest.fixture(scope="session")
 def contact_sites_distance_2(image_shape):
-    cs = np.zeros(image_shape, dtype=np.uint64)
+    cs = np.zeros(image_shape, dtype=np.uint8)
     cs[1:4, 2:5, 4:6] = 1
     cs[1:4, 7:10, 4:8] = 2
     return cs
@@ -353,7 +361,7 @@ def contact_sites_distance_2(image_shape):
 
 @pytest.fixture(scope="session")
 def contact_sites_distance_3(image_shape):
-    cs = np.zeros(image_shape, dtype=np.uint64)
+    cs = np.zeros(image_shape, dtype=np.uint8)
     nonzeros = [
         (0, 2, 4),
         (0, 2, 5),
@@ -549,6 +557,7 @@ def test_image_dict(
     image_with_holes_filled,
     mask_one,
     mask_two,
+    label_mask,
     segmentation_1,
     segmentation_2,
     segmentation_cylinders,
@@ -568,6 +577,7 @@ def test_image_dict(
         "image_with_holes_filled": image_with_holes_filled,
         "mask_one": mask_one,
         "mask_two": mask_two,
+        "label_mask": label_mask,
         "segmentation_1": segmentation_1,
         "segmentation_cylinders": segmentation_cylinders,
         "segmentation_spheres": segmentation_spheres,
@@ -620,7 +630,7 @@ def write_zarrs(tmp_zarr, test_image_dict, voxel_size, chunk_size):
             # use larger chunk size for segmentation_cylinders since we had to make it bigger
             ds = create_multiscale_dataset(
                 data_path,
-                dtype=np.uint8,
+                dtype=data.dtype,
                 voxel_size=ds_voxel_size,
                 total_roi=total_roi,
                 write_size=write_size,

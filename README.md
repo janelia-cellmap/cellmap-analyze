@@ -17,7 +17,8 @@ A suite of Dask-powered tools for processing and analyzing terabyte-scale 3D seg
 | **Contact Sites**        | `contact-sites`              | Identify object contact regions with configurable contact distance. |
 | **Fill Holes**           | `filling-holes`              | Fill interior gaps in segmented volumes.                    |
 | **Filter IDs**           | `filter-ids`                 | Exclude unwanted segmentation IDs.                          |
-| **Mutex Watershed**           | `mws`                 | Exclude unwanted segmentation IDs.                          |
+| **Mutex Watershed**           | `mws`                 | Mutex watershed agglomeration from affinities                          |
+| **Label With Mask**           | `label-with-mask`                 | Label one dataset with ids from another                          |
 
 
 ### Analysis Tools
