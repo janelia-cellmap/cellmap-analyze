@@ -3,6 +3,7 @@ import neuroglancer
 import os
 import struct
 import json
+from .image_data_interface import ImageDataInterface
 
 
 def view_in_neuroglancer(**kwargs):
@@ -11,6 +12,10 @@ def view_in_neuroglancer(**kwargs):
     viewer = neuroglancer.Viewer()
     with viewer.txn() as s:
         for array_name, array in kwargs.items():
+
+            if type(array) != np.ndarray:
+                array = ImageDataInterface(array).to_ndarray_ts()
+
             if (
                 array.dtype in (float, np.float32)
                 or "raw" in array_name
