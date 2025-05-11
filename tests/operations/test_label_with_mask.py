@@ -15,8 +15,8 @@ def ground_truth_label_with_mask(
     intensity_threshold_maximum,
 ):
     # Create a mask based on the intensity thresholds
-    output = label_mask * (input >= intensity_threshold_minimum) & (
-        input < intensity_threshold_maximum
+    output = label_mask * (
+        (input >= intensity_threshold_minimum) & (input < intensity_threshold_maximum)
     )
     return output
 

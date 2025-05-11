@@ -67,8 +67,9 @@ class LabelWithMask(ComputeConfigMixin):
         )
         input = input_idi.to_ndarray_ts(block.read_roi)
         mask = mask_idi.to_ndarray_ts(block.read_roi)
-        output = (input >= intensity_threshold_minimum) & (
-            input < intensity_threshold_maximum
+        output = (
+            (input >= intensity_threshold_minimum)
+            & (input < intensity_threshold_maximum)
         ) * mask
         output_idi.ds[block.write_roi] = output
 
