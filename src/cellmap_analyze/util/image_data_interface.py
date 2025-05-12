@@ -207,6 +207,7 @@ class ImageDataInterface:
         output_voxel_size=None,
         custom_fill_value=None,
         concurrency_limit=1,
+        chunk_shape=None,
     ):
         dataset_path = str(Path(dataset_path).resolve())
         self.path = dataset_path
@@ -218,7 +219,13 @@ class ImageDataInterface:
         self.swap_axes = self.filetype == "n5"
         self.ts = None
         self.voxel_size = self.ds.voxel_size
+        self.dtype = self.ds.dtype
         self.chunk_shape = self.ds.chunk_shape
+        if chunk_shape is not None:
+            if type(chunk_shape) != Coordinate:
+                chunk_shape = Coordinate(chunk_shape)
+            self.chunk_shape = chunk_shape
+
         self.roi = self.ds.roi
         self.offset = self.ds.roi.offset
 

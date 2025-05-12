@@ -123,6 +123,7 @@ def create_multiscale_dataset_idi(
     scale=0,
     mode="w",
     custom_fill_value=None,
+    chunk_shape=None,
 ):
     create_multiscale_dataset(
         output_path, dtype, voxel_size, total_roi, write_size, scale=scale, mode=mode
@@ -134,5 +135,6 @@ def create_multiscale_dataset_idi(
         output_path + f"/s{scale}",
         mode=mode,
         custom_fill_value=custom_fill_value,
+        chunk_shape=chunk_shape,
     )
     return idi

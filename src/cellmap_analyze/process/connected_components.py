@@ -56,6 +56,7 @@ class ConnectedComponents(ComputeConfigMixin):
         invert=False,
         calculating_holes=False,
         fill_holes=False,
+        chunk_shape=None,
     ):
         super().__init__(num_workers)
         if input_path and connected_components_blockwise_path:
@@ -64,15 +65,19 @@ class ConnectedComponents(ComputeConfigMixin):
             raise Exception("Must provide either input_path or tmp_blockwise_path")
 
         if input_path:
-            template_idi = self.input_idi = ImageDataInterface(input_path)
+            template_idi = self.input_idi = ImageDataInterface(
+                input_path, chunk_shape=chunk_shape
+            )
         else:
             template_idi = self.connected_components_blockwise_idi = ImageDataInterface(
-                connected_components_blockwise_path
+                connected_components_blockwise_path, chunk_shape=chunk_shape
             )
 
         self.object_labels_idi = None
         if object_labels_path:
-            self.object_labels_idi = ImageDataInterface(object_labels_path)
+            self.object_labels_idi = ImageDataInterface(
+                object_labels_path, chunk_shape=chunk_shape
+            )
 
         if roi is None:
             self.roi = template_idi.roi
@@ -108,7 +113,7 @@ class ConnectedComponents(ComputeConfigMixin):
             self.do_full_connected_components = True
         else:
             self.connected_components_blockwise_idi = ImageDataInterface(
-                connected_components_blockwise_path
+                connected_components_blockwise_path, chunk_shape=chunk_shape
             )
         self.output_path = output_path
 

@@ -1,4 +1,5 @@
-[![CI Status](https://github.com/janelia-cellmap/cellmap-analyze/actions/workflows/tests.yml/badge.svg)](https://github.com/janelia-cellmap/cellmap-analyze/actions/workflows/tests.yml) [![Codecov](https://codecov.io/gh/janelia-cellmap/cellmap-analyze/branch/refactor_for_release/graph/badge.svg)](https://codecov.io/gh/janelia-cellmap/cellmap-analyze)
+[![CI Status](https://github.com/janelia-cellmap/cellmap-analyze/actions/workflows/tests.yml/badge.svg)](https://github.com/janelia-cellmap/cellmap-analyze/actions/workflows/tests.yml) [![Codecov](https://codecov.io/gh/janelia-cellmap/cellmap-analyze/branch/main/graph/badge.svg)](https://app.codecov.io/gh/janelia-cellmap/cellmap-analyze)
+
 
 # cellmap-analyze
 
@@ -17,7 +18,8 @@ A suite of Dask-powered tools for processing and analyzing terabyte-scale 3D seg
 | **Contact Sites**        | `contact-sites`              | Identify object contact regions with configurable contact distance. |
 | **Fill Holes**           | `filling-holes`              | Fill interior gaps in segmented volumes.                    |
 | **Filter IDs**           | `filter-ids`                 | Exclude unwanted segmentation IDs.                          |
-| **Mutex Watershed**           | `mws`                 | Exclude unwanted segmentation IDs.                          |
+| **Mutex Watershed**           | `mws`                 | Mutex watershed agglomeration from affinities                          |
+| **Label With Mask**           | `label-with-mask`                 | Label one dataset with ids from another                          |
 
 
 ### Analysis Tools

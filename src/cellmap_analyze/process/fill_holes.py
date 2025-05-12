@@ -39,9 +39,10 @@ class FillHoles(ComputeConfigMixin):
         connectivity=2,
         delete_tmp=False,
         roi=None,
+        chunk_shape=None,
     ):
         super().__init__(num_workers)
-        self.input_idi = ImageDataInterface(input_path)
+        self.input_idi = ImageDataInterface(input_path, chunk_shape=chunk_shape)
         self.roi = roi
         if self.roi is None:
             self.roi = self.input_idi.roi
@@ -227,7 +228,7 @@ class FillHoles(ComputeConfigMixin):
             roi=self.roi,
         )
         cc.get_connected_components()
-        self.holes_idi = ImageDataInterface(self.holes_path + "/s0", mode="r+")
+        self.holes_idi = ImageDataInterface(self.holes_path + "/s0", mode="r+", chunk_shape=self.input_idi.chunk_shape)
         # get the assignments of holes to objects or background
         self.get_hole_assignments()
 
