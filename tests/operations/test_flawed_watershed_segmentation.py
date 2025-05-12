@@ -1,5 +1,8 @@
+# %%
 import pytest
-from cellmap_analyze.process.flawed_watershed_segmentation import FlawedWatershedSegmentation
+from cellmap_analyze.process.flawed_watershed_segmentation import (
+    FlawedWatershedSegmentation,
+)
 from tests.test_utils import arrays_equal_up_to_id_ordering
 import edt
 import numpy as np
@@ -66,6 +69,7 @@ def test_watershed_segmentation(
         output_path=output_path,
         pseudo_neighborhood_radius_nm=pseudo_neighborhood_radius_voxels * voxel_size,
         num_workers=1,
+        do_flwed
     )
     ws.get_watershed_segmentation()
 
@@ -84,3 +88,12 @@ def test_watershed_segmentation(
         test_data,
         ground_truth,
     )
+
+# %%
+FlawedWatershedSegmentation(
+    input_path="/tmp/pytest-of-ackermand/pytest-current/tmpcurrent/tmp.zarr/segmentation_spheres/s0",
+    output_path="/tmp/pytest-of-ackermand/pytest-current/tmpcurrent/tmp.zarr/segmentation_spheres_global/s0",
+    pseudo_neighborhood_radius_nm=100,
+    num_workers=1,
+).get_watershed_segmentation()
+# %%
