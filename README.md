@@ -20,6 +20,7 @@ A suite of Dask-powered tools for processing and analyzing terabyte-scale 3D seg
 | **Filter IDs**           | `filter-ids`                 | Exclude unwanted segmentation IDs.                          |
 | **Mutex Watershed**           | `mws`                 | Mutex watershed agglomeration from affinities                          |
 | **Label With Mask**           | `label-with-mask`                 | Label one dataset with ids from another                          |
+| **Watershed Segmentation**           | `watershed-segmentation`                 | Watershed a segmentation; currently only works by doing watershed globally, but distance transform and seed finding work blockwise|
 
 
 ### Analysis Tools
