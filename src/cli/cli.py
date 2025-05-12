@@ -65,7 +65,7 @@ def mutex_watershed():
 
 
 def watershed_segmentation():
-    from cellmap_analyze.process.watershed_segmentation import (
+    from cellmap_analyze.process.flawed_watershed_segmentation import (
         FlawedWatershedSegmentation,
     )
 

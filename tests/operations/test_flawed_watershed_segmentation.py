@@ -1,5 +1,5 @@
 import pytest
-from cellmap_analyze.process.watershed_segmentation import FlawedWatershedSegmentation
+from cellmap_analyze.process.flawed_watershed_segmentation import FlawedWatershedSegmentation
 from tests.test_utils import arrays_equal_up_to_id_ordering
 import edt
 import numpy as np
