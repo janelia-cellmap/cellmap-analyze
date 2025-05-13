@@ -1,6 +1,5 @@
 coverage:
   status:
-    # turn off the overall project‐level check (optional)
-    project: off  
+    project: on  
     # turn off the diff/patch coverage check
     patch: off        
