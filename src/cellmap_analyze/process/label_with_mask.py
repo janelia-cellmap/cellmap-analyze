@@ -59,9 +59,9 @@ class LabelWithMask(ComputeConfigMixin):
         self.output_idi = create_multiscale_dataset_idi(
             output_path,
             dtype=self.mask_idi.dtype,
-            voxel_size=self.mask_idi.voxel_size,
+            voxel_size=self.input_idi.voxel_size,
             total_roi=self.roi,
-            write_size=self.mask_idi.chunk_shape * self.mask_idi.voxel_size,
+            write_size=self.input_idi.chunk_shape * self.input_idi.voxel_size,
         )
 
     @staticmethod
