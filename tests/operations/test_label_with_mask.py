@@ -65,15 +65,3 @@ def test_label_with_mask(
         test_data,
         ground_truth,
     )
-
-
-# %%
-from cellmap_analyze.util.neuroglancer_util import view_in_neuroglancer
-
-view_in_neuroglancer(
-    img=f"/tmp/pytest-of-ackermand/pytest-current/tmpcurrent/tmp.zarr/image_with_holes_filled/s0",
-    mask="/tmp/pytest-of-ackermand/pytest-current/tmpcurrent/tmp.zarr/label_mask/s0",
-    all="/tmp/pytest-of-ackermand/pytest-current/tmpcurrent/tmp.zarr/test_label_mask_1_inf_False/s0",
-    surface="/tmp/pytest-of-ackermand/pytest-current/tmpcurrent/tmp.zarr/test_label_mask_1_inf_True/s0",
-)
-# %%
