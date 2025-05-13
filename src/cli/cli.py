@@ -28,8 +28,8 @@ def connected_components():
     rp = RunProperties()
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
-        contact_sites = ConnectedComponents(**rp.run_config)
-        contact_sites.get_connected_components()
+        cc = ConnectedComponents(**rp.run_config)
+        cc.get_connected_components()
 
 
 def clean_connected_components():
@@ -40,8 +40,8 @@ def clean_connected_components():
     rp = RunProperties()
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
-        contact_sites = CleanConnectedComponents(**rp.run_config)
-        contact_sites.clean_connected_components()
+        ccc = CleanConnectedComponents(**rp.run_config)
+        ccc.clean_connected_components()
 
 
 def contact_sites():
@@ -72,8 +72,8 @@ def watershed_segmentation():
     rp = RunProperties()
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
-        mws = WatershedSegmentation(**rp.run_config)
-        mws.get_watershed_segmentation()
+        ws = WatershedSegmentation(**rp.run_config)
+        ws.get_watershed_segmentation()
 
 
 def filter_ids():
@@ -92,8 +92,8 @@ def label_with_mask():
     rp = RunProperties()
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
-        filter_ids = LabelWithMask(**rp.run_config)
-        filter_ids.get_label_with_mask()
+        lwm = LabelWithMask(**rp.run_config)
+        lwm.get_label_with_mask()
 
 
 def measure():
