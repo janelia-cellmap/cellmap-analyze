@@ -1,5 +1,8 @@
+# %%
 import pytest
-from cellmap_analyze.process.watershed_segmentation import FlawedWatershedSegmentation
+from cellmap_analyze.process.watershed_segmentation import (
+    WatershedSegmentation,
+)
 from tests.test_utils import arrays_equal_up_to_id_ordering
 import edt
 import numpy as np
@@ -53,19 +56,30 @@ def global_watershed(input, pseudo_neighborhood_radius_voxels, voxel_size):
     [2, 3],
     ids=["radius_2voxels", "radius_3voxels"],
 )
+@pytest.mark.parametrize(
+    "use_deprecated_flawed",
+    [True, False],
+    ids=["use_deprecated_flawed_true", "use_deprecated_flawed_false"],
+)
 def test_watershed_segmentation(
-    tmp_zarr, request, fixture_name, image_name, pseudo_neighborhood_radius_voxels
+    tmp_zarr,
+    request,
+    fixture_name,
+    image_name,
+    pseudo_neighborhood_radius_voxels,
+    use_deprecated_flawed,
 ):
     # dynamically grab the correct fixture
     input_path = f"{tmp_zarr}/{image_name}/s0"
     output_path = f"{tmp_zarr}/test_watershed_segmentation_{image_name}"
     voxel_size = ImageDataInterface(input_path).ds.voxel_size[0]
 
-    ws = FlawedWatershedSegmentation(
+    ws = WatershedSegmentation(
         input_path=input_path,
         output_path=output_path,
         pseudo_neighborhood_radius_nm=pseudo_neighborhood_radius_voxels * voxel_size,
         num_workers=1,
+        use_deprecated_flawed=use_deprecated_flawed,
     )
     ws.get_watershed_segmentation()
 

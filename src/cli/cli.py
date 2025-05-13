@@ -66,13 +66,13 @@ def mutex_watershed():
 
 def watershed_segmentation():
     from cellmap_analyze.process.watershed_segmentation import (
-        FlawedWatershedSegmentation,
+        WatershedSegmentation,
     )
 
     rp = RunProperties()
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
-        mws = FlawedWatershedSegmentation(**rp.run_config)
+        mws = WatershedSegmentation(**rp.run_config)
         mws.get_watershed_segmentation()
 
 

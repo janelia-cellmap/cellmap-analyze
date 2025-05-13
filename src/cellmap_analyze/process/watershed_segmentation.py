@@ -1,6 +1,7 @@
 # %%
 import cc3d
 import numpy as np
+from tqdm import tqdm
 from cellmap_analyze.process.connected_components import ConnectedComponents
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util import io_util
@@ -19,7 +20,7 @@ import logging
 import dask.bag as db
 import numpy as np
 
-from skimage.segmentation import watershed
+from skimage.segmentation import watershed as skimage_watershed
 from skimage.feature import peak_local_max
 import edt
 import fastremap
@@ -104,7 +105,7 @@ logger = logging.getLogger(__name__)
 # plt.show()
 
 
-class FlawedWatershedSegmentation(ComputeConfigMixin):
+class WatershedSegmentation(ComputeConfigMixin):
     def __init__(
         self,
         input_path,
@@ -114,6 +115,7 @@ class FlawedWatershedSegmentation(ComputeConfigMixin):
         num_workers=10,
         pseudo_neighborhood_radius_nm=100,
         chunk_shape=None,
+        use_deprecated_flawed=False,
     ):
         super().__init__(num_workers)
         self.input_path = input_path
@@ -152,7 +154,7 @@ class FlawedWatershedSegmentation(ComputeConfigMixin):
             write_size=self.input_idi.chunk_shape * self.voxel_size,
         )
         self.watershed_seeds_path = self.output_path + "_seeds"
-
+        self.use_deprecated_flawed = use_deprecated_flawed
         self.delete_tmp = delete_tmp
 
     @staticmethod
@@ -242,7 +244,7 @@ class FlawedWatershedSegmentation(ComputeConfigMixin):
             block_indexes,
             npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
         ).map(
-            FlawedWatershedSegmentation.calculate_blockwise_watershed_seeds_blockwise,
+            WatershedSegmentation.calculate_blockwise_watershed_seeds_blockwise,
             self.input_idi,
             self.distance_transform_idi,
             self.watershed_seeds_blockwise_idi,
@@ -266,7 +268,7 @@ class FlawedWatershedSegmentation(ComputeConfigMixin):
             block_indexes,
             npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
         ).map(
-            FlawedWatershedSegmentation.calculate_distance_transform_blockwise,
+            WatershedSegmentation.calculate_distance_transform_blockwise,
             self.input_idi,
             self.distance_transform_idi,
         )
@@ -319,7 +321,7 @@ class FlawedWatershedSegmentation(ComputeConfigMixin):
             mask = input == id
             distance_transform_masked = distance_transform * mask
             watershed_seeds_masked = watershed_seeds * mask
-            labels += watershed(
+            labels += skimage_watershed(
                 -distance_transform_masked,
                 markers=watershed_seeds_masked,
                 mask=distance_transform_masked > 0,
@@ -327,14 +329,51 @@ class FlawedWatershedSegmentation(ComputeConfigMixin):
             )
         watershed_idi.ds[block.write_roi] = trim_array(labels, padding_voxels)
 
-    def do_watershed(self):
+    def global_watershed(
+        block_indexes,
+        input_idi: ImageDataInterface,
+        distance_transform_idi: ImageDataInterface,
+        watershed_seeds_idi: ImageDataInterface,
+        watershed_idi: ImageDataInterface,
+    ):
+        input = input_idi.to_ndarray_ts()
+        distance_transform = distance_transform_idi.to_ndarray_ts()
+        watershed_seeds = watershed_seeds_idi.to_ndarray_ts()
+        watershed = np.zeros_like(watershed_seeds, dtype=np.uint32)
+        for id in fastremap.unique(input):
+            if id == 0:
+                pass
+            mask = input == id
+            distance_transform_masked = distance_transform * mask
+            watershed_seeds_masked = watershed_seeds * mask
+            watershed += skimage_watershed(
+                -distance_transform_masked,
+                markers=watershed_seeds_masked,
+                mask=distance_transform_masked > 0,
+                connectivity=1,
+            )
+        watershed = watershed.astype(watershed_seeds.dtype)
+        for block_index in tqdm(block_indexes):
+            block = create_block_from_index(
+                watershed_idi,
+                block_index,
+            )
+            write_roi_voxels = block.write_roi / watershed_idi.voxel_size
+            print(
+                block.write_roi,
+                np.unique(watershed[write_roi_voxels.to_slices()]),
+                write_roi_voxels.to_slices(),
+            )
+            watershed_idi.ds[block.write_roi] = watershed[write_roi_voxels.to_slices()]
+
+    def do_deprecated_flawed_watershed(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
         block_indexes = list(range(num_blocks))
         b = db.from_sequence(
             block_indexes,
             npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
         ).map(
-            FlawedWatershedSegmentation.watershed_blockwise,
+            WatershedSegmentation.watershed_blockwise,
             self.input_idi,
             self.distance_transform_idi,
             self.watershed_seeds_idi,
@@ -350,6 +389,18 @@ class FlawedWatershedSegmentation(ComputeConfigMixin):
         ):
             with io_util.Timing_Messager("Calculating watershed", logger):
                 dask_computer(b, self.num_workers, **self.compute_args)
+
+    def do_global_watershed(self):
+        num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
+        block_indexes = list(range(num_blocks))
+        with io_util.Timing_Messager("Calculating watershed", logger):
+            WatershedSegmentation.global_watershed(
+                block_indexes,
+                self.input_idi,
+                self.distance_transform_idi,
+                self.watershed_seeds_idi,
+                self.watershed_idi,
+            )
 
     def get_watershed_segmentation(self):
         self.calculate_distance_transform()
@@ -377,7 +428,12 @@ class FlawedWatershedSegmentation(ComputeConfigMixin):
             total_roi=self.roi,
             write_size=self.input_idi.chunk_shape * self.input_idi.voxel_size,
         )
-        self.do_watershed()
+
+        if self.use_deprecated_flawed:
+            self.do_deprecated_flawed_watershed()
+        else:
+            self.do_global_watershed()
+
         if self.delete_tmp:
             dask_util.delete_tmp_dataset(
                 self.watershed_seeds_idi.path,
@@ -391,3 +447,6 @@ class FlawedWatershedSegmentation(ComputeConfigMixin):
                 self.num_workers,
                 self.compute_args,
             )
+
+
+# %%
