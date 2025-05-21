@@ -213,24 +213,18 @@ class MutexWatershed(ComputeConfigMixin):
 
     @staticmethod
     def instancewise_instance_segmentation(segmentation, connectivity, do_opening):
-        ids = fastremap.unique(segmentation[segmentation > 0])
-        output = np.zeros_like(segmentation, dtype=np.uint64)
-        for id in ids:
-            segmentation_for_id = segmentation == id
-            if do_opening:
-                segmentation_for_id = fastmorph.erode(segmentation_for_id)
+        # ids = fastremap.unique(segmentation[segmentation > 0])
+        if do_opening:
+            segmentation = fastmorph.erode(segmentation)
+        cc = cc3d.connected_components(
+            segmentation,
+            connectivity=6 + 12 * (connectivity >= 2) + 8 * (connectivity >= 3),
+            out_dtype=np.uint64,
+        )
+        if do_opening:
+            cc = fastmorph.dilate(cc)
 
-            cc = cc3d.connected_components(
-                segmentation_for_id,
-                connectivity=6 + 12 * (connectivity >= 2) + 8 * (connectivity >= 3),
-                binary_image=True,
-                out_dtype=np.uint64,
-            )
-            if do_opening:
-                cc = fastmorph.dilate(cc)
-            cc[cc > 0] += np.max(output)
-            output += cc
-        return output
+        return cc
 
     def calculate_block_connected_components(
         block_index,
