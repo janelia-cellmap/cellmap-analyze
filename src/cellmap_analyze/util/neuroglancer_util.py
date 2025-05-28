@@ -6,7 +6,7 @@ import json
 from .image_data_interface import ImageDataInterface
 
 
-def view_in_neuroglancer(**kwargs):
+def view_in_neuroglancer(**kwargs):  # pragma: no cover
     # get variable name as string
     neuroglancer.set_server_bind_address("0.0.0.0")
     viewer = neuroglancer.Viewer()
