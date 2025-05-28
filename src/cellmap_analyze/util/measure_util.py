@@ -39,35 +39,89 @@ def calculate_surface_areas_voxelwise(
     return surface_areas
 
 
-def get_surface_areas(data, voxel_face_area=1, mask=None, trim=1):
+# chatgpt
+def calculate_surface_areas_voxelwise(
+    data: np.ndarray, voxel_face_area: float = 1, do_zero_padding: bool = True
+) -> np.ndarray:
+    # 1) Optionally pad with zeros (so we never have wrap or missing‐neighbor)
+    if do_zero_padding:
+        pad_width = [(1, 1)] * data.ndim
+        data = np.pad(data, pad_width, mode="constant", constant_values=0)
+
+    # 2) Prepare face_counts buffer
+    face_counts = np.zeros_like(data, dtype=int)
+    ndim = data.ndim
+
+    # 3) For each axis, compare forward + backward with distinct slices
+    for axis in range(ndim):
+        # forward neighbor: orig [:-1], neigh [1:]
+        orig_fwd = [slice(None)] * ndim
+        neigh_fwd = [slice(None)] * ndim
+        orig_fwd[axis] = slice(None, -1)
+        neigh_fwd[axis] = slice(1, None)
+        of, nf = tuple(orig_fwd), tuple(neigh_fwd)
+
+        mask_fwd = (data[of] > 0) & (data[of] != data[nf])
+        face_counts[of] += mask_fwd
+
+        # backward neighbor: orig [1:], neigh [:-1]
+        orig_bwd = [slice(None)] * ndim
+        neigh_bwd = [slice(None)] * ndim
+        orig_bwd[axis] = slice(1, None)
+        neigh_bwd[axis] = slice(None, -1)
+        ob, nb = tuple(orig_bwd), tuple(neigh_bwd)
+
+        mask_bwd = (data[ob] > 0) & (data[ob] != data[nb])
+        face_counts[ob] += mask_bwd
+
+    # 4) Multiply by face area
+    surface_areas = face_counts * voxel_face_area
+
+    # 5) If we padded, trim off the 1-voxel border
+    if do_zero_padding:
+        trim_slices = tuple(slice(1, -1) for _ in range(ndim))
+        surface_areas = surface_areas[trim_slices]
+
+    return surface_areas
+
+
+# chatgpt
+def get_surface_areas(
+    data: np.ndarray, voxel_face_area: float = 1, mask: np.ndarray = None, trim: int = 1
+):
+    # 1) per‐voxel SAs
     surface_areas = calculate_surface_areas_voxelwise(
         data, voxel_face_area, do_zero_padding=(trim == 0)
     )
-    # if we have padded the array, need to trim
+
+    # 2) optional trim
     if trim:
         surface_areas = trim_array(surface_areas, trim)
         data = trim_array(data, trim)
-    if mask:
-        mask |= data > 0
+
+    # 3) build final mask
+    if mask is None:
+        final_mask = data > 0
     else:
-        mask = data > 0
+        final_mask = mask | (data > 0)
 
-    surface_areas = surface_areas[mask]
-    data = data[mask]
+    # 4) gather labels & SAs
+    labels = data[final_mask].ravel()
+    sa_vals = surface_areas[final_mask].ravel()
 
-    pairs, counts = np.unique(
-        np.array([data.ravel(), surface_areas.ravel()]), axis=1, return_counts=True
-    )
-    voxel_ids = pairs[0]
-    voxel_surface_area = pairs[1]
-    voxel_counts = counts
-    surface_areas_dict = {}
-    for voxel_id in np.unique(voxel_ids):
-        indices = voxel_ids == voxel_id
-        surface_areas_dict[voxel_id] = np.sum(
-            voxel_surface_area[indices] * voxel_counts[indices]
-        )
-    return surface_areas_dict
+    if labels.size == 0:
+        return {}
+
+    # 5) group and sum without huge arrays:
+    #    - unique_labels: sorted unique IDs (still uint64)
+    #    - inverse: map each label → index in unique_labels
+    unique_labels, inverse = fastremap.unique(labels, return_inverse=True)
+    #    - sums[i] = total SA for unique_labels[i]
+    sums = np.bincount(inverse, weights=sa_vals)
+
+    # 6) build output dict
+    #    cast keys back to Python int if you like, or keep as uint64
+    return {int(lbl): float(sums[idx]) for idx, lbl in enumerate(unique_labels)}
 
 
 def get_volumes(data, voxel_volume=1, trim=1):
@@ -81,9 +135,10 @@ def get_region_properties(data, voxel_edge_length=1, trim=1):
     voxel_face_area = voxel_edge_length**2
     voxel_volume = voxel_edge_length**3
     surface_areas = get_surface_areas(data, voxel_face_area=voxel_face_area, trim=trim)
-    surface_areas = surface_areas.values()
     data = trim_array(data, trim)
     ids, counts = fastremap.unique(data[data > 0], return_counts=True)
+    # need this to get in correct order due to "bug" in fastremap: https://github.com/seung-lab/fastremap/issues/42
+    surface_areas = np.array([surface_areas[id] for id in ids])
     if len(ids) == 0:
         return None
     volumes = counts * voxel_volume

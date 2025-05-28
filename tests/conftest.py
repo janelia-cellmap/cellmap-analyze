@@ -346,6 +346,13 @@ def segmentation_2(image_shape):
 
 
 @pytest.fixture(scope="session")
+def segmentation_random(image_shape):
+    np.random.seed(42)
+    seg = np.random.randint(low=1, high=10, size=image_shape, dtype=np.uint8)
+    return seg
+
+
+@pytest.fixture(scope="session")
 def contact_sites_distance_1(image_shape):
     cs = np.zeros(image_shape, dtype=np.uint8)
     return cs
@@ -560,6 +567,7 @@ def test_image_dict(
     label_mask,
     segmentation_1,
     segmentation_2,
+    segmentation_random,
     segmentation_cylinders,
     segmentation_spheres,
     segmentation_cells,
@@ -584,6 +592,7 @@ def test_image_dict(
         "affinities_cylinders": affinities_cylinders,
         "segmentation_1_downsampled": segmentation_1_downsampled,
         "segmentation_2": segmentation_2,
+        "segmentation_random": segmentation_random,
         "segmentation_cells": segmentation_cells,
         "contact_sites_distance_1": contact_sites_distance_1,
         "contact_sites_distance_2": contact_sites_distance_2,
