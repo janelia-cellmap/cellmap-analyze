@@ -251,6 +251,21 @@ def compare_measurements(
     assert m.measurements == contact_site_information_dict
 
 
+@pytest.mark.parametrize(
+    "segmentation_name", ["segmentation_1", "segmentation_2", "segmentation_random"]
+)
+def test_measure_blockwise(tmp_zarr, segmentation_name, request):
+    m = Measure(
+        input_path=f"{tmp_zarr}/{segmentation_name}/s0",
+        output_path=None,
+        num_workers=1,
+    )
+    m.get_measurements()
+    assert m.measurements == simple_object_information_dict(
+        request.getfixturevalue(segmentation_name), m.input_idi.voxel_size[0]
+    )
+
+
 def test_measure_blockwise_contact_sites_distance_1(
     tmp_zarr, contact_site_information_dict_contact_distance_1
 ):
