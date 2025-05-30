@@ -145,8 +145,8 @@ class CleanConnectedComponents(ComputeConfigMixin):
     def get_connected_component_information(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, self.roi)
         block_indexes = list(range(num_blocks))
-        b = db.from_sequence(
-            block_indexes,
+        b = db.range(
+            num_blocks,
             npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
         ).map(
             CleanConnectedComponents.get_connected_component_information_blockwise,

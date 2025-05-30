@@ -93,10 +93,9 @@ class LabelWithMask(ComputeConfigMixin):
 
     def get_label_with_mask(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
-        block_indexes = list(range(num_blocks))
-        b = db.from_sequence(
-            block_indexes,
-            npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
+        b = db.range(
+            num_blocks,
+            npartitions=guesstimate_npartitions(num_blocks, self.num_workers),
         ).map(
             LabelWithMask.label_with_mask_blockwise,
             self.input_idi,

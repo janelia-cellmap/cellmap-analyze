@@ -117,10 +117,9 @@ class FilterIDs(ComputeConfigMixin):
 
     def get_object_ids(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi)
-        block_indexes = list(range(num_blocks))
-        b = db.from_sequence(
-            block_indexes,
-            npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
+        b = db.range(
+            num_blocks,
+            npartitions=guesstimate_npartitions(num_blocks, self.num_workers),
         ).map(
             FilterIDs.get_object_ids_blockwise,
             self.input_idi,

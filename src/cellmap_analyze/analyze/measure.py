@@ -158,21 +158,17 @@ class Measure(ComputeConfigMixin):
 
     def measure(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, self.roi)
-        block_indexes = list(range(num_blocks))
 
-        b = (
-            db.from_sequence(
-                block_indexes,
-                npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
-            ).map(
-                Measure.get_measurements_blockwise,
-                self.input_idi,
-                self.roi,
-                self.global_offset,
-                self.contact_sites,
-                **self.get_measurements_blockwise_extra_kwargs,
-            )
-            # .reduction(Measure.__summer, Measure.__summer)
+        b = db.range(
+            num_blocks,
+            npartitions=guesstimate_npartitions(num_blocks, self.num_workers),
+        ).map(
+            Measure.get_measurements_blockwise,
+            self.input_idi,
+            self.roi,
+            self.global_offset,
+            self.contact_sites,
+            **self.get_measurements_blockwise_extra_kwargs,
         )
 
         with dask_util.start_dask(

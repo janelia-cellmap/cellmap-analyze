@@ -207,10 +207,9 @@ class ConnectedComponents(ComputeConfigMixin):
 
     def calculate_connected_components_blockwise(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
-        block_indexes = list(range(num_blocks))
-        b = db.from_sequence(
-            block_indexes,
-            npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
+        b = db.range(
+            num_blocks,
+            npartitions=guesstimate_npartitions(num_blocks, self.num_workers),
         ).map(
             ConnectedComponents.calculate_block_connected_components,
             self.input_idi,
@@ -386,10 +385,9 @@ class ConnectedComponents(ComputeConfigMixin):
 
     def get_connected_component_information(self):
         num_blocks = dask_util.get_num_blocks(self.connected_components_blockwise_idi)
-        block_indexes = list(range(num_blocks))
-        b = db.from_sequence(
-            block_indexes,
-            npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
+        b = db.range(
+            num_blocks,
+            npartitions=guesstimate_npartitions(num_blocks, self.num_workers),
         ).map(
             ConnectedComponents.get_connected_component_information_blockwise,
             self.connected_components_blockwise_idi,
@@ -496,12 +494,14 @@ class ConnectedComponents(ComputeConfigMixin):
 
     @staticmethod
     def relabel_block_from_path(
-        block_coords,
+        block_index,
         input_idi: ImageDataInterface,
         output_idi: ImageDataInterface,
         block_info_basepath=None,
         mask: MasksFromConfig = None,
     ):
+        # create block from index
+        block_coords = create_block_from_index(input_idi, block_index).coords
         if block_info_basepath is None:
             block_info_basepath = input_idi.path
         # read block from pickle file
@@ -530,10 +530,10 @@ class ConnectedComponents(ComputeConfigMixin):
             write_size=original_idi.chunk_shape * original_idi.voxel_size,
         )
 
-        block_coords = [block.coords for block in blocks]
-        b = db.from_sequence(
-            block_coords,
-            npartitions=guesstimate_npartitions(blocks, num_workers),
+        num_blocks = len(blocks)
+        b = db.range(
+            num_blocks,
+            npartitions=guesstimate_npartitions(num_blocks, num_workers),
         ).map(
             ConnectedComponents.relabel_block_from_path,
             original_idi,

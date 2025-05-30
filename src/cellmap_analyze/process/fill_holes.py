@@ -131,10 +131,9 @@ class FillHoles(ComputeConfigMixin):
 
     def get_hole_assignments(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi)
-        block_indexes = list(range(num_blocks))
-        b = db.from_sequence(
-            block_indexes,
-            npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
+        b = db.range(
+            num_blocks,
+            npartitions=guesstimate_npartitions(num_blocks, self.num_workers),
         ).map(
             FillHoles.get_hole_information_blockwise,
             input_idi=self.input_idi,
@@ -167,12 +166,13 @@ class FillHoles(ComputeConfigMixin):
 
     @staticmethod
     def relabel_block(
-        block_coords,
+        block_index,
         input_idi,
         holes_idi,
         output_idi,
     ):
         # read block from pickle file
+        block_coords = create_block_from_index(input_idi, block_index).coords
         block_coords_string = "/".join([str(c) for c in block_coords])
         with open(f"{holes_idi.path}/{block_coords_string}.pkl", "rb") as handle:
             block = pickle.load(handle)
@@ -200,10 +200,10 @@ class FillHoles(ComputeConfigMixin):
             write_size=self.input_idi.chunk_shape * self.input_idi.voxel_size,
         )
 
-        block_coords = [block.coords for block in self.blocks]
-        b = db.from_sequence(
-            block_coords,
-            npartitions=guesstimate_npartitions(self.blocks, self.num_workers),
+        num_blocks = len(self.blocks)
+        b = db.range(
+            num_blocks,
+            npartitions=guesstimate_npartitions(num_blocks, self.num_workers),
         ).map(
             FillHoles.relabel_block,
             self.input_idi,
@@ -228,7 +228,9 @@ class FillHoles(ComputeConfigMixin):
             roi=self.roi,
         )
         cc.get_connected_components()
-        self.holes_idi = ImageDataInterface(self.holes_path + "/s0", mode="r+", chunk_shape=self.input_idi.chunk_shape)
+        self.holes_idi = ImageDataInterface(
+            self.holes_path + "/s0", mode="r+", chunk_shape=self.input_idi.chunk_shape
+        )
         # get the assignments of holes to objects or background
         self.get_hole_assignments()
 

@@ -43,8 +43,12 @@ class ContactSites(ComputeConfigMixin):
         chunk_shape=None,
     ):
         super().__init__(num_workers)
-        self.organelle_1_idi = ImageDataInterface(organelle_1_path, chunk_shape=chunk_shape)
-        self.organelle_2_idi = ImageDataInterface(organelle_2_path, chunk_shape=chunk_shape)
+        self.organelle_1_idi = ImageDataInterface(
+            organelle_1_path, chunk_shape=chunk_shape
+        )
+        self.organelle_2_idi = ImageDataInterface(
+            organelle_2_path, chunk_shape=chunk_shape
+        )
         output_voxel_size = min(
             self.organelle_1_idi.voxel_size, self.organelle_2_idi.voxel_size
         )
@@ -180,10 +184,9 @@ class ContactSites(ComputeConfigMixin):
         num_blocks = dask_util.get_num_blocks(
             self.contact_sites_blockwise_idi, self.roi
         )
-        block_indexes = list(range(num_blocks))
-        b = db.from_sequence(
-            block_indexes,
-            npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
+        b = db.range(
+            num_blocks,
+            npartitions=guesstimate_npartitions(num_blocks, self.num_workers),
         ).map(
             ContactSites.calculate_block_contact_sites,
             self.organelle_1_idi,

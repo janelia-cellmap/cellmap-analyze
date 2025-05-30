@@ -239,10 +239,9 @@ class WatershedSegmentation(ComputeConfigMixin):
 
     def calculate_blockwise_watershed_seeds(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
-        block_indexes = list(range(num_blocks))
-        b = db.from_sequence(
-            block_indexes,
-            npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
+        b = db.range(
+            num_blocks,
+            npartitions=guesstimate_npartitions(num_blocks, self.num_workers),
         ).map(
             WatershedSegmentation.calculate_blockwise_watershed_seeds_blockwise,
             self.input_idi,
@@ -263,10 +262,9 @@ class WatershedSegmentation(ComputeConfigMixin):
 
     def calculate_distance_transform(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
-        block_indexes = list(range(num_blocks))
-        b = db.from_sequence(
-            block_indexes,
-            npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
+        b = db.range(
+            num_blocks,
+            npartitions=guesstimate_npartitions(num_blocks, self.num_workers),
         ).map(
             WatershedSegmentation.calculate_distance_transform_blockwise,
             self.input_idi,
@@ -368,10 +366,9 @@ class WatershedSegmentation(ComputeConfigMixin):
 
     def do_deprecated_flawed_watershed(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
-        block_indexes = list(range(num_blocks))
-        b = db.from_sequence(
-            block_indexes,
-            npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
+        b = db.range(
+            num_blocks,
+            npartitions=guesstimate_npartitions(num_blocks, self.num_workers),
         ).map(
             WatershedSegmentation.watershed_blockwise,
             self.input_idi,
@@ -447,6 +444,3 @@ class WatershedSegmentation(ComputeConfigMixin):
                 self.num_workers,
                 self.compute_args,
             )
-
-
-# %%

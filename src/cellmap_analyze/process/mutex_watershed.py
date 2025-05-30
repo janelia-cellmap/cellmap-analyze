@@ -278,10 +278,9 @@ class MutexWatershed(ComputeConfigMixin):
 
     def calculate_connected_components_blockwise(self):
         num_blocks = dask_util.get_num_blocks(self.affinities_idi, roi=self.roi)
-        block_indexes = list(range(num_blocks))
-        b = db.from_sequence(
-            block_indexes,
-            npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
+        b = db.range(
+            num_blocks,
+            npartitions=guesstimate_npartitions(num_blocks, self.num_workers),
         ).map(
             MutexWatershed.calculate_block_connected_components,
             self.affinities_idi,

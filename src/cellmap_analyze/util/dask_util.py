@@ -159,10 +159,10 @@ def create_blocks(
     return block_rois
 
 
-def guesstimate_npartitions(sequence, num_workers, scaling=4):
-    # if num_workers == 1:
-    #     return 1
-    return min(len(sequence), num_workers * scaling)
+def guesstimate_npartitions(elements, num_workers, scaling=4):
+    if not isinstance(elements, int):
+        elements = len(elements)
+    return min(elements, num_workers * scaling)
 
 
 def dask_computer(b, num_workers, **kwargs):
