@@ -286,7 +286,7 @@ class ConnectedComponents(ComputeConfigMixin):
 
     @staticmethod
     def get_object_sizes(data):
-        labels, counts = np.unique(data[data > 0], return_counts=True)
+        labels, counts = fastremap.unique(data[data > 0], return_counts=True)
         return defaultdict(int, zip(labels, counts))
 
     @staticmethod
