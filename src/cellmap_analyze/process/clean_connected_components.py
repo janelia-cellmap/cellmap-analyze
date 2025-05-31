@@ -144,25 +144,16 @@ class CleanConnectedComponents(ComputeConfigMixin):
 
     def get_connected_component_information(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, self.roi)
-        block_indexes = list(range(num_blocks))
-        b = db.range(
+        bagged_results = dask_util.compute_blockwise_partitions(
             num_blocks,
-            npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
-        ).map(
+            self.num_workers,
+            self.compute_args,
+            logger,
+            "getting connected component information",
             CleanConnectedComponents.get_connected_component_information_blockwise,
             self.input_idi,
             self.mask,
         )
-
-        with dask_util.start_dask(
-            self.num_workers,
-            "calculate connected component information",
-            logger,
-        ):
-            with io_util.Timing_Messager(
-                "Calculating connected component information", logger
-            ):
-                bagged_results = dask_computer(b, self.num_workers, **self.compute_args)
 
         # moved this out of dask, seems fast enough without having to daskify
         with io_util.Timing_Messager("Combining bagged results", logger):
@@ -216,7 +207,6 @@ class CleanConnectedComponents(ComputeConfigMixin):
             self.blocks,
             self.num_local_threads_available,
             self.local_config,
-            self.num_workers,
             self.compute_args,
             use_new_temp_dir=True,
         )

@@ -23,6 +23,8 @@ import numpy as np
 import logging
 from contextlib import contextmanager, nullcontext
 import dask.bag as db
+from cellmap_analyze.util.io_util import Timing_Messager
+import types
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -170,12 +172,12 @@ def dask_computer(b, num_workers, **kwargs):
         return b.compute(**kwargs)
     if num_workers > 1:
         b = b.persist(**kwargs)  # start computation in the background
-        if num_workers <= 100:
-            interval = "3s"
-        elif num_workers <= 500:
-            interval = "30s"
-        else:
-            interval = "150s"
+        # if num_workers <= 100:
+        #     interval = "3s"
+        # elif num_workers <= 500:
+        #     interval = "30s"
+        # else:
+        #     interval = "150s"
         # progress(b, interval=interval)  # watch progress
         return b.compute(**kwargs)
 
@@ -357,3 +359,61 @@ def delete_tmp_dataset(path_to_dataset, blocks, num_workers, compute_args):
 
     basepath, _ = split_dataset_path(path_to_dataset)
     os.system(f"rm -rf {basepath}/{get_name_from_path(path_to_dataset)}")
+
+
+def compute_blockwise_partitions(
+    num_blocks: int,
+    num_workers: int,
+    compute_args: dict,
+    logger,
+    msg: str,
+    fn,
+    *fn_args,
+    **fn_kwargs,
+):
+    """
+    Run `fn(i, *fn_args, **fn_kwargs)` for i in range(num_blocks) using Dask with map_partitions.
+    The return value is always a flat list where each element is exactly what a single `fn(i, ...)` returned.
+    If `fn(i, ...)` returns None, that None will appear in the list; if it returns a tuple or custom object,
+    that object appears as-is.
+
+    - num_blocks: total number of indices to process
+    - num_workers: how many Dask workers to spin up
+    - compute_args: dict of kwargs for .persist/.compute (e.g. {"scheduler": "threads"})
+    - logger: your Logger instance
+    - msg: description string (used in start_dask and Timing_Messager)
+    - fn: block-wise function taking `(index, *fn_args, **fn_kwargs)` → R (any type, including None)
+    - *fn_args: extra positional args to forward to fn
+    - **fn_kwargs: extra keyword args to forward to fn
+    """
+
+    def _partitioner(idxs, *args, **kwargs):
+        """
+        Process a batch of indices. For each index i, call fn(i, *args, **kwargs) and
+        append the return value (whatever it is) into a list. Return that list.
+        """
+        out = []
+        for i in idxs:
+            out.append(fn(i, *args, **kwargs))
+        return out  # always a plain list of return-values
+
+    # Build the Dask Bag: indices [0 .. num_blocks-1], partitioned into `npart` parts
+    npart = guesstimate_npartitions(num_blocks, num_workers)
+    bag = db.range(num_blocks, npartitions=npart).map_partitions(
+        _partitioner, *fn_args, **fn_kwargs
+    )
+
+    # Start the cluster, time it, and compute
+    with start_dask(num_workers, msg, logger):
+        with Timing_Messager(msg.capitalize(), logger):
+            raw = dask_computer(bag, num_workers, **compute_args)
+
+    # Normalize raw into a flat list of "one-element-per-core-call"
+    if raw is None:
+        return []
+
+    # If Dask returned a generator, exhaust it now
+    if isinstance(raw, types.GeneratorType):
+        raw = list(raw)
+
+    return raw

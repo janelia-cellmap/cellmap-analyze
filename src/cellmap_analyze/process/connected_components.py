@@ -28,6 +28,8 @@ from cellmap_analyze.util.mask_util import MasksFromConfig
 from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
 import cc3d
+from collections import Counter
+from itertools import chain
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -207,10 +209,12 @@ class ConnectedComponents(ComputeConfigMixin):
 
     def calculate_connected_components_blockwise(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
-        b = db.range(
+        dask_util.compute_blockwise_partitions(
             num_blocks,
-            npartitions=guesstimate_npartitions(num_blocks, self.num_workers),
-        ).map(
+            self.num_workers,
+            self.compute_args,
+            logger,
+            "calculating connected components",
             ConnectedComponents.calculate_block_connected_components,
             self.input_idi,
             self.connected_components_blockwise_idi,
@@ -222,14 +226,6 @@ class ConnectedComponents(ComputeConfigMixin):
             self.mask,
             self.connectivity,
         )
-
-        with dask_util.start_dask(
-            self.num_workers,
-            "calculate connected components",
-            logger,
-        ):
-            with io_util.Timing_Messager("Calculating connected components", logger):
-                dask_computer(b, self.num_workers, **self.compute_args)
 
     @staticmethod
     def get_touching_ids(data, mask, connectivity=2, object_labels=None):
@@ -362,48 +358,39 @@ class ConnectedComponents(ComputeConfigMixin):
 
     @staticmethod
     def _combine_results(results):
-        if type(results) is tuple:
-            results = [results]
-        elif isinstance(results, types.GeneratorType):
-            results = list(results)
+        all_blocks = []
+        id_to_volume = Counter()
+        touching_ids = set()
 
-        for idx, (block, current_id_to_volume_dict, current_touching_ids) in enumerate(
-            tqdm(results)
-        ):
-            if idx == 0:
-                blocks = block
-                id_to_volume_dict = current_id_to_volume_dict
-                touching_ids = current_touching_ids
-                continue
+        for blk, cur_id2vol, cur_touch in tqdm(results, desc="Merging results"):
+            # blk might be a single block or a list of blocks
+            if isinstance(blk, list):
+                all_blocks.extend(blk)
+            else:
+                all_blocks.append(blk)
 
-            blocks += block
-            for key, value in current_id_to_volume_dict.items():
-                id_to_volume_dict[key] += value
-            touching_ids.update(current_touching_ids)
+            # Counter.update will sum volumes by key
+            id_to_volume.update(cur_id2vol)
 
-        return blocks, id_to_volume_dict, touching_ids
+            # set |= set is faster than update on arbitrary iterables
+            touching_ids |= set(cur_touch)
+
+        # If you really need a plain dict (not Counter):
+        return all_blocks, dict(id_to_volume), touching_ids
 
     def get_connected_component_information(self):
         num_blocks = dask_util.get_num_blocks(self.connected_components_blockwise_idi)
-        b = db.range(
+        bagged_results = dask_util.compute_blockwise_partitions(
             num_blocks,
-            npartitions=guesstimate_npartitions(num_blocks, self.num_workers),
-        ).map(
+            self.num_workers,
+            self.compute_args,
+            logger,
+            "calculating connected component information",
             ConnectedComponents.get_connected_component_information_blockwise,
             self.connected_components_blockwise_idi,
             self.connectivity,
             self.object_labels_idi,
         )
-
-        with dask_util.start_dask(
-            self.num_workers,
-            "calculate connected component information",
-            logger,
-        ):
-            with io_util.Timing_Messager(
-                "Calculating connected component information", logger
-            ):
-                bagged_results = dask_computer(b, self.num_workers, **self.compute_args)
 
         # moved this out of dask, seems fast enough without having to daskify
         with io_util.Timing_Messager("Combining bagged results", logger):
@@ -421,19 +408,17 @@ class ConnectedComponents(ComputeConfigMixin):
         blocks,
         num_local_threads_available,
         local_config,
-        num_workers,
         compute_args,
         use_new_temp_dir=False,
     ):
-        def write_out_block_object(block, tmp_path, use_new_temp_dir=False):
-            block_coords_string = "/".join([str(c) for c in block.coords])
-            output_path = f"{tmp_path}/{block_coords_string}.pkl"
-            if use_new_temp_dir:
-                os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
-            # write relabeling dict to pkl file
-            with open(f"{output_path}", "wb") as handle:
-                pickle.dump(block, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        def write_partition(blocks, tmp_path, use_new_temp_dir=False):
+            for block in blocks:
+                coords = "/".join(str(c) for c in block.coords)
+                out = os.path.join(tmp_path, f"{coords}.pkl")
+                if use_new_temp_dir:
+                    os.makedirs(os.path.dirname(out), exist_ok=True)
+                with open(out, "wb") as f:
+                    pickle.dump(block, f, protocol=pickle.HIGHEST_PROTOCOL)
 
         # NOTE: do it the following way since it should be fast enough with 10 workers and then we don't have to bog down distributed stuff
         with dask_util.start_dask(
@@ -445,8 +430,11 @@ class ConnectedComponents(ComputeConfigMixin):
             with io_util.Timing_Messager("Writing out blocks", logger):
                 b = db.from_sequence(
                     blocks,
-                    npartitions=guesstimate_npartitions(blocks, num_workers),
-                ).map(write_out_block_object, path, use_new_temp_dir)
+                    npartitions=guesstimate_npartitions(
+                        len(blocks), num_local_threads_available
+                    ),
+                ).map_partitions(write_partition, path, use_new_temp_dir)
+                # now you have only `num_workers` tasks, not millions
                 dask_computer(b, num_local_threads_available, **compute_args)
 
     def get_final_connected_components(self):
@@ -531,20 +519,18 @@ class ConnectedComponents(ComputeConfigMixin):
         )
 
         num_blocks = len(blocks)
-        b = db.range(
+        dask_util.compute_blockwise_partitions(
             num_blocks,
-            npartitions=guesstimate_npartitions(num_blocks, num_workers),
-        ).map(
+            num_workers,
+            compute_args,
+            logger,
+            "relabeling dataset",
             ConnectedComponents.relabel_block_from_path,
             original_idi,
             output_idi,
             block_info_basepath,
             mask=mask,
         )
-
-        with dask_util.start_dask(num_workers, "relabel dataset", logger):
-            with io_util.Timing_Messager("Relabeling dataset", logger):
-                dask_computer(b, num_workers, **compute_args)
 
     def get_connected_components(self):
         self.calculate_connected_components_blockwise()
@@ -561,7 +547,6 @@ class ConnectedComponents(ComputeConfigMixin):
             self.blocks,
             self.num_local_threads_available,
             self.local_config,
-            self.num_workers,
             self.compute_args,
         )
         self.relabel_dataset(

@@ -278,10 +278,12 @@ class MutexWatershed(ComputeConfigMixin):
 
     def calculate_connected_components_blockwise(self):
         num_blocks = dask_util.get_num_blocks(self.affinities_idi, roi=self.roi)
-        b = db.range(
+        dask_util.compute_blockwise_partitions(
             num_blocks,
-            npartitions=guesstimate_npartitions(num_blocks, self.num_workers),
-        ).map(
+            self.num_workers,
+            self.compute_args,
+            logger,
+            "calculating connected components blockwise",
             MutexWatershed.calculate_block_connected_components,
             self.affinities_idi,
             self.connected_components_blockwise_idi,
@@ -293,13 +295,6 @@ class MutexWatershed(ComputeConfigMixin):
             self.connectivity,
             self.do_opening,
         )
-        with dask_util.start_dask(
-            self.num_workers,
-            "calculate connected components",
-            logger,
-        ):
-            with io_util.Timing_Messager("Calculating connected components", logger):
-                dask_computer(b, self.num_workers, **self.compute_args)
 
     def get_connected_components(self):
         self.calculate_connected_components_blockwise()

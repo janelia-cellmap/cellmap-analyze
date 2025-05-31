@@ -94,29 +94,25 @@ class FillHoles(ComputeConfigMixin):
 
     @staticmethod
     def __combine_hole_information(blocks):
-        if type(blocks) is DaskBlock:
-            blocks = list(blocks)
-        if isinstance(blocks, types.GeneratorType):
-            blocks = list(blocks)
-
+        # 1) Merge hole_to_object_dict from each block
         hole_to_object_dict = {}
-        for idx, block in enumerate(tqdm(blocks)):
+        for idx, block in enumerate(tqdm(blocks, desc="Merging hole info")):
+            # The first block just seeds our dictionary (make a copy to avoid mutating original)
             if idx == 0:
-                hole_to_object_dict = block.hole_to_object_dict
+                hole_to_object_dict = block.hole_to_object_dict.copy()
                 continue
 
-            for key, value in block.hole_to_object_dict.items():
-                current_values = hole_to_object_dict.get(key, set())
-                hole_to_object_dict[key] = current_values.union(value)
+            # For subsequent blocks, union any sets in their dict into ours
+            for hole_id, obj_set in block.hole_to_object_dict.items():
+                existing = hole_to_object_dict.get(hole_id, set())
+                hole_to_object_dict[hole_id] = existing.union(obj_set)
 
-        for hole_id, object_ids in hole_to_object_dict.items():
+        # 5) Post-process: if a hole is touching more than one object, mark it 0; otherwise pop the single ID
+        for hole_id, object_ids in list(hole_to_object_dict.items()):
             if len(object_ids) > 1:
-                # then is touching two ids so is not a hole we can fill, so delete it from dictionary
                 hole_to_object_dict[hole_id] = 0
             else:
-                hole_to_object_dict[hole_id] = (
-                    object_ids.pop()
-                )  # get only element of the set
+                hole_to_object_dict[hole_id] = object_ids.pop()
 
         return blocks, hole_to_object_dict
 
@@ -131,24 +127,17 @@ class FillHoles(ComputeConfigMixin):
 
     def get_hole_assignments(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi)
-        b = db.range(
+        bagged_results = dask_util.compute_blockwise_partitions(
             num_blocks,
-            npartitions=guesstimate_npartitions(num_blocks, self.num_workers),
-        ).map(
+            self.num_workers,
+            self.compute_args,
+            logger,
+            "calculating hole information",
             FillHoles.get_hole_information_blockwise,
             input_idi=self.input_idi,
             holes_idi=self.holes_idi,
             connectivity=self.connectivity,
         )
-
-        with dask_util.start_dask(
-            self.num_workers,
-            "calculate hole information",
-            logger,
-        ):
-            with io_util.Timing_Messager("Calculating hole information", logger):
-                bagged_results = dask_computer(b, self.num_workers, **self.compute_args)
-
         # moved this out of dask, seems fast enough without having to daskify
         with io_util.Timing_Messager("Combining bagged results", logger):
             blocks, hole_to_object_dict = FillHoles.__combine_hole_information(
@@ -201,19 +190,17 @@ class FillHoles(ComputeConfigMixin):
         )
 
         num_blocks = len(self.blocks)
-        b = db.range(
+        dask_util.compute_blockwise_partitions(
             num_blocks,
-            npartitions=guesstimate_npartitions(num_blocks, self.num_workers),
-        ).map(
+            self.num_workers,
+            self.compute_args,
+            logger,
+            "relabeling dataset",
             FillHoles.relabel_block,
             self.input_idi,
             self.holes_idi,
             self.output_idi,
         )
-
-        with dask_util.start_dask(self.num_workers, "relabel dataset", logger):
-            with io_util.Timing_Messager("Relabeling dataset", logger):
-                dask_computer(b, self.num_workers, **self.compute_args)
 
     def fill_holes(self):
 
@@ -240,7 +227,6 @@ class FillHoles(ComputeConfigMixin):
             blocks=self.blocks,
             num_local_threads_available=self.num_local_threads_available,
             local_config=self.local_config,
-            num_workers=self.num_workers,
             compute_args=self.compute_args,
         )
         self.relabel_dataset()

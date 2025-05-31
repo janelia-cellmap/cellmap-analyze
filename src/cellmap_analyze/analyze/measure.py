@@ -138,31 +138,27 @@ class Measure(ComputeConfigMixin):
 
     @staticmethod
     def __summer(object_information_dicts):
-        if type(object_information_dicts) is tuple:
-            object_information_dicts = [object_information_dicts]
-        elif isinstance(object_information_dicts, types.GeneratorType):
-            object_information_dicts = list(object_information_dicts)
-
-        for idx, object_information_dict in enumerate(tqdm(object_information_dicts)):
-            if idx == 0:
-                output_dict = object_information_dict
-                continue
-
-            for id, oi in object_information_dict.items():
-                if id in output_dict:
-                    output_dict[id] += oi
+        # 4) Now `flat_dicts` is a list of {id: value} dictionaries. Merge them.
+        output_dict = {}
+        for curr in tqdm(
+            object_information_dicts, desc="Summing object_information_dicts"
+        ):
+            for key, val in curr.items():
+                if key in output_dict:
+                    output_dict[key] += val
                 else:
-                    output_dict[id] = oi
+                    output_dict[key] = val
 
         return output_dict
 
     def measure(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, self.roi)
-
-        b = db.range(
+        bagged_results = dask_util.compute_blockwise_partitions(
             num_blocks,
-            npartitions=guesstimate_npartitions(num_blocks, self.num_workers),
-        ).map(
+            self.num_workers,
+            self.compute_args,
+            logger,
+            "measuring object information",
             Measure.get_measurements_blockwise,
             self.input_idi,
             self.roi,
@@ -170,14 +166,6 @@ class Measure(ComputeConfigMixin):
             self.contact_sites,
             **self.get_measurements_blockwise_extra_kwargs,
         )
-
-        with dask_util.start_dask(
-            self.num_workers,
-            "measure object information",
-            logger,
-        ):
-            with io_util.Timing_Messager("Measuring object information", logger):
-                bagged_results = dask_computer(b, self.num_workers, **self.compute_args)
 
         # moved this out of dask, seems fast enough without having to daskify
         with io_util.Timing_Messager("Combining bagged results", logger):

@@ -184,10 +184,12 @@ class ContactSites(ComputeConfigMixin):
         num_blocks = dask_util.get_num_blocks(
             self.contact_sites_blockwise_idi, self.roi
         )
-        b = db.range(
+        dask_util.compute_blockwise_partitions(
             num_blocks,
-            npartitions=guesstimate_npartitions(num_blocks, self.num_workers),
-        ).map(
+            self.num_workers,
+            self.compute_args,
+            logger,
+            "calculating contact sites",
             ContactSites.calculate_block_contact_sites,
             self.organelle_1_idi,
             self.organelle_2_idi,
@@ -195,14 +197,6 @@ class ContactSites(ComputeConfigMixin):
             self.contact_distance_voxels,
             self.padding_voxels,
         )
-
-        with dask_util.start_dask(
-            self.num_workers,
-            "calculate contact sites",
-            logger,
-        ):
-            with io_util.Timing_Messager("Calculating contact sites", logger):
-                dask_computer(b, self.num_workers, **self.compute_args)
 
     def get_contact_sites(self):
         self.calculate_contact_sites_blockwise()

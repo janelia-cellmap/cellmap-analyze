@@ -93,10 +93,12 @@ class LabelWithMask(ComputeConfigMixin):
 
     def get_label_with_mask(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
-        b = db.range(
+        dask_util.compute_blockwise_partitions(
             num_blocks,
-            npartitions=guesstimate_npartitions(num_blocks, self.num_workers),
-        ).map(
+            self.num_workers,
+            self.compute_args,
+            logger,
+            "labeling with mask",
             LabelWithMask.label_with_mask_blockwise,
             self.input_idi,
             self.mask_idi,
@@ -105,11 +107,3 @@ class LabelWithMask(ComputeConfigMixin):
             self.intensity_threshold_maximum,
             self.surface_voxels_only,
         )
-
-        with dask_util.start_dask(
-            self.num_workers,
-            "labeling with mask",
-            logger,
-        ):
-            with io_util.Timing_Messager("Labeling with mask", logger):
-                dask_computer(b, self.num_workers, **self.compute_args)

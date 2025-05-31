@@ -105,9 +105,6 @@ class FilterIDs(ComputeConfigMixin):
 
     @staticmethod
     def __combine_results(results):
-        if type(results) != list:
-            results = list(results)
-
         for idx, block in enumerate(tqdm(results)):
             if idx == 0:
                 blocks = block
@@ -117,21 +114,15 @@ class FilterIDs(ComputeConfigMixin):
 
     def get_object_ids(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi)
-        b = db.range(
+        bagged_results = dask_util.compute_blockwise_partitions(
             num_blocks,
-            npartitions=guesstimate_npartitions(num_blocks, self.num_workers),
-        ).map(
+            self.num_workers,
+            self.compute_args,
+            logger,
+            "calculating object ids",
             FilterIDs.get_object_ids_blockwise,
             self.input_idi,
         )
-
-        with dask_util.start_dask(
-            self.num_workers,
-            "calculate object ids",
-            logger,
-        ):
-            with io_util.Timing_Messager("Calculating object ids", logger):
-                bagged_results = dask_computer(b, self.num_workers, **self.compute_args)
 
         # moved this out of dask, seems fast enough without having to daskify
         with io_util.Timing_Messager("Combining bagged results", logger):
@@ -153,7 +144,6 @@ class FilterIDs(ComputeConfigMixin):
             self.blocks,
             self.num_local_threads_available,
             self.local_config,
-            self.num_workers,
             self.compute_args,
             use_new_temp_dir=True,
         )

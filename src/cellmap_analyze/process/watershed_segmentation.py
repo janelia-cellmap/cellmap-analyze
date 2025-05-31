@@ -239,10 +239,12 @@ class WatershedSegmentation(ComputeConfigMixin):
 
     def calculate_blockwise_watershed_seeds(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
-        b = db.range(
+        dask_util.compute_blockwise_partitions(
             num_blocks,
-            npartitions=guesstimate_npartitions(num_blocks, self.num_workers),
-        ).map(
+            self.num_workers,
+            self.compute_args,
+            logger,
+            "calculating blockwise watershed seeds",
             WatershedSegmentation.calculate_blockwise_watershed_seeds_blockwise,
             self.input_idi,
             self.distance_transform_idi,
@@ -250,31 +252,38 @@ class WatershedSegmentation(ComputeConfigMixin):
             self.pseudo_neighborhood_radius_voxels,
         )
 
-        with dask_util.start_dask(
-            self.num_workers,
-            "calculate blockwise watershed seeds",
-            logger,
-        ):
-            with io_util.Timing_Messager(
-                "Calculating blockwise watershed seeds", logger
-            ):
-                dask_computer(b, self.num_workers, **self.compute_args)
-
     def calculate_distance_transform(self):
+
         num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
-        b = db.range(
-            num_blocks,
-            npartitions=guesstimate_npartitions(num_blocks, self.num_workers),
-        ).map(
-            WatershedSegmentation.calculate_distance_transform_blockwise,
+
+        # 1) Define a partition-wise helper that computes the maximum DT for its indices
+        def _dt_partition(idxs, input_idi, distance_transform_idi):
+            local_max = 0.0
+            for idx in idxs:
+                dt_val = WatershedSegmentation.calculate_distance_transform_blockwise(
+                    idx, input_idi, distance_transform_idi
+                )
+                if dt_val > local_max:
+                    local_max = dt_val
+            # Return a single-element list (Dask will flatten this into one item per partition)
+            return [local_max]
+
+        # 2) Build a Bag using map_partitions instead of map
+        npart = guesstimate_npartitions(num_blocks, self.num_workers)
+        b = db.range(num_blocks, npartitions=npart).map_partitions(
+            _dt_partition,
             self.input_idi,
             self.distance_transform_idi,
         )
+
+        # 3) Launch Dask, compute the per-partition maxima, then take the global max
         with dask_util.start_dask(
             self.num_workers, "calculate distance transform blockwise", logger
         ):
             with io_util.Timing_Messager("Calculating distance transform", logger):
+                # b now contains one float per partition: the local max for that partition
                 global_dt_max = np.ceil(b.max().compute(**self.compute_args))
+
                 self.global_dt_max_voxels = int(
                     np.ceil(global_dt_max / self.input_idi.voxel_size[0])
                 )
@@ -366,10 +375,12 @@ class WatershedSegmentation(ComputeConfigMixin):
 
     def do_deprecated_flawed_watershed(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
-        b = db.range(
+        dask_util.compute_blockwise_partitions(
             num_blocks,
-            npartitions=guesstimate_npartitions(num_blocks, self.num_workers),
-        ).map(
+            self.num_workers,
+            self.compute_args,
+            logger,
+            "calculating watershed blockwise",
             WatershedSegmentation.watershed_blockwise,
             self.input_idi,
             self.distance_transform_idi,
@@ -378,14 +389,6 @@ class WatershedSegmentation(ComputeConfigMixin):
             self.global_dt_max_voxels,
             self.pseudo_neighborhood_radius_voxels,
         )
-
-        with dask_util.start_dask(
-            self.num_workers,
-            "calculate watershed blockwise",
-            logger,
-        ):
-            with io_util.Timing_Messager("Calculating watershed", logger):
-                dask_computer(b, self.num_workers, **self.compute_args)
 
     def do_global_watershed(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
