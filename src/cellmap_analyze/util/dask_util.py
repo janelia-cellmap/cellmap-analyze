@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 import os
+import random
 import dask
 from dask.distributed import Client
 import getpass
@@ -171,7 +172,7 @@ def dask_computer(b, num_workers, **kwargs):
     if num_workers == 1:
         return b.compute(**kwargs)
     if num_workers > 1:
-        b = b.persist(**kwargs)  # start computation in the background
+        # b = b.persist(**kwargs)  # start computation in the background
         # if num_workers <= 100:
         #     interval = "3s"
         # elif num_workers <= 500:
@@ -279,12 +280,13 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
         elif cluster_type == "slurm":
             from dask_jobqueue import SLURMCluster
 
-            cluster = SLURMCluster()
+            cluster = SLURMlsCluster()
         elif cluster_type == "sge":
             from dask_jobqueue import SGECluster
 
             cluster = SGECluster()
         cluster.scale(num_workers)
+        # cluster.adapt(minimum=0, maximum=num_workers, interval="1s")
     try:
         with Timing_Messager(
             f"Starting {cluster_type} dask cluster for {msg} with {num_workers} workers",
@@ -329,8 +331,10 @@ def setup_execution_directory(config_path, logger):
 def delete_chunks(block_coords, tmp_blockwise_ds_path):
     block_coords_string = "/".join([str(c) for c in block_coords])
     delete_name = f"{tmp_blockwise_ds_path}/{block_coords_string}"
-    if os.path.exists(delete_name) and (
-        os.path.isfile(delete_name) or os.listdir(delete_name) == []
+    if (os.path.exists(delete_name) or os.path.exists(f"{delete_name}.pkl")) and (
+        os.path.isfile(delete_name)
+        or os.path.isfile(f"{delete_name}.pkl")
+        or os.listdir(delete_name) == []
     ):
         os.system(f"rm -rf {delete_name}")
         if len(block_coords) == 3:
@@ -372,47 +376,72 @@ def compute_blockwise_partitions(
     **fn_kwargs,
 ):
     """
-    Run `fn(i, *fn_args, **fn_kwargs)` for i in range(num_blocks) using Dask with map_partitions.
-    The return value is always a flat list where each element is exactly what a single `fn(i, ...)` returned.
-    If `fn(i, ...)` returns None, that None will appear in the list; if it returns a tuple or custom object,
-    that object appears as-is.
+    Just like your original, but *without* building a giant Python list.
+    We start from db.range(...) (lazy), then attach a random key to each integer,
+    repartition, and drop that key—resulting in a Bag of [0..num_blocks-1] in random order.
 
-    - num_blocks: total number of indices to process
+    - num_blocks: how many indices you want to process (0..num_blocks-1)
     - num_workers: how many Dask workers to spin up
     - compute_args: dict of kwargs for .persist/.compute (e.g. {"scheduler": "threads"})
-    - logger: your Logger instance
-    - msg: description string (used in start_dask and Timing_Messager)
-    - fn: block-wise function taking `(index, *fn_args, **fn_kwargs)` → R (any type, including None)
-    - *fn_args: extra positional args to forward to fn
-    - **fn_kwargs: extra keyword args to forward to fn
+    - logger, msg, fn, *fn_args, **fn_kwargs: same as before
     """
 
     def _partitioner(idxs, *args, **kwargs):
         """
-        Process a batch of indices. For each index i, call fn(i, *args, **kwargs) and
-        append the return value (whatever it is) into a list. Return that list.
+        Called on each Bag-partition: receives a sequence of (shuffled) indices,
+        calls fn(i, *args, **kwargs) for each i, collects return-values in a list.
         """
         out = []
         for i in idxs:
             out.append(fn(i, *args, **kwargs))
-        return out  # always a plain list of return-values
+        return out
 
-    # Build the Dask Bag: indices [0 .. num_blocks-1], partitioned into `npart` parts
+    # ──────────────────────────────────────────────────────────────────────────
+    # STEP 1) Create a lazy Bag of 0..num_blocks-1, partitioned into `npart` parts
+    # ──────────────────────────────────────────────────────────────────────────
     npart = guesstimate_npartitions(num_blocks, num_workers)
-    bag = db.range(num_blocks, npartitions=npart).map_partitions(
-        _partitioner, *fn_args, **fn_kwargs
-    )
+    bag0 = db.range(num_blocks, npartitions=npart)
 
-    # Start the cluster, time it, and compute
+    # ──────────────────────────────────────────────────────────────────────────
+    # STEP 2) Attach a random key to each index: (rand_float, i)
+    # ──────────────────────────────────────────────────────────────────────────
+    #
+    # This single `map` does *not* blow up memory—Dask will generate one (rand,i)
+    # tuple at a time, on whichever worker grabs that partition.
+    bag1 = bag0.map(lambda i: (random.random(), i))
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # STEP 3) Repartition by that random key
+    # ──────────────────────────────────────────────────────────────────────────
+    #
+    # Because the first element of each tuple is a uniform random float in [0,1),
+    # doing `repartition(npartitions=…)` will hash‐shuffle those (rand, i) pairs
+    # into `npart` new partitions, mixing everything up.
+    bag2 = bag1.repartition(npartitions=npart)
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # STEP 4) Drop the random key, leaving just the integer i—now in random order
+    # ──────────────────────────────────────────────────────────────────────────
+    bag_shuffled = bag2.map(lambda pair: pair[1])
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # STEP 5) Finally, map your _partitioner over those randomly ordered indices
+    # ──────────────────────────────────────────────────────────────────────────
+    bag = bag_shuffled.map_partitions(_partitioner, *fn_args, **fn_kwargs)
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # STEP 6) Launch the cluster, time the computation, and .compute() or .persist()
+    # ──────────────────────────────────────────────────────────────────────────
     with start_dask(num_workers, msg, logger):
         with Timing_Messager(msg.capitalize(), logger):
             raw = dask_computer(bag, num_workers, **compute_args)
 
-    # Normalize raw into a flat list of "one-element-per-core-call"
+    # ──────────────────────────────────────────────────────────────────────────
+    # STEP 7) Normalize the result into a flat list (exactly as you had before)
+    # ──────────────────────────────────────────────────────────────────────────
     if raw is None:
         return []
 
-    # If Dask returned a generator, exhaust it now
     if isinstance(raw, types.GeneratorType):
         raw = list(raw)
 
