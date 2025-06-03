@@ -130,17 +130,19 @@ class CleanConnectedComponents(ComputeConfigMixin):
 
     def get_connected_component_information(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, self.roi)
-        blocks_with_dict, self.id_to_volume_dict, _ = dask_util.compute_blockwise_partitions(
-            num_blocks,
-            self.num_workers,
-            self.compute_args,
-            logger,
-            "getting connected component information",
-            CleanConnectedComponents.get_connected_component_information_blockwise,
-            self.input_idi,
-            self.mask,
-            merge_fn=ConnectedComponents._merge_tuples,
-            merge_identity=([], Counter(), set()),
+        blocks_with_dict, self.id_to_volume_dict, _ = (
+            dask_util.compute_blockwise_partitions(
+                num_blocks,
+                self.num_workers,
+                self.compute_args,
+                logger,
+                "getting connected component information",
+                CleanConnectedComponents.get_connected_component_information_blockwise,
+                self.input_idi,
+                self.mask,
+                merge_fn=ConnectedComponents._merge_tuples,
+                merge_identity=([], Counter(), set()),
+            )
         )
 
         self.blocks = [None] * num_blocks
