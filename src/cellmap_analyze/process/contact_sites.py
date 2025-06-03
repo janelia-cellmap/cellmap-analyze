@@ -1,20 +1,15 @@
 import numpy as np
 from cellmap_analyze.util import dask_util
-from cellmap_analyze.util import io_util
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
-    dask_computer,
-    guesstimate_npartitions,
 )
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.io_util import get_name_from_path
-from skimage import measure
 from cellmap_analyze.cythonizing.process_arrays import initialize_contact_site_array
 from cellmap_analyze.cythonizing.bresenham3D import bresenham_3D_lines
 import logging
 from cellmap_analyze.process.connected_components import ConnectedComponents
 from scipy.spatial import KDTree
-import dask.bag as db
 from cellmap_analyze.util.measure_util import trim_array
 from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.util.zarr_util import (

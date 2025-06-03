@@ -6,8 +6,6 @@ from cellmap_analyze.util import dask_util
 from cellmap_analyze.util import io_util
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
-    dask_computer,
-    guesstimate_npartitions,
 )
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.io_util import (
@@ -15,7 +13,6 @@ from cellmap_analyze.util.io_util import (
     split_dataset_path,
 )
 import logging
-import dask.bag as db
 import os
 import pandas as pd
 

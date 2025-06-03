@@ -1,4 +1,3 @@
-from collections import defaultdict
 import pickle
 import numpy as np
 from cellmap_analyze.util import dask_util
@@ -344,8 +343,7 @@ class ConnectedComponents(ComputeConfigMixin):
 
     @staticmethod
     def _merge_tuples(
-        acc: tuple[list, Counter, set],
-        res: tuple[list | object, dict, set]
+        acc: tuple[list, Counter, set], res: tuple[list | object, dict, set]
     ) -> tuple[list, Counter, set]:
         """
         acc: (all_blocks_acc, counter_acc, touch_acc)
@@ -372,21 +370,23 @@ class ConnectedComponents(ComputeConfigMixin):
 
     def get_connected_component_information(self):
         num_blocks = dask_util.get_num_blocks(self.connected_components_blockwise_idi)
-        all_blocks, self.id_to_volume_dict, self.touching_ids = dask_util.compute_blockwise_partitions(
-            num_blocks,
-            self.num_workers,
-            self.compute_args,
-            logger,
-            "calculating connected component information",
-            ConnectedComponents.get_connected_component_information_blockwise,
-            self.connected_components_blockwise_idi,
-            self.connectivity,
-            self.object_labels_idi,
-            merge_fn=ConnectedComponents._merge_tuples,
-            merge_identity=([], Counter(), set()),
+        all_blocks, self.id_to_volume_dict, self.touching_ids = (
+            dask_util.compute_blockwise_partitions(
+                num_blocks,
+                self.num_workers,
+                self.compute_args,
+                logger,
+                "calculating connected component information",
+                ConnectedComponents.get_connected_component_information_blockwise,
+                self.connected_components_blockwise_idi,
+                self.connectivity,
+                self.object_labels_idi,
+                merge_fn=ConnectedComponents._merge_tuples,
+                merge_identity=([], Counter(), set()),
+            )
         )
         print(self.id_to_volume_dict)
-        
+
         # Reconstruct self.blocks by index
         self.blocks = [None] * num_blocks
         for blk in all_blocks:
@@ -568,6 +568,8 @@ class ConnectedComponents(ComputeConfigMixin):
                 delete_tmp=self.delete_tmp,
             )
             fh.fill_holes()
+
+
 # %%
 # from cellmap_analyze.util.image_data_interface import ImageDataInterface
 # import numpy as np
