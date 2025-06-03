@@ -346,17 +346,6 @@ class ConnectedComponents(ComputeConfigMixin):
         return [block], id_to_volume_dict, touching_ids
 
     @staticmethod
-    def combine_id_to_volume_dicts(dict1, dict2):
-        # make dict1 the larger dict
-        if len(dict1) < len(dict2):
-            dict1, dict2 = dict2, dict1
-
-        dict1 = dict1.copy()
-        for id, volume in dict2.items():
-            dict1[id] = dict1.get(id, 0) + volume
-        return dict1
-
-    @staticmethod
     def _combine_results(results):
         all_blocks = []
         id_to_volume = Counter()

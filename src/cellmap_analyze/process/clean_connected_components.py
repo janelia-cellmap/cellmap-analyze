@@ -131,17 +131,6 @@ class CleanConnectedComponents(ComputeConfigMixin):
             )
         return [block], id_to_volume_dict, set()
 
-    @staticmethod
-    def combine_id_to_volume_dicts(dict1, dict2):
-        # make dict1 the larger dict
-        if len(dict1) < len(dict2):
-            dict1, dict2 = dict2, dict1
-
-        dict1 = dict1.copy()
-        for id, volume in dict2.items():
-            dict1[id] = dict1.get(id, 0) + volume
-        return dict1
-
     def get_connected_component_information(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, self.roi)
         bagged_results = dask_util.compute_blockwise_partitions(
