@@ -365,6 +365,11 @@ def delete_tmp_dataset(path_to_dataset, blocks, num_workers, compute_args):
     os.system(f"rm -rf {basepath}/{get_name_from_path(path_to_dataset)}")
 
 
+import random
+import types
+from collections import Counter
+import dask.bag as db
+
 def compute_blockwise_partitions(
     num_blocks: int,
     num_workers: int,
@@ -373,22 +378,32 @@ def compute_blockwise_partitions(
     msg: str,
     fn,
     *fn_args,
+    randomize: bool = True,
+    merge_fn=None,
+    merge_identity=None,
     **fn_kwargs,
 ):
     """
-    Just like your original, but *without* building a giant Python list.
-    We start from db.range(...) (lazy), then attach a random key to each integer,
-    repartition, and drop that key—resulting in a Bag of [0..num_blocks-1] in random order.
+    Just like your original, but:
+      1) randomization of indices is optional (defaults to True)
+      2) if `merge_fn` and `identity` are provided, performs a parallel fold
+         instead of returning a flat list of all results.
 
     - num_blocks: how many indices you want to process (0..num_blocks-1)
     - num_workers: how many Dask workers to spin up
     - compute_args: dict of kwargs for .persist/.compute (e.g. {"scheduler": "threads"})
-    - logger, msg, fn, *fn_args, **fn_kwargs: same as before
+    - logger: logger instance for timing messages
+    - msg: descriptive message for timing (e.g. "calculating connected component information")
+    - fn: the per-index function, called as fn(i, *fn_args, **fn_kwargs)
+    - *fn_args, **fn_kwargs: arguments passed to `fn`
+    - randomize: if True (default), shuffle indices via random keys before partitioning
+    - merge_fn: if provided (callable), used as the binary merge function for folding
+    - identity: if provided, the identity element (e.g., ([], Counter(), set())) for folding
     """
 
     def _partitioner(idxs, *args, **kwargs):
         """
-        Called on each Bag-partition: receives a sequence of (shuffled) indices,
+        Called on each Bag-partition: receives a sequence of (possibly shuffled) indices,
         calls fn(i, *args, **kwargs) for each i, collects return-values in a list.
         """
         out = []
@@ -403,46 +418,45 @@ def compute_blockwise_partitions(
     bag0 = db.range(num_blocks, npartitions=npart)
 
     # ──────────────────────────────────────────────────────────────────────────
-    # STEP 2) Attach a random key to each index: (rand_float, i)
+    # STEP 2-4) Optionally shuffle: attach a random key, repartition, then drop the key
     # ──────────────────────────────────────────────────────────────────────────
-    #
-    # This single `map` does *not* blow up memory—Dask will generate one (rand,i)
-    # tuple at a time, on whichever worker grabs that partition.
-    bag1 = bag0.map(lambda i: (random.random(), i))
+    if randomize:
+        bag1 = bag0.map(lambda i: (random.random(), i))
+        bag2 = bag1.repartition(npartitions=npart)
+        bag_shuffled = bag2.map(lambda pair: pair[1])
+    else:
+        bag_shuffled = bag0
 
     # ──────────────────────────────────────────────────────────────────────────
-    # STEP 3) Repartition by that random key
-    # ──────────────────────────────────────────────────────────────────────────
-    #
-    # Because the first element of each tuple is a uniform random float in [0,1),
-    # doing `repartition(npartitions=…)` will hash‐shuffle those (rand, i) pairs
-    # into `npart` new partitions, mixing everything up.
-    bag2 = bag1.repartition(npartitions=npart)
-
-    # ──────────────────────────────────────────────────────────────────────────
-    # STEP 4) Drop the random key, leaving just the integer i—now in random order
-    # ──────────────────────────────────────────────────────────────────────────
-    bag_shuffled = bag2.map(lambda pair: pair[1])
-
-    # ──────────────────────────────────────────────────────────────────────────
-    # STEP 5) Finally, map your _partitioner over those randomly ordered indices
+    # STEP 5) Map your _partitioner over those (possibly shuffled) indices
     # ──────────────────────────────────────────────────────────────────────────
     bag = bag_shuffled.map_partitions(_partitioner, *fn_args, **fn_kwargs)
 
     # ──────────────────────────────────────────────────────────────────────────
-    # STEP 6) Launch the cluster, time the computation, and .compute() or .persist()
+    # STEP 6) If merge_fn & identity are supplied, fold; otherwise compute full list
     # ──────────────────────────────────────────────────────────────────────────
     with start_dask(num_workers, msg, logger):
         with Timing_Messager(msg.capitalize(), logger):
-            raw = dask_computer(bag, num_workers, **compute_args)
+            if merge_fn is not None and merge_identity is not None:
+                # Perform a parallel tree-reduce (fold) across all partitions
+                folded = bag.fold(binop=merge_fn, combine=merge_fn, initial=merge_identity)
+                raw = dask_computer(folded, num_workers, **compute_args)
+            else:
+                # Default behavior: compute each partition’s list-of-results,
+                # then flatten into a single Python list
+                raw = dask_computer(bag, num_workers, **compute_args)
 
     # ──────────────────────────────────────────────────────────────────────────
-    # STEP 7) Normalize the result into a flat list (exactly as you had before)
+    # STEP 7) If we didn’t do a fold, normalize the result into a flat list (as before)
     # ──────────────────────────────────────────────────────────────────────────
-    if raw is None:
-        return []
+    if merge_fn is None or merge_identity is None:
+        if raw is None:
+            return []
+        if isinstance(raw, types.GeneratorType):
+            raw = list(raw)
+        return raw
 
-    if isinstance(raw, types.GeneratorType):
-        raw = list(raw)
-
+    # ──────────────────────────────────────────────────────────────────────────
+    # STEP 8) If folding was used, we assume `raw` is already the merged result
+    # ──────────────────────────────────────────────────────────────────────────
     return raw

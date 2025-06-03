@@ -92,42 +92,65 @@ class FillHoles(ComputeConfigMixin):
 
         return block
 
+    
     @staticmethod
-    def __combine_hole_information(blocks):
-        # 1) Merge hole_to_object_dict from each block
-        hole_to_object_dict = {}
-        for idx, block in enumerate(tqdm(blocks, desc="Merging hole info")):
-            # The first block just seeds our dictionary (make a copy to avoid mutating original)
-            if idx == 0:
-                hole_to_object_dict = block.hole_to_object_dict.copy()
-                continue
+    def _merge_hole_partials(
+        acc: tuple[list, dict[int, set[int]]],
+        res: object | tuple[list, dict[int, set[int]]]
+    ) -> tuple[list, dict[int, set[int]]]:
+        """
+        acc:     (blocks_acc, hole_dict_acc)
+        res:     either a Block instance (with .hole_to_object_dict),
+                 or a previously‐merged tuple (blocks_list, hole_dict)
+        
+        Logic:
+          - If `res` is a Block, pull its hole_to_object_dict, make a copy,
+            and merge into acc.
+          - If `res` is already a merged tuple, merge both hole_dicts and both block‐lists.
+        """
+        blocks_acc, hole_dict_acc = acc
 
-            # For subsequent blocks, union any sets in their dict into ours
-            for hole_id, obj_set in block.hole_to_object_dict.items():
-                existing = hole_to_object_dict.get(hole_id, set())
-                hole_to_object_dict[hole_id] = existing.union(obj_set)
+        # Case 1: `res` is a Block (leaf from the Bag)
+        if hasattr(res, "hole_to_object_dict"):
+            block = res
+            # 1a) Add this single block
+            new_blocks = blocks_acc + [block]
 
-        # 5) Post-process: if a hole is touching more than one object, mark it 0; otherwise pop the single ID
-        for hole_id, object_ids in list(hole_to_object_dict.items()):
-            if len(object_ids) > 1:
-                hole_to_object_dict[hole_id] = 0
+            # 1b) Copy its hole→object‐set mapping
+            hole_dict_res = block.hole_to_object_dict.copy()
+            # 1c) Merge that into the accumulator’s hole_dict_acc
+            merged_hole_dict = hole_dict_acc.copy()
+            for hole_id, obj_set in hole_dict_res.items():
+                merged_hole_dict[hole_id] = merged_hole_dict.get(hole_id, set()).union(obj_set)
+
+        # Case 2: `res` is already a merged tuple (blocks_list, hole_dict)
+        else:
+            blocks_list2, hole_dict2 = res  # type: ignore
+            new_blocks = blocks_acc + blocks_list2
+
+            merged_hole_dict = hole_dict_acc.copy()
+            for hole_id, obj_set in hole_dict2.items():
+                merged_hole_dict[hole_id] = merged_hole_dict.get(hole_id, set()).union(obj_set)
+
+        return (new_blocks, merged_hole_dict)
+    
+    @staticmethod
+    def __postprocess_hole_dict(raw_hole_dict: dict[int, set[int]]) -> dict[int, int]:
+        """
+        For each hole_id, if it touches >1 objects, assign 0.
+        Otherwise, extract the single object ID.
+        """
+        final = {}
+        for hole_id, obj_set in raw_hole_dict.items():
+            if len(obj_set) > 1:
+                final[hole_id] = 0
             else:
-                hole_to_object_dict[hole_id] = object_ids.pop()
-
-        return blocks, hole_to_object_dict
-
-    def get_final_hole_assignments(self, hole_to_object_dict):
-        # update blockwise relabeing dicts
-        for block in self.blocks:
-            block.relabeling_dict = {
-                id: hole_to_object_dict.get(id, 0)
-                for id in block.hole_to_object_dict.keys()
-            }
-            block.hole_to_object_dict = None
-
+                final[hole_id] = next(iter(obj_set))
+        return final
+    
     def get_hole_assignments(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi)
-        bagged_results = dask_util.compute_blockwise_partitions(
+        blocks, hole_to_object_dict = dask_util.compute_blockwise_partitions(
             num_blocks,
             self.num_workers,
             self.compute_args,
@@ -137,12 +160,12 @@ class FillHoles(ComputeConfigMixin):
             input_idi=self.input_idi,
             holes_idi=self.holes_idi,
             connectivity=self.connectivity,
+            merge_fn=FillHoles._merge_hole_partials,
+            merge_identity=([], {}),
         )
-        # moved this out of dask, seems fast enough without having to daskify
-        with io_util.Timing_Messager("Combining bagged results", logger):
-            blocks, hole_to_object_dict = FillHoles.__combine_hole_information(
-                bagged_results
-            )
+
+        hole_to_object_dict = FillHoles.__postprocess_hole_dict(hole_to_object_dict)
+
         # get blockwise dict assignments
         self.blocks = [None] * num_blocks
         for block in blocks:

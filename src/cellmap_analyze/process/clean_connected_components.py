@@ -1,11 +1,10 @@
+from collections import Counter
 import numpy as np
 from cellmap_analyze.process.connected_components import ConnectedComponents
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util import io_util
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
-    dask_computer,
-    guesstimate_npartitions,
 )
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.io_util import (
@@ -14,9 +13,7 @@ from cellmap_analyze.util.io_util import (
 )
 
 import logging
-import dask.bag as db
 import itertools
-import os
 from cellmap_analyze.util.mask_util import MasksFromConfig
 import fastremap
 
@@ -133,7 +130,7 @@ class CleanConnectedComponents(ComputeConfigMixin):
 
     def get_connected_component_information(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, self.roi)
-        bagged_results = dask_util.compute_blockwise_partitions(
+        blocks_with_dict, self.id_to_volume_dict, _ = dask_util.compute_blockwise_partitions(
             num_blocks,
             self.num_workers,
             self.compute_args,
@@ -142,13 +139,9 @@ class CleanConnectedComponents(ComputeConfigMixin):
             CleanConnectedComponents.get_connected_component_information_blockwise,
             self.input_idi,
             self.mask,
+            merge_fn=ConnectedComponents._merge_tuples,
+            merge_identity=([], Counter(), set()),
         )
-
-        # moved this out of dask, seems fast enough without having to daskify
-        with io_util.Timing_Messager("Combining bagged results", logger):
-            blocks_with_dict, self.id_to_volume_dict, _ = (
-                ConnectedComponents._combine_results(bagged_results)
-            )
 
         self.blocks = [None] * num_blocks
         for block in blocks_with_dict:

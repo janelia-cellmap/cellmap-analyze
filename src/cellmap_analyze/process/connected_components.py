@@ -1,8 +1,6 @@
 from collections import defaultdict
 import pickle
-import types
 import numpy as np
-from tqdm import tqdm
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util import io_util
 from cellmap_analyze.util.block_util import relabel_block
@@ -29,7 +27,6 @@ from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
 import cc3d
 from collections import Counter
-from itertools import chain
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -283,7 +280,7 @@ class ConnectedComponents(ComputeConfigMixin):
     @staticmethod
     def get_object_sizes(data):
         labels, counts = fastremap.unique(data[data > 0], return_counts=True)
-        return defaultdict(int, zip(labels, counts))
+        return Counter(dict(zip(labels, counts)))
 
     @staticmethod
     def get_connected_ids(nodes, edges):
@@ -346,30 +343,36 @@ class ConnectedComponents(ComputeConfigMixin):
         return [block], id_to_volume_dict, touching_ids
 
     @staticmethod
-    def _combine_results(results):
-        all_blocks = []
-        id_to_volume = Counter()
-        touching_ids = set()
+    def _merge_tuples(
+        acc: tuple[list, Counter, set],
+        res: tuple[list | object, dict, set]
+    ) -> tuple[list, Counter, set]:
+        """
+        acc: (all_blocks_acc, counter_acc, touch_acc)
+        res: (blk_or_list, cur_id2vol, cur_touch)
 
-        for blk, cur_id2vol, cur_touch in tqdm(results, desc="Merging results"):
-            # blk might be a single block or a list of blocks
-            if isinstance(blk, list):
-                all_blocks.extend(blk)
-            else:
-                all_blocks.append(blk)
+        This version checks for overlap and avoids mutating counter_acc in place.
+        """
+        all_blocks_acc, counter_acc, touch_acc = acc
+        blk, cur_id2vol, cur_touch = res
 
-            # Counter.update will sum volumes by key
-            id_to_volume.update(cur_id2vol)
+        # 1) Normalize `blk` to a list and concatenate
+        if isinstance(blk, list):
+            new_blocks = all_blocks_acc + blk
+        else:
+            new_blocks = all_blocks_acc + [blk]
 
-            # set |= set is faster than update on arbitrary iterables
-            touching_ids |= set(cur_touch)
+        # 2) Create a new Counter rather than updating in place
+        merged_counter = counter_acc + Counter(cur_id2vol)
 
-        # If you really need a plain dict (not Counter):
-        return all_blocks, dict(id_to_volume), touching_ids
+        # 3) Union the touching‐IDs sets
+        new_touch_set = touch_acc.union(cur_touch)
+
+        return (new_blocks, merged_counter, new_touch_set)
 
     def get_connected_component_information(self):
         num_blocks = dask_util.get_num_blocks(self.connected_components_blockwise_idi)
-        bagged_results = dask_util.compute_blockwise_partitions(
+        all_blocks, self.id_to_volume_dict, self.touching_ids = dask_util.compute_blockwise_partitions(
             num_blocks,
             self.num_workers,
             self.compute_args,
@@ -379,17 +382,15 @@ class ConnectedComponents(ComputeConfigMixin):
             self.connected_components_blockwise_idi,
             self.connectivity,
             self.object_labels_idi,
+            merge_fn=ConnectedComponents._merge_tuples,
+            merge_identity=([], Counter(), set()),
         )
-
-        # moved this out of dask, seems fast enough without having to daskify
-        with io_util.Timing_Messager("Combining bagged results", logger):
-            blocks_with_dict, self.id_to_volume_dict, self.touching_ids = (
-                ConnectedComponents._combine_results(bagged_results)
-            )
-
+        print(self.id_to_volume_dict)
+        
+        # Reconstruct self.blocks by index
         self.blocks = [None] * num_blocks
-        for block in blocks_with_dict:
-            self.blocks[block.index] = block
+        for blk in all_blocks:
+            self.blocks[blk.index] = blk
 
     @staticmethod
     def write_out_block_objects(
@@ -567,3 +568,21 @@ class ConnectedComponents(ComputeConfigMixin):
                 delete_tmp=self.delete_tmp,
             )
             fh.fill_holes()
+# %%
+# from cellmap_analyze.util.image_data_interface import ImageDataInterface
+# import numpy as np
+# ground_truth = ImageDataInterface("/tmp/pytest-of-ackermand/pytest-current/tmpcurrent/tmp.zarr/intensity_image/s0").to_ndarray_ts()
+# uniques, counts = np.unique(ground_truth, return_counts=True)
+# relabeling_dict = dict(zip(uniques, [0] * len(uniques)))
+# counts = counts[uniques > 0]
+# uniques = uniques[uniques > 0]
+# uniques = uniques[
+#     (counts >= 4) & (counts < 63)
+# ]
+# relabeling_dict.update({k: i + 1 for i, k in enumerate(uniques)})
+# ground_truth = np.vectorize(relabeling_dict.get)(ground_truth)
+# from cellmap_analyze.util.neuroglancer_util import view_in_neuroglancer
+# view_in_neuroglancer(gt=ground_truth.astype(np.uint64),
+#                      test="/tmp/pytest-of-ackermand/pytest-current/tmpcurrent/tmp.zarr/test_connected_components_minimum_volume_nm_3_2048_maximum_volume_nm_3_32256/s0",
+#                      blockwise="/tmp/pytest-of-ackermand/pytest-current/tmpcurrent/tmp.zarr/test_connected_components_minimum_volume_nm_3_2048_maximum_volume_nm_3_32256_blockwise/s0")
+# # %%

@@ -137,23 +137,21 @@ class Measure(ComputeConfigMixin):
         return object_informations
 
     @staticmethod
-    def __summer(object_information_dicts):
-        # 4) Now `flat_dicts` is a list of {id: value} dictionaries. Merge them.
-        output_dict = {}
-        for curr in tqdm(
-            object_information_dicts, desc="Summing object_information_dicts"
-        ):
-            for key, val in curr.items():
-                if key in output_dict:
-                    output_dict[key] += val
-                else:
-                    output_dict[key] = val
-
-        return output_dict
+    def _merge_dicts(left: dict, right: dict) -> dict:
+        """
+        Merge two {id: value} dicts by summing values for matching keys.
+        """
+        merged = left.copy()
+        for k, v in right.items():
+            if k not in merged:
+                merged[k] = v
+            else:
+                merged[k] += v
+        return merged
 
     def measure(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, self.roi)
-        bagged_results = dask_util.compute_blockwise_partitions(
+        self.measurements = dask_util.compute_blockwise_partitions(
             num_blocks,
             self.num_workers,
             self.compute_args,
@@ -165,11 +163,9 @@ class Measure(ComputeConfigMixin):
             self.global_offset,
             self.contact_sites,
             **self.get_measurements_blockwise_extra_kwargs,
+            merge_fn=Measure._merge_dicts,
+            merge_identity={},
         )
-
-        # moved this out of dask, seems fast enough without having to daskify
-        with io_util.Timing_Messager("Combining bagged results", logger):
-            self.measurements = Measure.__summer(bagged_results)
 
     def write_measurements(self):
         os.makedirs(self.output_path, exist_ok=True)
