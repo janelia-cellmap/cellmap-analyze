@@ -84,22 +84,24 @@ class FillHoles(ComputeConfigMixin):
 
         return block
 
-    
     @staticmethod
     def _merge_hole_partials(
         acc: tuple[list, dict[int, set[int]]],
-        res: object | tuple[list, dict[int, set[int]]]
+        res: object | tuple[list, dict[int, set[int]]],
     ) -> tuple[list, dict[int, set[int]]]:
         """
         acc:     (blocks_acc, hole_dict_acc)
         res:     either a Block instance (with .hole_to_object_dict),
                  or a previously‐merged tuple (blocks_list, hole_dict)
-        
+
         Logic:
           - If `res` is a Block, pull its hole_to_object_dict, make a copy,
             and merge into acc.
           - If `res` is already a merged tuple, merge both hole_dicts and both block‐lists.
         """
+
+        if acc is None:
+            acc = ([], {})
         blocks_acc, hole_dict_acc = acc
 
         # Case 1: `res` is a Block (leaf from the Bag)
@@ -113,7 +115,9 @@ class FillHoles(ComputeConfigMixin):
             # 1c) Merge that into the accumulator’s hole_dict_acc
             merged_hole_dict = hole_dict_acc.copy()
             for hole_id, obj_set in hole_dict_res.items():
-                merged_hole_dict[hole_id] = merged_hole_dict.get(hole_id, set()).union(obj_set)
+                merged_hole_dict[hole_id] = merged_hole_dict.get(hole_id, set()).union(
+                    obj_set
+                )
 
         # Case 2: `res` is already a merged tuple (blocks_list, hole_dict)
         else:
@@ -122,10 +126,12 @@ class FillHoles(ComputeConfigMixin):
 
             merged_hole_dict = hole_dict_acc.copy()
             for hole_id, obj_set in hole_dict2.items():
-                merged_hole_dict[hole_id] = merged_hole_dict.get(hole_id, set()).union(obj_set)
+                merged_hole_dict[hole_id] = merged_hole_dict.get(hole_id, set()).union(
+                    obj_set
+                )
 
         return (new_blocks, merged_hole_dict)
-    
+
     @staticmethod
     def __postprocess_hole_dict(raw_hole_dict: dict[int, set[int]]) -> dict[int, int]:
         """
@@ -139,7 +145,7 @@ class FillHoles(ComputeConfigMixin):
             else:
                 final[hole_id] = next(iter(obj_set))
         return final
-    
+
     def get_hole_assignments(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi)
         blocks, hole_to_object_dict = dask_util.compute_blockwise_partitions(
@@ -153,7 +159,7 @@ class FillHoles(ComputeConfigMixin):
             holes_idi=self.holes_idi,
             connectivity=self.connectivity,
             merge_fn=FillHoles._merge_hole_partials,
-            merge_identity=([], {}),
+            merge_identity=None,
         )
 
         hole_to_object_dict = FillHoles.__postprocess_hole_dict(hole_to_object_dict)

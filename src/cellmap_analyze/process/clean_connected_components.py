@@ -141,7 +141,7 @@ class CleanConnectedComponents(ComputeConfigMixin):
                 self.input_idi,
                 self.mask,
                 merge_fn=ConnectedComponents._merge_tuples,
-                merge_identity=([], Counter(), set()),
+                merge_identity=None,
             )
         )
 

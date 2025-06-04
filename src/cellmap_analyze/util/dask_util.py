@@ -162,7 +162,7 @@ def create_blocks(
     return block_rois
 
 
-def guesstimate_npartitions(elements, num_workers, scaling=4):
+def guesstimate_npartitions(elements, num_workers, scaling=1):
     if not isinstance(elements, int):
         elements = len(elements)
     return min(elements, num_workers * scaling)
@@ -370,6 +370,7 @@ import types
 from collections import Counter
 import dask.bag as db
 
+
 def compute_blockwise_partitions(
     num_blocks: int,
     num_workers: int,
@@ -437,9 +438,14 @@ def compute_blockwise_partitions(
     # ──────────────────────────────────────────────────────────────────────────
     with start_dask(num_workers, msg, logger):
         with Timing_Messager(msg.capitalize(), logger):
-            if merge_fn is not None and merge_identity is not None:
+            if merge_fn is not None:
                 # Perform a parallel tree-reduce (fold) across all partitions
-                folded = bag.fold(binop=merge_fn, combine=merge_fn, initial=merge_identity)
+                folded = bag.fold(
+                    binop=merge_fn,
+                    combine=merge_fn,
+                    initial=merge_identity,
+                    split_every=8,
+                )
                 raw = dask_computer(folded, num_workers, **compute_args)
             else:
                 # Default behavior: compute each partition’s list-of-results,
@@ -449,7 +455,7 @@ def compute_blockwise_partitions(
     # ──────────────────────────────────────────────────────────────────────────
     # STEP 7) If we didn’t do a fold, normalize the result into a flat list (as before)
     # ──────────────────────────────────────────────────────────────────────────
-    if merge_fn is None or merge_identity is None:
+    if merge_fn is None:
         if raw is None:
             return []
         if isinstance(raw, types.GeneratorType):

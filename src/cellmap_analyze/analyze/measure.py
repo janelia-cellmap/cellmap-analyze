@@ -5,6 +5,7 @@ from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.information_holders import ObjectInformation
 from cellmap_analyze.util.io_util import (
     get_name_from_path,
 )
@@ -16,6 +17,7 @@ from cellmap_analyze.util.measure_util import get_object_information
 import os
 
 from cellmap_analyze.util.mixins import ComputeConfigMixin
+import time
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -126,22 +128,24 @@ class Measure(ComputeConfigMixin):
         #     # however if i added os.system calls to touch and rm file named with block index, then it wouldnt hang. so assuming that it has to do with a timing thing in that it only had to load/process a single dataset chunk.
         #     # sleeping for a little bit may therefore help:
         #     # NOTE: this happened after adding concurrency limits=1 when opening tensorstore, but never tested on complete single organelle datasets before that switch
-        #     time.sleep(0.1)
-
         return object_informations
 
     @staticmethod
-    def _merge_dicts(left: dict, right: dict) -> dict:
+    def _merge_dicts(
+        left: dict[int, ObjectInformation] | None, right: dict[int, ObjectInformation]
+    ) -> dict[int, ObjectInformation]:
         """
-        Merge two {id: value} dicts by summing values for matching keys.
+        1) If left is None, create a fresh dict for this partition’s local fold.
+        2) Otherwise, merge `right` into `left` in place.
         """
-        merged = left.copy()
+        if left is None:
+            left = {}
         for k, v in right.items():
-            if k not in merged:
-                merged[k] = v
+            if k not in left:
+                left[k] = v
             else:
-                merged[k] += v
-        return merged
+                left[k] = left[k] + v
+        return left
 
     def measure(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, self.roi)
@@ -158,7 +162,7 @@ class Measure(ComputeConfigMixin):
             self.contact_sites,
             **self.get_measurements_blockwise_extra_kwargs,
             merge_fn=Measure._merge_dicts,
-            merge_identity={},
+            merge_identity=None,
         )
 
     def write_measurements(self):

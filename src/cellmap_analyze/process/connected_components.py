@@ -351,6 +351,9 @@ class ConnectedComponents(ComputeConfigMixin):
 
         This version checks for overlap and avoids mutating counter_acc in place.
         """
+        if acc is None:
+            acc = ([], Counter(), set())
+
         all_blocks_acc, counter_acc, touch_acc = acc
         blk, cur_id2vol, cur_touch = res
 
@@ -382,7 +385,7 @@ class ConnectedComponents(ComputeConfigMixin):
                 self.connectivity,
                 self.object_labels_idi,
                 merge_fn=ConnectedComponents._merge_tuples,
-                merge_identity=([], Counter(), set()),
+                merge_identity=None,
             )
         )
         print(self.id_to_volume_dict)
@@ -568,23 +571,3 @@ class ConnectedComponents(ComputeConfigMixin):
                 delete_tmp=self.delete_tmp,
             )
             fh.fill_holes()
-
-
-# %%
-# from cellmap_analyze.util.image_data_interface import ImageDataInterface
-# import numpy as np
-# ground_truth = ImageDataInterface("/tmp/pytest-of-ackermand/pytest-current/tmpcurrent/tmp.zarr/intensity_image/s0").to_ndarray_ts()
-# uniques, counts = np.unique(ground_truth, return_counts=True)
-# relabeling_dict = dict(zip(uniques, [0] * len(uniques)))
-# counts = counts[uniques > 0]
-# uniques = uniques[uniques > 0]
-# uniques = uniques[
-#     (counts >= 4) & (counts < 63)
-# ]
-# relabeling_dict.update({k: i + 1 for i, k in enumerate(uniques)})
-# ground_truth = np.vectorize(relabeling_dict.get)(ground_truth)
-# from cellmap_analyze.util.neuroglancer_util import view_in_neuroglancer
-# view_in_neuroglancer(gt=ground_truth.astype(np.uint64),
-#                      test="/tmp/pytest-of-ackermand/pytest-current/tmpcurrent/tmp.zarr/test_connected_components_minimum_volume_nm_3_2048_maximum_volume_nm_3_32256/s0",
-#                      blockwise="/tmp/pytest-of-ackermand/pytest-current/tmpcurrent/tmp.zarr/test_connected_components_minimum_volume_nm_3_2048_maximum_volume_nm_3_32256_blockwise/s0")
-# # %%
