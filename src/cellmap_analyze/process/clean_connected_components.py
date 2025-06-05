@@ -197,7 +197,6 @@ class CleanConnectedComponents(ComputeConfigMixin):
                 num_workers=self.num_workers,
                 roi=self.roi,
                 connectivity=self.connectivity,
-                delete_tmp=self.delete_tmp,
             )
             fh.fill_holes()
 
