@@ -365,11 +365,6 @@ class WatershedSegmentation(ComputeConfigMixin):
                 block_index,
             )
             write_roi_voxels = block.write_roi / watershed_idi.voxel_size
-            print(
-                block.write_roi,
-                np.unique(watershed[write_roi_voxels.to_slices()]),
-                write_roi_voxels.to_slices(),
-            )
             watershed_idi.ds[block.write_roi] = watershed[write_roi_voxels.to_slices()]
 
     def do_deprecated_flawed_watershed(self):
