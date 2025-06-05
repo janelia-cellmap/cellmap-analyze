@@ -434,15 +434,13 @@ class WatershedSegmentation(ComputeConfigMixin):
             self.do_global_watershed()
 
         if self.delete_tmp:
-            dask_util.delete_tmp_dataset(
-                self.watershed_seeds_idi.path,
-                cc.blocks,
+            dask_util.delete_tmp_zarr(
+                self.watershed_seeds_idi,
                 self.num_workers,
                 self.compute_args,
             )
-            dask_util.delete_tmp_dataset(
-                self.distance_transform_idi.path,
-                cc.blocks,
+            dask_util.delete_tmp_zarr(
+                self.distance_transform_idi,
                 self.num_workers,
                 self.compute_args,
             )

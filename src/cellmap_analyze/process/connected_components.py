@@ -1,12 +1,8 @@
-import pickle
 import numpy as np
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util import io_util
-from cellmap_analyze.util.block_util import relabel_block
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
-    dask_computer,
-    guesstimate_npartitions,
 )
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.io_util import (
@@ -17,7 +13,6 @@ from cellmap_analyze.util.io_util import (
 import logging
 from skimage.graph import pixel_graph
 import networkx as nx
-import dask.bag as db
 import itertools
 import fastremap
 import os
@@ -26,6 +21,7 @@ from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
 import cc3d
 from collections import Counter
+import shutil
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -114,6 +110,8 @@ class ConnectedComponents(ComputeConfigMixin):
                 connected_components_blockwise_path, chunk_shape=chunk_shape
             )
         self.output_path = output_path
+
+        self.relabeling_dict_path = f"{self.output_path}_relabeling_dict/"
 
         # evaluate minimum_volume_nm_3 voxels if it is a string
         if type(minimum_volume_nm_3) == str:
@@ -339,7 +337,7 @@ class ConnectedComponents(ComputeConfigMixin):
             raise Exception(
                 f"Error in get_connected_component_information_blockwise {block_index}, {connected_components_blockwise_idi.voxel_size}"
             )
-        return [block], id_to_volume_dict, touching_ids
+        return id_to_volume_dict, touching_ids
 
     @staticmethod
     def _merge_tuples(
@@ -352,16 +350,10 @@ class ConnectedComponents(ComputeConfigMixin):
         This version checks for overlap and avoids mutating counter_acc in place.
         """
         if acc is None:
-            acc = ([], Counter(), set())
+            acc = (Counter(), set())
 
-        all_blocks_acc, counter_acc, touch_acc = acc
-        blk, cur_id2vol, cur_touch = res
-
-        # 1) Normalize `blk` to a list and concatenate
-        if isinstance(blk, list):
-            new_blocks = all_blocks_acc + blk
-        else:
-            new_blocks = all_blocks_acc + [blk]
+        counter_acc, touch_acc = acc
+        cur_id2vol, cur_touch = res
 
         # 2) Create a new Counter rather than updating in place
         merged_counter = counter_acc + Counter(cur_id2vol)
@@ -369,11 +361,11 @@ class ConnectedComponents(ComputeConfigMixin):
         # 3) Union the touching‐IDs sets
         new_touch_set = touch_acc.union(cur_touch)
 
-        return (new_blocks, merged_counter, new_touch_set)
+        return (merged_counter, new_touch_set)
 
     def get_connected_component_information(self):
         num_blocks = dask_util.get_num_blocks(self.connected_components_blockwise_idi)
-        all_blocks, self.id_to_volume_dict, self.touching_ids = (
+        self.id_to_volume_dict, self.touching_ids = (
             dask_util.compute_blockwise_partitions(
                 num_blocks,
                 self.num_workers,
@@ -388,47 +380,70 @@ class ConnectedComponents(ComputeConfigMixin):
                 merge_identity=None,
             )
         )
-        print(self.id_to_volume_dict)
-
-        # Reconstruct self.blocks by index
-        self.blocks = [None] * num_blocks
-        for blk in all_blocks:
-            self.blocks[blk.index] = blk
 
     @staticmethod
-    def write_out_block_objects(
-        path,
-        blocks,
-        num_local_threads_available,
-        local_config,
-        compute_args,
-        use_new_temp_dir=False,
-    ):
-        def write_partition(blocks, tmp_path, use_new_temp_dir=False):
-            for block in blocks:
-                coords = "/".join(str(c) for c in block.coords)
-                out = os.path.join(tmp_path, f"{coords}.pkl")
-                if use_new_temp_dir:
-                    os.makedirs(os.path.dirname(out), exist_ok=True)
-                with open(out, "wb") as f:
-                    pickle.dump(block, f, protocol=pickle.HIGHEST_PROTOCOL)
+    def write_memmap_relabeling_dicts(relabeling_dict, output_path):
+        os.makedirs(output_path, exist_ok=True)
 
-        # NOTE: do it the following way since it should be fast enough with 10 workers and then we don't have to bog down distributed stuff
-        with dask_util.start_dask(
-            num_workers=num_local_threads_available,
-            msg="write out blocks",
-            logger=logger,
-            config=local_config,
-        ):
-            with io_util.Timing_Messager("Writing out blocks", logger):
-                b = db.from_sequence(
-                    blocks,
-                    npartitions=guesstimate_npartitions(
-                        len(blocks), num_local_threads_available
-                    ),
-                ).map_partitions(write_partition, path, use_new_temp_dir)
-                # now you have only `num_workers` tasks, not millions
-                dask_computer(b, num_local_threads_available, **compute_args)
+        if relabeling_dict is None or len(relabeling_dict) == 0:
+            # If the relabeling dict is empty, then it will all be zeros so write out empty arrays
+            old_sorted = np.array([], dtype=np.uint8)
+            new_sorted = np.array([], dtype=np.uint8)
+
+        else:
+            # 1) Extract keys and values
+            first_key, first_val = next(iter(relabeling_dict.items()))
+
+            all_old = np.fromiter(relabeling_dict.keys(), dtype=type(first_key))
+            all_new = np.fromiter(relabeling_dict.values(), dtype=type(first_val))
+
+            # 2) Sort by old keyf
+            sort_idx = np.argsort(all_old)
+            old_sorted = all_old[sort_idx]
+            new_sorted = all_new[sort_idx]
+
+        # 3) Save both arrays to disk in .npy format (which is also memory‐mappable)
+        np.save(f"{output_path}/old_sorted.npy", old_sorted)
+        np.save(f"{output_path}/new_sorted.npy", new_sorted)
+
+    @staticmethod
+    def get_updated_relabeling_dict(query_ids, relabeling_dict_path):
+        # 1) Load the sorted old→new arrays as memmaps
+        old_sorted_mm = np.load(f"{relabeling_dict_path}/old_sorted.npy", mmap_mode="r")
+        new_sorted_mm = np.load(f"{relabeling_dict_path}/new_sorted.npy", mmap_mode="r")
+
+        # 2) Start with all outputs = 0
+        out = np.zeros(query_ids.shape, dtype=new_sorted_mm.dtype)
+
+        if len(old_sorted_mm) == 0 and len(new_sorted_mm) == 0:
+            return dict(zip(query_ids, out))
+
+        # 3) Compute insertion indices for each query_id
+        idx = np.searchsorted(old_sorted_mm, query_ids)
+
+        # 4) Build an “in_bounds” mask
+        in_bounds = idx < old_sorted_mm.shape[0]
+
+        # 5) Allocate a boolean array for “matches” (initialize False)
+        matches = np.zeros_like(in_bounds, dtype=bool)
+
+        # 6) Only compare old_sorted_mm[idx] vs. query_ids where in_bounds is True
+        # this is because if volume filtered, they wont be in the array
+        valid_indices = np.nonzero(in_bounds)[0]  # positions where idx is < size
+        if valid_indices.size > 0:
+            # For those positions:
+            sub_idx = idx[valid_indices]  # guaranteed < len(old_sorted_mm)
+            sub_q = query_ids[valid_indices]
+            matches_sub = old_sorted_mm[sub_idx] == sub_q
+            matches[valid_indices] = matches_sub
+
+        # 7) Wherever matches == True, fill out from new_sorted_mm
+        good = np.nonzero(matches)[0]
+        if good.size > 0:
+            out[good] = new_sorted_mm[idx[good]]
+
+        # 8) Return a dict mapping each query_id → (new label or 0)
+        return dict(zip(query_ids, out))
 
     def get_final_connected_components(self):
         with io_util.Timing_Messager("Finding connected components", logger):
@@ -462,45 +477,60 @@ class ConnectedComponents(ComputeConfigMixin):
 
         if len(new_ids) == 0:
             self.new_dtype = np.uint8
+            relabeling_dict = {}
         else:
             self.new_dtype = np.min_scalar_type(max(new_ids))
             relabeling_dict = dict(zip(old_ids, new_ids))
-            # update blockwise relabeing dicts
-            for block in self.blocks:
-                block.relabeling_dict = {
-                    id: relabeling_dict.get(id, 0)
-                    for id in block.relabeling_dict.keys()
-                }
-            del relabeling_dict
+
+        ConnectedComponents.write_memmap_relabeling_dicts(
+            relabeling_dict, self.relabeling_dict_path
+        )
 
     @staticmethod
     def relabel_block_from_path(
         block_index,
         input_idi: ImageDataInterface,
         output_idi: ImageDataInterface,
-        block_info_basepath=None,
+        relabeling_dict_path: str,
         mask: MasksFromConfig = None,
     ):
         # create block from index
-        block_coords = create_block_from_index(input_idi, block_index).coords
-        if block_info_basepath is None:
-            block_info_basepath = input_idi.path
-        # read block from pickle file
-        block_coords_string = "/".join([str(c) for c in block_coords])
-        with open(f"{block_info_basepath}/{block_coords_string}.pkl", "rb") as handle:
-            block = pickle.load(handle)
-        relabel_block(block, input_idi, output_idi, mask)
+        block = create_block_from_index(input_idi, block_index)
+
+        # All ids must be accounted for in the relabeling dict
+        data = input_idi.to_ndarray_ts(
+            block.write_roi,
+        )
+        ids = fastremap.unique(data[data > 0])
+        relabeling_dict = ConnectedComponents.get_updated_relabeling_dict(
+            ids, relabeling_dict_path
+        )
+
+        if mask:
+            mask_block = mask.process_block(roi=block.write_roi)
+            data *= mask_block
+
+        if len(relabeling_dict) > 0:
+            try:
+                fastremap.remap(
+                    data, relabeling_dict, preserve_missing_labels=True, in_place=True
+                )
+            except:
+                raise Exception(
+                    f"Error in relabel_block {block.write_roi}, {list(relabeling_dict.keys())}, {list(relabeling_dict.values())}"
+                )
+
+        output_idi.ds[block.write_roi] = data
 
     @staticmethod
     def relabel_dataset(
         original_idi,
         output_path,
-        blocks,
         roi,
         dtype,
+        relabeling_dict_path,
         num_workers,
         compute_args,
-        block_info_basepath=None,
         mask=None,
     ):
         output_idi = create_multiscale_dataset_idi(
@@ -511,7 +541,7 @@ class ConnectedComponents(ComputeConfigMixin):
             write_size=original_idi.chunk_shape * original_idi.voxel_size,
         )
 
-        num_blocks = len(blocks)
+        num_blocks = dask_util.get_num_blocks(original_idi, roi=roi)
         dask_util.compute_blockwise_partitions(
             num_blocks,
             num_workers,
@@ -521,7 +551,7 @@ class ConnectedComponents(ComputeConfigMixin):
             ConnectedComponents.relabel_block_from_path,
             original_idi,
             output_idi,
-            block_info_basepath,
+            relabeling_dict_path,
             mask=mask,
         )
 
@@ -534,27 +564,20 @@ class ConnectedComponents(ComputeConfigMixin):
         self.get_connected_component_information()
         # get final connected components necessary for relabeling, including volume filtering
         self.get_final_connected_components()
-        # write out block information
-        ConnectedComponents.write_out_block_objects(
-            self.connected_components_blockwise_idi.path,
-            self.blocks,
-            self.num_local_threads_available,
-            self.local_config,
-            self.compute_args,
-        )
+
         self.relabel_dataset(
             self.connected_components_blockwise_idi,
             self.output_path,
-            self.blocks,
             self.roi,
             self.new_dtype,
+            self.relabeling_dict_path,
             self.num_workers,
             self.compute_args,
         )
+
         if self.delete_tmp:
-            dask_util.delete_tmp_dataset(
-                self.connected_components_blockwise_idi.path,
-                self.blocks,
+            dask_util.delete_tmp_zarr(
+                self.connected_components_blockwise_idi,
                 self.num_workers,
                 self.compute_args,
             )
@@ -568,6 +591,7 @@ class ConnectedComponents(ComputeConfigMixin):
                 num_workers=self.num_workers,
                 roi=self.roi,
                 connectivity=self.connectivity,
-                delete_tmp=self.delete_tmp,
             )
             fh.fill_holes()
+
+        shutil.rmtree(self.relabeling_dict_path)

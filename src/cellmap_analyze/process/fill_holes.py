@@ -1,4 +1,3 @@
-import pickle
 import numpy as np
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util.dask_util import (
@@ -12,6 +11,7 @@ from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
 from skimage.segmentation import find_boundaries
 from .connected_components import ConnectedComponents
+import shutil
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -26,10 +26,8 @@ class FillHoles(ComputeConfigMixin):
         self,
         input_path,
         output_path=None,
-        minimum_volume_nm_3=0,
         num_workers=10,
         connectivity=2,
-        delete_tmp=False,
         roi=None,
         chunk_shape=None,
     ):
@@ -44,7 +42,7 @@ class FillHoles(ComputeConfigMixin):
         self.output_path = output_path
         if self.output_path is None:
             self.output_path = input_path + "_filled"
-
+        self.relabeling_dict_path = self.output_path + "_relabeling_dict/"
         self.holes_path = self.output_path + "_holes"
 
     def get_hole_information_blockwise(
@@ -58,7 +56,7 @@ class FillHoles(ComputeConfigMixin):
             block_index,
             padding=input_idi.voxel_size,
         )
-        block.hole_to_object_dict = {}
+        hole_to_object_dict = {}
         roi = block.read_roi.grow(input_idi.voxel_size, input_idi.voxel_size)
         holes = holes_idi.to_ndarray_ts(roi)
         input = input_idi.to_ndarray_ts(roi)
@@ -78,59 +76,39 @@ class FillHoles(ComputeConfigMixin):
                 continue
             id2 -= max_input_id
             # then input objects are touching holes
-            object_ids = block.hole_to_object_dict.get(id2, set())
+            object_ids = hole_to_object_dict.get(id2, set())
             object_ids.add(id1)
-            block.hole_to_object_dict[id2] = object_ids
+            hole_to_object_dict[id2] = object_ids
 
-        return block
+        return hole_to_object_dict
 
     @staticmethod
     def _merge_hole_partials(
-        acc: tuple[list, dict[int, set[int]]],
-        res: object | tuple[list, dict[int, set[int]]],
-    ) -> tuple[list, dict[int, set[int]]]:
+        hole_dict_acc: dict[int, set[int]],
+        hole_dict_2: dict[int, set[int]],
+    ) -> dict[int, set[int]]:
+        """Merge two dictionaries of hole IDs to sets of object IDs.
+        If a hole ID appears in both dictionaries, the sets of object IDs are
+        combined. If a hole ID appears in only one dictionary, its set of object
+        IDs is retained.
+        If the accumulator is None, it initializes an empty dictionary.
+        Args:
+            hole_dict_acc (dict[int, set[int]]): The accumulator dictionary.
+            hole_dict2 (dict[int, set[int]]): The dictionary to merge into the accumulator.
+        Returns:
+            dict[int, set[int]]: The merged dictionary of hole IDs to sets of object IDs.
         """
-        acc:     (blocks_acc, hole_dict_acc)
-        res:     either a Block instance (with .hole_to_object_dict),
-                 or a previously‐merged tuple (blocks_list, hole_dict)
 
-        Logic:
-          - If `res` is a Block, pull its hole_to_object_dict, make a copy,
-            and merge into acc.
-          - If `res` is already a merged tuple, merge both hole_dicts and both block‐lists.
-        """
+        if hole_dict_acc is None:
+            hole_dict_acc = {}
 
-        if acc is None:
-            acc = ([], {})
-        blocks_acc, hole_dict_acc = acc
+        merged_hole_dict = hole_dict_acc.copy()
+        for hole_id, obj_set in hole_dict_2.items():
+            merged_hole_dict[hole_id] = merged_hole_dict.get(hole_id, set()).union(
+                obj_set
+            )
 
-        # Case 1: `res` is a Block (leaf from the Bag)
-        if hasattr(res, "hole_to_object_dict"):
-            block = res
-            # 1a) Add this single block
-            new_blocks = blocks_acc + [block]
-
-            # 1b) Copy its hole→object‐set mapping
-            hole_dict_res = block.hole_to_object_dict.copy()
-            # 1c) Merge that into the accumulator’s hole_dict_acc
-            merged_hole_dict = hole_dict_acc.copy()
-            for hole_id, obj_set in hole_dict_res.items():
-                merged_hole_dict[hole_id] = merged_hole_dict.get(hole_id, set()).union(
-                    obj_set
-                )
-
-        # Case 2: `res` is already a merged tuple (blocks_list, hole_dict)
-        else:
-            blocks_list2, hole_dict2 = res  # type: ignore
-            new_blocks = blocks_acc + blocks_list2
-
-            merged_hole_dict = hole_dict_acc.copy()
-            for hole_id, obj_set in hole_dict2.items():
-                merged_hole_dict[hole_id] = merged_hole_dict.get(hole_id, set()).union(
-                    obj_set
-                )
-
-        return (new_blocks, merged_hole_dict)
+        return merged_hole_dict
 
     @staticmethod
     def __postprocess_hole_dict(raw_hole_dict: dict[int, set[int]]) -> dict[int, int]:
@@ -148,7 +126,7 @@ class FillHoles(ComputeConfigMixin):
 
     def get_hole_assignments(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi)
-        blocks, hole_to_object_dict = dask_util.compute_blockwise_partitions(
+        hole_to_object_dict = dask_util.compute_blockwise_partitions(
             num_blocks,
             self.num_workers,
             self.compute_args,
@@ -164,38 +142,31 @@ class FillHoles(ComputeConfigMixin):
 
         hole_to_object_dict = FillHoles.__postprocess_hole_dict(hole_to_object_dict)
 
-        # get blockwise dict assignments
-        self.blocks = [None] * num_blocks
-        for block in blocks:
-            self.blocks[block.index] = block
-            block.relabeling_dict = {
-                id: hole_to_object_dict.get(id, 0)
-                for id in block.hole_to_object_dict.keys()
-            }
-            block.hole_to_object_dict = None
+        ConnectedComponents.write_memmap_relabeling_dicts(
+            hole_to_object_dict,
+            self.relabeling_dict_path,
+        )
 
     @staticmethod
     def relabel_block(
-        block_index,
-        input_idi,
-        holes_idi,
-        output_idi,
+        block_index, input_idi, holes_idi, output_idi, relabeling_dict_path
     ):
         # read block from pickle file
-        block_coords = create_block_from_index(input_idi, block_index).coords
-        block_coords_string = "/".join([str(c) for c in block_coords])
-        with open(f"{holes_idi.path}/{block_coords_string}.pkl", "rb") as handle:
-            block = pickle.load(handle)
+        block = create_block_from_index(input_idi, block_index)
+
         # print_with_datetime(block.relabeling_dict, logger)
         input = input_idi.to_ndarray_ts(
             block.write_roi,
         )
         holes = holes_idi.to_ndarray_ts(block.write_roi)
-
-        if len(block.relabeling_dict) > 0:
+        hole_ids = fastremap.unique(holes[holes > 0])
+        relabeling_dict = ConnectedComponents.get_updated_relabeling_dict(
+            hole_ids, relabeling_dict_path
+        )
+        if len(relabeling_dict) > 0:
             fastremap.remap(
                 holes,
-                block.relabeling_dict,
+                relabeling_dict,
                 preserve_missing_labels=True,
                 in_place=True,
             )
@@ -210,7 +181,7 @@ class FillHoles(ComputeConfigMixin):
             write_size=self.input_idi.chunk_shape * self.input_idi.voxel_size,
         )
 
-        num_blocks = len(self.blocks)
+        num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
         dask_util.compute_blockwise_partitions(
             num_blocks,
             self.num_workers,
@@ -221,6 +192,7 @@ class FillHoles(ComputeConfigMixin):
             self.input_idi,
             self.holes_idi,
             self.output_idi,
+            self.relabeling_dict_path,
         )
 
     def fill_holes(self):
@@ -241,25 +213,16 @@ class FillHoles(ComputeConfigMixin):
         )
         # get the assignments of holes to objects or background
         self.get_hole_assignments()
-
-        # relabel dataset
-        ConnectedComponents.write_out_block_objects(
-            path=self.holes_path + "/s0",
-            blocks=self.blocks,
-            num_local_threads_available=self.num_local_threads_available,
-            local_config=self.local_config,
-            compute_args=self.compute_args,
-        )
         self.relabel_dataset()
-        dask_util.delete_tmp_dataset(
-            self.holes_path + "/s0",
-            self.blocks,
+        dask_util.delete_tmp_zarr(
+            self.holes_idi,
             self.num_workers,
             self.compute_args,
         )
-        dask_util.delete_tmp_dataset(
+        dask_util.delete_tmp_zarr(
             self.holes_path + "_blockwise/s0",
-            self.blocks,
             self.num_workers,
             self.compute_args,
         )
+
+        shutil.rmtree(self.relabeling_dict_path)

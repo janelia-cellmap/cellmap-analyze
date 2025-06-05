@@ -328,41 +328,42 @@ def setup_execution_directory(config_path, logger):
     return execution_dir
 
 
-def delete_chunks(block_coords, tmp_blockwise_ds_path):
+def delete_chunks(block_index, idi, depth=3):
+    block = create_block_from_index(idi, block_index)
+    block_coords = block.coords[:depth]
     block_coords_string = "/".join([str(c) for c in block_coords])
-    delete_name = f"{tmp_blockwise_ds_path}/{block_coords_string}"
-    if (os.path.exists(delete_name) or os.path.exists(f"{delete_name}.pkl")) and (
-        os.path.isfile(delete_name)
-        or os.path.isfile(f"{delete_name}.pkl")
-        or os.listdir(delete_name) == []
-    ):
-        os.system(f"rm -rf {delete_name}")
-        if len(block_coords) == 3:
-            # if it is the highest level then we also remove the pkl file
-            os.system(f"rm -rf {delete_name}.pkl")
+    delete_name = f"{idi.path}/{block_coords_string}"
+    if os.path.exists(delete_name):
+        if os.path.isfile(delete_name):
+            os.remove(delete_name)
+        elif os.listdir(delete_name) == []:
+            shutil.rmtree(f"{delete_name}")
 
 
-def delete_tmp_dataset(path_to_dataset, blocks, num_workers, compute_args):
+def delete_tmp_zarr(
+    idi_or_location: ImageDataInterface | str, num_workers, compute_args
+):
+    if type(idi_or_location) is str:
+        idi = ImageDataInterface(idi_or_location)
+    else:
+        idi = idi_or_location
+
+    num_blocks = get_num_blocks(idi, idi.roi)
+
     for depth in range(3, 0, -1):
-        all_block_coords = set([block.coords[:depth] for block in blocks])
-        b = db.from_sequence(
-            all_block_coords,
-            npartitions=guesstimate_npartitions(blocks, num_workers),
-        ).map(
+        compute_blockwise_partitions(
+            num_blocks,
+            num_workers,
+            compute_args,
+            logger,
+            "Deleting temporary zarr dataset",
             delete_chunks,
-            path_to_dataset,
+            idi,
+            depth,
         )
 
-        with start_dask(
-            num_workers,
-            f"delete blockwise depth: {depth}",
-            logger,
-        ):
-            with Timing_Messager(f"Deleting blockwise depth: {depth}", logger):
-                dask_computer(b, num_workers, **compute_args)
-
-    basepath, _ = split_dataset_path(path_to_dataset)
-    os.system(f"rm -rf {basepath}/{get_name_from_path(path_to_dataset)}")
+    basepath, _ = split_dataset_path(idi.path)
+    shutil.rmtree(f"{basepath}/{get_name_from_path(idi.path)}")
 
 
 import random
