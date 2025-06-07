@@ -22,6 +22,7 @@ from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
 import cc3d
 from collections import Counter
 import shutil
+from cellmap_analyze.cythonizing.touching import get_touching_ids
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -222,59 +223,6 @@ class ConnectedComponents(ComputeConfigMixin):
         )
 
     @staticmethod
-    def get_touching_ids(data, mask, connectivity=2, object_labels=None):
-        """
-        Find all pairs of different labels in `data` whose pixels touch
-        (with given connectivity), optionally restricted to those within the same object.
-
-        Parameters
-        ----------
-        data : ndarray of int
-            Label image.
-        mask : ndarray of bool
-            Which pixels to consider in building the graph.
-        connectivity : {1, 2}, optional
-            Pixel‐connectivity for the graph (4‐ or 8‐connected in 2D).
-        object_labels : ndarray of int, optional
-            Additional label/image of same shape.  Only touching‐pairs
-            whose object_labels match are kept.
-
-        Returns
-        -------
-        touching_ids : set of tuple(int, int)
-            Each tuple (i, j) with i < j indicates two different `data`-labels that touch.
-        """
-        # initially from here: https://stackoverflow.com/questions/72452267/finding-identity-of-touching-labels-objects-masks-in-images-using-python
-        # build pixel‐adjacency graph
-        g, nodes = pixel_graph(data, mask=mask, connectivity=connectivity)
-
-        # extract all neighbor‐pairs
-        coo = g.tocoo()
-        center_coords = nodes[coo.row]
-        neighbor_coords = nodes[coo.col]
-
-        center_vals = data.ravel()[center_coords]
-        neighbor_vals = data.ravel()[neighbor_coords]
-
-        # if object_labels given, filter to only same-object contacts
-        if object_labels is not None:
-            obj_center = object_labels.ravel()[center_coords]
-            obj_neighbor = object_labels.ravel()[neighbor_coords]
-            same_object = obj_center == obj_neighbor
-            center_vals = center_vals[same_object]
-            neighbor_vals = neighbor_vals[same_object]
-
-        # remove self‐touches, sort pairs so smaller id comes first
-        pairs = np.stack([center_vals, neighbor_vals], axis=1)
-        unequal = pairs[:, 0] != pairs[:, 1]
-        pairs = pairs[unequal]
-        pairs.sort(axis=1)  # row‐wise sort
-
-        # unique set of tuples
-        touching_ids = {tuple(p) for p in pairs}
-        return touching_ids
-
-    @staticmethod
     def get_object_sizes(data):
         labels, counts = fastremap.unique(data[data > 0], return_counts=True)
         return Counter(dict(zip(labels, counts)))
@@ -314,7 +262,10 @@ class ConnectedComponents(ComputeConfigMixin):
                 connected_components_blockwise_idi,
                 block_index,
                 padding=connected_components_blockwise_idi.voxel_size,
+                padding_direction="neg_with_edge_pos",
             )
+            # need to pad into external space (for holes) which - if we only pad in the negative direction - will not happen on the positive ends
+
             data = connected_components_blockwise_idi.to_ndarray_ts(
                 block.read_roi,
             )
@@ -324,25 +275,30 @@ class ConnectedComponents(ComputeConfigMixin):
 
             mask = data.astype(bool)
             mask[2:, 2:, 2:] = False
-            touching_ids = ConnectedComponents.get_touching_ids(
+            touching_ids = get_touching_ids(
                 data, mask=mask, connectivity=connectivity, object_labels=object_labels
             )
-
             # get information only from actual block(not including padding)
-            id_to_volume_dict = ConnectedComponents.get_object_sizes(
-                data[1:-1, 1:-1, 1:-1]
+            actual_padding = np.array(
+                block.read_roi.shape / connected_components_blockwise_idi.voxel_size
+                - connected_components_blockwise_idi.chunk_shape
             )
-            block.relabeling_dict = {id: 0 for id in id_to_volume_dict.keys()}
-        except:
+            if np.any(actual_padding == 2):
+                data = data[1:-1, 1:-1, 1:-1]
+            else:
+                data = data[1:, 1:, 1:]
+
+            id_to_volume_dict = ConnectedComponents.get_object_sizes(data)
+        except Exception as e:
             raise Exception(
-                f"Error in get_connected_component_information_blockwise {block_index}, {connected_components_blockwise_idi.voxel_size}"
+                f"Error {e} in get_connected_component_information_blockwise {block_index}, {connected_components_blockwise_idi.voxel_size}"
             )
         return id_to_volume_dict, touching_ids
 
     @staticmethod
     def _merge_tuples(
-        acc: tuple[list, Counter, set], res: tuple[list | object, dict, set]
-    ) -> tuple[list, Counter, set]:
+        acc: tuple[Counter, set], res: tuple[Counter, set]
+    ) -> tuple[Counter, set]:
         """
         acc: (all_blocks_acc, counter_acc, touch_acc)
         res: (blk_or_list, cur_id2vol, cur_touch)

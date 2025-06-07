@@ -8,6 +8,7 @@ from cellmap_analyze.util.image_data_interface import ImageDataInterface
 import logging
 import fastremap
 from cellmap_analyze.util.mixins import ComputeConfigMixin
+from cellmap_analyze.cythonizing.touching import get_touching_ids
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
 from skimage.segmentation import find_boundaries
 from .connected_components import ConnectedComponents
@@ -51,15 +52,16 @@ class FillHoles(ComputeConfigMixin):
         holes_idi: ImageDataInterface,
         connectivity,
     ):
+        # pad by two pixels since to determine boundary need an extra pixel
         block = create_block_from_index(
             input_idi,
             block_index,
             padding=input_idi.voxel_size,
+            padding_direction="neg_with_edge_pos",
         )
         hole_to_object_dict = {}
-        roi = block.read_roi.grow(input_idi.voxel_size, input_idi.voxel_size)
-        holes = holes_idi.to_ndarray_ts(roi)
-        input = input_idi.to_ndarray_ts(roi)
+        holes = holes_idi.to_ndarray_ts(block.read_roi)
+        input = input_idi.to_ndarray_ts(block.read_roi)
 
         input_boundaries = find_boundaries(input, mode="inner").astype(np.uint64)
         hole_boundaries = find_boundaries(holes, mode="inner").astype(np.uint64)
@@ -69,7 +71,7 @@ class FillHoles(ComputeConfigMixin):
         holes[holes > 0] += max_input_id  # so there is no id overlap
         data = holes + input
         mask = np.logical_or(input_boundaries, hole_boundaries)
-        touching_ids = ConnectedComponents.get_touching_ids(data, mask, connectivity)
+        touching_ids = get_touching_ids(data, mask, connectivity)
 
         for id1, id2 in touching_ids:
             if id2 <= max_input_id:

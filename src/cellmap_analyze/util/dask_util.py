@@ -60,14 +60,37 @@ def get_global_block_id(
 
 
 def create_block(
-    roi, block_begin, block_size, voxel_size, padding, index, read_beyond_roi=True
+    roi,
+    block_begin,
+    block_size,
+    voxel_size,
+    padding,
+    index,
+    read_beyond_roi=True,
+    padding_direction="both",
 ):
     roi_shape_voxels = roi.shape / voxel_size
     write_roi = Roi(block_begin, block_size).intersect(roi)
     block_id = get_global_block_id(roi_shape_voxels, write_roi, voxel_size)
     read_roi = write_roi
     if padding:
-        read_roi = write_roi.grow(padding, padding)
+        amount_neg = 0
+        amount_pos = 0
+        if padding_direction in ["both", "neg", "pos"]:
+            amount_neg = padding * int(padding_direction in ["both", "neg"])
+            amount_pos = padding * int(padding_direction in ["both", "pos"])
+        # in some cases we want to add padding in the positive direction if we need context from outside the roi, for hole finding for example
+        elif padding_direction == "neg_with_edge_pos":
+            amount_neg = padding
+            test_grow = write_roi.grow(amount_pos=padding)
+            if test_grow != test_grow.intersect(roi):
+                amount_pos = padding
+        elif padding_direction == "pos_with_edge_neg":
+            amount_pos = padding
+            test_grow = write_roi.grow(amount_neg=padding)
+            if test_grow != test_grow.intersect(roi):
+                amount_neg = padding
+        read_roi = write_roi.grow(amount_neg=amount_neg, amount_pos=amount_pos)
 
     if not read_beyond_roi:
         read_roi = read_roi.intersect(roi)
@@ -92,6 +115,7 @@ def create_block_from_index(
     roi: Roi = None,
     block_size=None,
     read_beyond_roi=True,
+    padding_direction="both",
 ) -> DaskBlock:
     if not roi:
         roi = idi.roi
@@ -110,6 +134,7 @@ def create_block_from_index(
         padding,
         index,
         read_beyond_roi,
+        padding_direction,
     )
 
 
@@ -286,7 +311,7 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
 
             cluster = SGECluster()
         cluster.scale(num_workers)
-        # cluster.adapt(minimum=0, maximum=num_workers, interval="1s")
+        # cluster.adapt(minimum=0, maximum=num_workers)
     try:
         with Timing_Messager(
             f"Starting {cluster_type} dask cluster for {msg} with {num_workers} workers",
