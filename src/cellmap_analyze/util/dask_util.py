@@ -434,19 +434,8 @@ def compute_blockwise_partitions(
     # STEP 3) Spin up Dask, collect ALL partitions to driver
     with start_dask(num_workers, msg, logger) as client:
         with Timing_Messager(msg.capitalize(), logger):
-            delayed_parts = bag.to_delayed()
+            flat = bag.compute(**compute_args)
 
-            if client is not None:
-                # distributed scheduler: kick off all partitions
-                futures = client.compute(delayed_parts, **compute_args)
-                # gather them back as a list of lists
-                raw_parts = client.gather(futures)
-            else:
-                # single‐worker: just compute the bag
-                raw_parts = [bag.compute(**compute_args)]
-
-    # by exiting the with-block the cluster is shut down
-    flat = [elem for part in raw_parts for elem in part]
     # STEP 4) If no merge_fn: flatten and return raw_parts
     if merge_fn is None:
         return flat
