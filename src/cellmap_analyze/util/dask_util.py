@@ -306,7 +306,7 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
         elif cluster_type == "slurm":
             from dask_jobqueue import SLURMCluster
 
-            cluster = SLURMlsCluster()
+            cluster = SLURMCluster()
         elif cluster_type == "sge":
             from dask_jobqueue import SGECluster
 
