@@ -25,7 +25,23 @@ import logging
 from contextlib import contextmanager, nullcontext
 import dask.bag as db
 from cellmap_analyze.util.io_util import Timing_Messager
-import types
+from tqdm import tqdm
+
+import random
+import dask.bag as db
+
+from functools import wraps
+from tqdm import tqdm
+
+
+def with_tqdm(fn):
+    @wraps(fn)
+    def wrapper(lst, *args, **kwargs):
+        # wrap the list in tqdm, but still pass it to fn
+        return fn(tqdm(lst, desc=fn.__name__), *args, **kwargs)
+
+    return wrapper
+
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -187,25 +203,10 @@ def create_blocks(
     return block_rois
 
 
-def guesstimate_npartitions(elements, num_workers, scaling=1):
+def guesstimate_npartitions(elements, num_workers, scaling=4):
     if not isinstance(elements, int):
         elements = len(elements)
     return min(elements, num_workers * scaling)
-
-
-def dask_computer(b, num_workers, **kwargs):
-    if num_workers == 1:
-        return b.compute(**kwargs)
-    if num_workers > 1:
-        # b = b.persist(**kwargs)  # start computation in the background
-        # if num_workers <= 100:
-        #     interval = "3s"
-        # elif num_workers <= 500:
-        #     interval = "30s"
-        # else:
-        #     interval = "150s"
-        # progress(b, interval=interval)  # watch progress
-        return b.compute(**kwargs)
 
 
 def set_local_directory(cluster_type):
@@ -355,14 +356,16 @@ def setup_execution_directory(config_path, logger):
 
 def delete_chunks(block_index, idi, depth=3):
     block = create_block_from_index(idi, block_index)
-    block_coords = block.coords[:depth]
+    block_coords = block.coords[
+        :depth
+    ]  # can have duplicates eg 0/0/0 and 0/0/1 go produce the same coords[:2]
     block_coords_string = "/".join([str(c) for c in block_coords])
     delete_name = f"{idi.path}/{block_coords_string}"
     if os.path.exists(delete_name):
         if os.path.isfile(delete_name):
             os.remove(delete_name)
         elif os.listdir(delete_name) == []:
-            shutil.rmtree(f"{delete_name}")
+            shutil.rmtree(delete_name, ignore_errors=True)
 
 
 def delete_tmp_zarr(
@@ -381,7 +384,7 @@ def delete_tmp_zarr(
             num_workers,
             compute_args,
             logger,
-            "Deleting temporary zarr dataset",
+            f"deleting temporary zarr dataset at depth {depth}",
             delete_chunks,
             idi,
             depth,
@@ -389,12 +392,6 @@ def delete_tmp_zarr(
 
     basepath, _ = split_dataset_path(idi.path)
     shutil.rmtree(f"{basepath}/{get_name_from_path(idi.path)}")
-
-
-import random
-import types
-from collections import Counter
-import dask.bag as db
 
 
 def compute_blockwise_partitions(
@@ -405,90 +402,56 @@ def compute_blockwise_partitions(
     msg: str,
     fn,
     *fn_args,
-    randomize: bool = True,
+    randomize: bool = False,
     merge_fn=None,
-    merge_identity=None,
     **fn_kwargs,
 ):
     """
-    Just like your original, but:
-      1) randomization of indices is optional (defaults to True)
-      2) if `merge_fn` and `identity` are provided, performs a parallel fold
-         instead of returning a flat list of all results.
-
-    - num_blocks: how many indices you want to process (0..num_blocks-1)
-    - num_workers: how many Dask workers to spin up
-    - compute_args: dict of kwargs for .persist/.compute (e.g. {"scheduler": "threads"})
-    - logger: logger instance for timing messages
-    - msg: descriptive message for timing (e.g. "calculating connected component information")
-    - fn: the per-index function, called as fn(i, *fn_args, **fn_kwargs)
-    - *fn_args, **fn_kwargs: arguments passed to `fn`
-    - randomize: if True (default), shuffle indices via random keys before partitioning
-    - merge_fn: if provided (callable), used as the binary merge function for folding
-    - identity: if provided, the identity element (e.g., ([], Counter(), set())) for folding
+    Partition 0..num_blocks-1 across num_workers, optionally randomize,
+    collect all raw partitions onto the driver, shut the cluster down,
+    then merge locally with a tqdm progress bar.
     """
 
     def _partitioner(idxs, *args, **kwargs):
-        """
-        Called on each Bag-partition: receives a sequence of (possibly shuffled) indices,
-        calls fn(i, *args, **kwargs) for each i, collects return-values in a list.
-        """
         out = []
         for i in idxs:
             out.append(fn(i, *args, **kwargs))
         return out
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # STEP 1) Create a lazy Bag of 0..num_blocks-1, partitioned into `npart` parts
-    # ──────────────────────────────────────────────────────────────────────────
+    # STEP 1) Build & (optionally) shuffle the bag
     npart = guesstimate_npartitions(num_blocks, num_workers)
-    bag0 = db.range(num_blocks, npartitions=npart)
-
-    # ──────────────────────────────────────────────────────────────────────────
-    # STEP 2-4) Optionally shuffle: attach a random key, repartition, then drop the key
-    # ──────────────────────────────────────────────────────────────────────────
+    bag = db.range(num_blocks, npartitions=npart)
     if randomize:
-        bag1 = bag0.map(lambda i: (random.random(), i))
-        bag2 = bag1.repartition(npartitions=npart)
-        bag_shuffled = bag2.map(lambda pair: pair[1])
-    else:
-        bag_shuffled = bag0
+        bag = (
+            bag.map(lambda i: (random.random(), i))
+            .repartition(npartitions=npart)
+            .map(lambda pair: pair[1])
+        )
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # STEP 5) Map your _partitioner over those (possibly shuffled) indices
-    # ──────────────────────────────────────────────────────────────────────────
-    bag = bag_shuffled.map_partitions(_partitioner, *fn_args, **fn_kwargs)
+    # STEP 2) Map your work fn over each partition
+    bag = bag.map_partitions(_partitioner, *fn_args, **fn_kwargs)
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # STEP 6) If merge_fn & identity are supplied, fold; otherwise compute full list
-    # ──────────────────────────────────────────────────────────────────────────
-    with start_dask(num_workers, msg, logger):
+    # STEP 3) Spin up Dask, collect ALL partitions to driver
+    with start_dask(num_workers, msg, logger) as client:
         with Timing_Messager(msg.capitalize(), logger):
-            if merge_fn is not None:
-                # Perform a parallel tree-reduce (fold) across all partitions
-                folded = bag.fold(
-                    binop=merge_fn,
-                    combine=merge_fn,
-                    initial=merge_identity,
-                    split_every=8,
-                )
-                raw = dask_computer(folded, num_workers, **compute_args)
+            delayed_parts = bag.to_delayed()
+
+            if client is not None:
+                # distributed scheduler: kick off all partitions
+                futures = client.compute(delayed_parts, **compute_args)
+                # gather them back as a list of lists
+                raw_parts = client.gather(futures)
             else:
-                # Default behavior: compute each partition’s list-of-results,
-                # then flatten into a single Python list
-                raw = dask_computer(bag, num_workers, **compute_args)
+                # single‐worker: just compute the bag
+                raw_parts = [bag.compute(**compute_args)]
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # STEP 7) If we didn’t do a fold, normalize the result into a flat list (as before)
-    # ──────────────────────────────────────────────────────────────────────────
+    # by exiting the with-block the cluster is shut down
+    flat = [elem for part in raw_parts for elem in part]
+    # STEP 4) If no merge_fn: flatten and return raw_parts
     if merge_fn is None:
-        if raw is None:
-            return []
-        if isinstance(raw, types.GeneratorType):
-            raw = list(raw)
-        return raw
+        return flat
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # STEP 8) If folding was used, we assume `raw` is already the merged result
-    # ──────────────────────────────────────────────────────────────────────────
-    return raw
+    # STEP 5) If merge_fn: merge the results with a tqdm progress bar
+    with Timing_Messager(f"Merging {len(flat)} results", logger):
+        result = with_tqdm(merge_fn)(flat)
+    return result

@@ -11,7 +11,6 @@ from cellmap_analyze.util.io_util import (
 )
 
 import logging
-from skimage.graph import pixel_graph
 import networkx as nx
 import itertools
 import fastremap
@@ -296,28 +295,15 @@ class ConnectedComponents(ComputeConfigMixin):
         return id_to_volume_dict, touching_ids
 
     @staticmethod
-    def _merge_tuples(
-        acc: tuple[Counter, set], res: tuple[Counter, set]
-    ) -> tuple[Counter, set]:
-        """
-        acc: (all_blocks_acc, counter_acc, touch_acc)
-        res: (blk_or_list, cur_id2vol, cur_touch)
+    def _merge_tuples(tuples) -> tuple[Counter, set]:
+        id_to_volume_dict = Counter()
+        touching_ids = set()
+        for current_tuple in tuples:
+            current_id_to_volume_dict, current_touching_ids = current_tuple
+            id_to_volume_dict.update(current_id_to_volume_dict)  # in-place, C‐loop
+            touching_ids.update(current_touching_ids)  # in-place, C‐loop
 
-        This version checks for overlap and avoids mutating counter_acc in place.
-        """
-        if acc is None:
-            acc = (Counter(), set())
-
-        counter_acc, touch_acc = acc
-        cur_id2vol, cur_touch = res
-
-        # 2) Create a new Counter rather than updating in place
-        merged_counter = counter_acc + Counter(cur_id2vol)
-
-        # 3) Union the touching‐IDs sets
-        new_touch_set = touch_acc.union(cur_touch)
-
-        return (merged_counter, new_touch_set)
+        return (id_to_volume_dict, touching_ids)
 
     def get_connected_component_information(self):
         num_blocks = dask_util.get_num_blocks(self.connected_components_blockwise_idi)
@@ -333,7 +319,6 @@ class ConnectedComponents(ComputeConfigMixin):
                 self.connectivity,
                 self.object_labels_idi,
                 merge_fn=ConnectedComponents._merge_tuples,
-                merge_identity=None,
             )
         )
 

@@ -90,6 +90,7 @@ def test_connected_components_filled(
             ).astype(np.uint64)
             * id
         )
+
     assert np.array_equal(
         test_data,
         ground_truth,

@@ -1,3 +1,5 @@
+from collections import defaultdict
+from typing import Set
 import numpy as np
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util.dask_util import (
@@ -85,32 +87,12 @@ class FillHoles(ComputeConfigMixin):
         return hole_to_object_dict
 
     @staticmethod
-    def _merge_hole_partials(
-        hole_dict_acc: dict[int, set[int]],
-        hole_dict_2: dict[int, set[int]],
-    ) -> dict[int, set[int]]:
-        """Merge two dictionaries of hole IDs to sets of object IDs.
-        If a hole ID appears in both dictionaries, the sets of object IDs are
-        combined. If a hole ID appears in only one dictionary, its set of object
-        IDs is retained.
-        If the accumulator is None, it initializes an empty dictionary.
-        Args:
-            hole_dict_acc (dict[int, set[int]]): The accumulator dictionary.
-            hole_dict2 (dict[int, set[int]]): The dictionary to merge into the accumulator.
-        Returns:
-            dict[int, set[int]]: The merged dictionary of hole IDs to sets of object IDs.
-        """
-
-        if hole_dict_acc is None:
-            hole_dict_acc = {}
-
-        merged_hole_dict = hole_dict_acc.copy()
-        for hole_id, obj_set in hole_dict_2.items():
-            merged_hole_dict[hole_id] = merged_hole_dict.get(hole_id, set()).union(
-                obj_set
-            )
-
-        return merged_hole_dict
+    def _merge_hole_to_object_dicts(hole_to_object_dicts) -> dict[int, set[int]]:
+        hole_to_object_dict: defaultdict[int, Set[int]] = defaultdict(set)
+        for d in hole_to_object_dicts:
+            for hole_id, touching_ids in d.items():
+                hole_to_object_dict[hole_id].update(touching_ids)
+        return hole_to_object_dict
 
     @staticmethod
     def __postprocess_hole_dict(raw_hole_dict: dict[int, set[int]]) -> dict[int, int]:
@@ -138,8 +120,7 @@ class FillHoles(ComputeConfigMixin):
             input_idi=self.input_idi,
             holes_idi=self.holes_idi,
             connectivity=self.connectivity,
-            merge_fn=FillHoles._merge_hole_partials,
-            merge_identity=None,
+            merge_fn=FillHoles._merge_hole_to_object_dicts,
         )
 
         hole_to_object_dict = FillHoles.__postprocess_hole_dict(hole_to_object_dict)

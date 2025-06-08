@@ -131,21 +131,15 @@ class Measure(ComputeConfigMixin):
         return object_informations
 
     @staticmethod
-    def _merge_dicts(
-        left: dict[int, ObjectInformation] | None, right: dict[int, ObjectInformation]
-    ) -> dict[int, ObjectInformation]:
-        """
-        1) If left is None, create a fresh dict for this partition’s local fold.
-        2) Otherwise, merge `right` into `left` in place.
-        """
-        if left is None:
-            left = {}
-        for k, v in right.items():
-            if k not in left:
-                left[k] = v
-            else:
-                left[k] = left[k] + v
-        return left
+    def _merge_dicts(dicts) -> dict[int, ObjectInformation]:
+        res = {}
+        for current_dict in dicts:
+            for k, v in current_dict.items():
+                if k not in res:
+                    res[k] = v
+                else:
+                    res[k] += v
+        return res
 
     def measure(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, self.roi)
@@ -162,7 +156,6 @@ class Measure(ComputeConfigMixin):
             self.contact_sites,
             **self.get_measurements_blockwise_extra_kwargs,
             merge_fn=Measure._merge_dicts,
-            merge_identity=None,
         )
 
     def write_measurements(self):

@@ -2,7 +2,6 @@
 from funlib.geometry import Roi
 import numpy as np
 from cellmap_analyze.util.dask_util import (
-    dask_computer,
     guesstimate_npartitions,
     start_dask,
 )
@@ -140,7 +139,7 @@ class FitLinesToSegmentations(ComputeConfigMixin):
         with start_dask(self.num_workers, "line fits", logger):
             with io_util.Timing_Messager("Fitting lines", logger):
                 # results = ddf_out.compute()
-                df = dask_computer(ddf_out, self.num_workers, **self.compute_args)
+                df = ddf_out.compute(**self.compute_args)
         df["Object ID"] = df["Object ID"].astype(int)
         df.to_csv(self.output_csv, index=False)
 

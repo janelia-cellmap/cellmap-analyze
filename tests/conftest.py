@@ -62,6 +62,12 @@ def image_with_holes(image_shape):
 
 
 @pytest.fixture(scope="session")
+def random_image_to_delete(image_shape):
+    np.random.seed(42)
+    return np.random.randint(low=0, high=255, size=image_shape, dtype=np.uint8)
+
+
+@pytest.fixture(scope="session")
 def tic_tac_toe(image_shape):
     seg = np.zeros(image_shape, dtype=np.uint8)
 
@@ -591,6 +597,7 @@ def test_image_dict(
     mask_one,
     mask_two,
     label_mask,
+    random_image_to_delete,
     segmentation_1,
     segmentation_2,
     segmentation_random,
@@ -614,6 +621,7 @@ def test_image_dict(
         "mask_one": mask_one,
         "mask_two": mask_two,
         "label_mask": label_mask,
+        "random_image_to_delete": random_image_to_delete,
         "segmentation_1": segmentation_1,
         "segmentation_cylinders": segmentation_cylinders,
         "segmentation_spheres": segmentation_spheres,

@@ -139,7 +139,6 @@ class CleanConnectedComponents(ComputeConfigMixin):
             self.input_idi,
             self.mask,
             merge_fn=ConnectedComponents._merge_tuples,
-            merge_identity=None,
         )
 
     def get_final_connected_components(self):
