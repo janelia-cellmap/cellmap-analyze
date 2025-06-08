@@ -55,7 +55,6 @@ def test_connected_components(
     test_data = ImageDataInterface(
         f"{tmp_zarr}/test_connected_components_minimum_volume_nm_3_{minimum_volume_nm_3}_maximum_volume_nm_3_{maximum_volume_nm_3}/s0"
     ).to_ndarray_ts()
-    print(test_data.flatten(), ground_truth.flatten())
     assert np.array_equal(
         test_data,
         ground_truth,
@@ -91,6 +90,7 @@ def test_connected_components_filled(
             ).astype(np.uint64)
             * id
         )
+
     assert np.array_equal(
         test_data,
         ground_truth,

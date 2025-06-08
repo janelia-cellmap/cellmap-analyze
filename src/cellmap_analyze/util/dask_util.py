@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 import os
+import random
 import dask
 from dask.distributed import Client
 import getpass
@@ -23,6 +24,24 @@ import numpy as np
 import logging
 from contextlib import contextmanager, nullcontext
 import dask.bag as db
+from cellmap_analyze.util.io_util import Timing_Messager
+from tqdm import tqdm
+
+import random
+import dask.bag as db
+
+from functools import wraps
+from tqdm import tqdm
+
+
+def with_tqdm(fn):
+    @wraps(fn)
+    def wrapper(lst, *args, **kwargs):
+        # wrap the list in tqdm, but still pass it to fn
+        return fn(tqdm(lst, desc=fn.__name__), *args, **kwargs)
+
+    return wrapper
+
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -57,14 +76,37 @@ def get_global_block_id(
 
 
 def create_block(
-    roi, block_begin, block_size, voxel_size, padding, index, read_beyond_roi=True
+    roi,
+    block_begin,
+    block_size,
+    voxel_size,
+    padding,
+    index,
+    read_beyond_roi=True,
+    padding_direction="both",
 ):
     roi_shape_voxels = roi.shape / voxel_size
     write_roi = Roi(block_begin, block_size).intersect(roi)
     block_id = get_global_block_id(roi_shape_voxels, write_roi, voxel_size)
     read_roi = write_roi
     if padding:
-        read_roi = write_roi.grow(padding, padding)
+        amount_neg = 0
+        amount_pos = 0
+        if padding_direction in ["both", "neg", "pos"]:
+            amount_neg = padding * int(padding_direction in ["both", "neg"])
+            amount_pos = padding * int(padding_direction in ["both", "pos"])
+        # in some cases we want to add padding in the positive direction if we need context from outside the roi, for hole finding for example
+        elif padding_direction == "neg_with_edge_pos":
+            amount_neg = padding
+            test_grow = write_roi.grow(amount_pos=padding)
+            if test_grow != test_grow.intersect(roi):
+                amount_pos = padding
+        elif padding_direction == "pos_with_edge_neg":
+            amount_pos = padding
+            test_grow = write_roi.grow(amount_neg=padding)
+            if test_grow != test_grow.intersect(roi):
+                amount_neg = padding
+        read_roi = write_roi.grow(amount_neg=amount_neg, amount_pos=amount_pos)
 
     if not read_beyond_roi:
         read_roi = read_roi.intersect(roi)
@@ -89,6 +131,7 @@ def create_block_from_index(
     roi: Roi = None,
     block_size=None,
     read_beyond_roi=True,
+    padding_direction="both",
 ) -> DaskBlock:
     if not roi:
         roi = idi.roi
@@ -107,6 +150,7 @@ def create_block_from_index(
         padding,
         index,
         read_beyond_roi,
+        padding_direction,
     )
 
 
@@ -159,25 +203,10 @@ def create_blocks(
     return block_rois
 
 
-def guesstimate_npartitions(sequence, num_workers, scaling=4):
-    # if num_workers == 1:
-    #     return 1
-    return min(len(sequence), num_workers * scaling)
-
-
-def dask_computer(b, num_workers, **kwargs):
-    if num_workers == 1:
-        return b.compute(**kwargs)
-    if num_workers > 1:
-        b = b.persist(**kwargs)  # start computation in the background
-        if num_workers <= 100:
-            interval = "3s"
-        elif num_workers <= 500:
-            interval = "30s"
-        else:
-            interval = "150s"
-        # progress(b, interval=interval)  # watch progress
-        return b.compute(**kwargs)
+def guesstimate_npartitions(elements, num_workers, scaling=4):
+    if not isinstance(elements, int):
+        elements = len(elements)
+    return min(elements, num_workers * scaling)
 
 
 def set_local_directory(cluster_type):
@@ -283,6 +312,7 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
 
             cluster = SGECluster()
         cluster.scale(num_workers)
+        # cluster.adapt(minimum=0, maximum=num_workers)
     try:
         with Timing_Messager(
             f"Starting {cluster_type} dask cluster for {msg} with {num_workers} workers",
@@ -324,36 +354,93 @@ def setup_execution_directory(config_path, logger):
     return execution_dir
 
 
-def delete_chunks(block_coords, tmp_blockwise_ds_path):
+def delete_chunks(block_index, idi, depth=3):
+    block = create_block_from_index(idi, block_index)
+    block_coords = block.coords[
+        :depth
+    ]  # can have duplicates eg 0/0/0 and 0/0/1 go produce the same coords[:2]
     block_coords_string = "/".join([str(c) for c in block_coords])
-    delete_name = f"{tmp_blockwise_ds_path}/{block_coords_string}"
-    if os.path.exists(delete_name) and (
-        os.path.isfile(delete_name) or os.listdir(delete_name) == []
-    ):
-        os.system(f"rm -rf {delete_name}")
-        if len(block_coords) == 3:
-            # if it is the highest level then we also remove the pkl file
-            os.system(f"rm -rf {delete_name}.pkl")
+    delete_name = f"{idi.path}/{block_coords_string}"
+    if os.path.exists(delete_name):
+        if os.path.isfile(delete_name):
+            os.remove(delete_name)
+        elif os.listdir(delete_name) == []:
+            shutil.rmtree(delete_name, ignore_errors=True)
 
 
-def delete_tmp_dataset(path_to_dataset, blocks, num_workers, compute_args):
+def delete_tmp_zarr(
+    idi_or_location: ImageDataInterface | str, num_workers, compute_args
+):
+    if type(idi_or_location) is str:
+        idi = ImageDataInterface(idi_or_location)
+    else:
+        idi = idi_or_location
+
+    num_blocks = get_num_blocks(idi, idi.roi)
+
     for depth in range(3, 0, -1):
-        all_block_coords = set([block.coords[:depth] for block in blocks])
-        b = db.from_sequence(
-            all_block_coords,
-            npartitions=guesstimate_npartitions(blocks, num_workers),
-        ).map(
+        compute_blockwise_partitions(
+            num_blocks,
+            num_workers,
+            compute_args,
+            logger,
+            f"deleting temporary zarr dataset at depth {depth}",
             delete_chunks,
-            path_to_dataset,
+            idi,
+            depth,
         )
 
-        with start_dask(
-            num_workers,
-            f"delete blockwise depth: {depth}",
-            logger,
-        ):
-            with Timing_Messager(f"Deleting blockwise depth: {depth}", logger):
-                dask_computer(b, num_workers, **compute_args)
+    basepath, _ = split_dataset_path(idi.path)
+    shutil.rmtree(f"{basepath}/{get_name_from_path(idi.path)}")
 
-    basepath, _ = split_dataset_path(path_to_dataset)
-    os.system(f"rm -rf {basepath}/{get_name_from_path(path_to_dataset)}")
+
+def compute_blockwise_partitions(
+    num_blocks: int,
+    num_workers: int,
+    compute_args: dict,
+    logger,
+    msg: str,
+    fn,
+    *fn_args,
+    randomize: bool = False,
+    merge_fn=None,
+    **fn_kwargs,
+):
+    """
+    Partition 0..num_blocks-1 across num_workers, optionally randomize,
+    collect all raw partitions onto the driver, shut the cluster down,
+    then merge locally with a tqdm progress bar.
+    """
+
+    def _partitioner(idxs, *args, **kwargs):
+        out = []
+        for i in idxs:
+            out.append(fn(i, *args, **kwargs))
+        return out
+
+    # STEP 1) Build & (optionally) shuffle the bag
+    npart = guesstimate_npartitions(num_blocks, num_workers)
+    bag = db.range(num_blocks, npartitions=npart)
+    if randomize:
+        bag = (
+            bag.map(lambda i: (random.random(), i))
+            .repartition(npartitions=npart)
+            .map(lambda pair: pair[1])
+        )
+
+    # STEP 2) Map your work fn over each partition
+    bag = bag.map_partitions(_partitioner, *fn_args, **fn_kwargs)
+
+    # STEP 3) Spin up Dask, collect ALL partitions to driver
+    with start_dask(num_workers, msg, logger) as client:
+        with Timing_Messager(msg.capitalize(), logger):
+            flat = bag.compute(**compute_args)
+
+    # STEP 4) If no merge_fn: flatten and return raw_parts
+    if merge_fn is None:
+        return flat
+
+    # STEP 5) If merge_fn: merge the results with a tqdm progress bar
+    with Timing_Messager(f"Merging {len(flat)} results", logger):
+        result = with_tqdm(merge_fn)(flat)
+    return result

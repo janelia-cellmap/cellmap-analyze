@@ -1,20 +1,15 @@
 import numpy as np
 from cellmap_analyze.util import dask_util
-from cellmap_analyze.util import io_util
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
-    dask_computer,
-    guesstimate_npartitions,
 )
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.io_util import get_name_from_path
-from skimage import measure
 from cellmap_analyze.cythonizing.process_arrays import initialize_contact_site_array
 from cellmap_analyze.cythonizing.bresenham3D import bresenham_3D_lines
 import logging
 from cellmap_analyze.process.connected_components import ConnectedComponents
 from scipy.spatial import KDTree
-import dask.bag as db
 from cellmap_analyze.util.measure_util import trim_array
 from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.util.zarr_util import (
@@ -43,8 +38,12 @@ class ContactSites(ComputeConfigMixin):
         chunk_shape=None,
     ):
         super().__init__(num_workers)
-        self.organelle_1_idi = ImageDataInterface(organelle_1_path, chunk_shape=chunk_shape)
-        self.organelle_2_idi = ImageDataInterface(organelle_2_path, chunk_shape=chunk_shape)
+        self.organelle_1_idi = ImageDataInterface(
+            organelle_1_path, chunk_shape=chunk_shape
+        )
+        self.organelle_2_idi = ImageDataInterface(
+            organelle_2_path, chunk_shape=chunk_shape
+        )
         output_voxel_size = min(
             self.organelle_1_idi.voxel_size, self.organelle_2_idi.voxel_size
         )
@@ -180,11 +179,12 @@ class ContactSites(ComputeConfigMixin):
         num_blocks = dask_util.get_num_blocks(
             self.contact_sites_blockwise_idi, self.roi
         )
-        block_indexes = list(range(num_blocks))
-        b = db.from_sequence(
-            block_indexes,
-            npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
-        ).map(
+        dask_util.compute_blockwise_partitions(
+            num_blocks,
+            self.num_workers,
+            self.compute_args,
+            logger,
+            "calculating contact sites",
             ContactSites.calculate_block_contact_sites,
             self.organelle_1_idi,
             self.organelle_2_idi,
@@ -192,14 +192,6 @@ class ContactSites(ComputeConfigMixin):
             self.contact_distance_voxels,
             self.padding_voxels,
         )
-
-        with dask_util.start_dask(
-            self.num_workers,
-            "calculate contact sites",
-            logger,
-        ):
-            with io_util.Timing_Messager("Calculating contact sites", logger):
-                dask_computer(b, self.num_workers, **self.compute_args)
 
     def get_contact_sites(self):
         self.calculate_contact_sites_blockwise()

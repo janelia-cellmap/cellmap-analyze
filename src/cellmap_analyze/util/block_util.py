@@ -30,30 +30,3 @@ def dilation(block, iterations, structuring_element):
         block > 0, structure=structuring_element, iterations=iterations
     )
     return block
-
-
-def relabel_block(
-    block: DaskBlock,
-    input_idi: ImageDataInterface,
-    output_idi: ImageDataInterface,
-    mask=None,
-):
-    # All ids must be accounted for in the relabeling dict
-    data = input_idi.to_ndarray_ts(
-        block.write_roi,
-    )
-    if mask:
-        mask_block = mask.process_block(roi=block.write_roi)
-        data *= mask_block
-
-    if len(block.relabeling_dict) > 0:
-        try:
-            fastremap.remap(
-                data, block.relabeling_dict, preserve_missing_labels=True, in_place=True
-            )
-        except:
-            raise Exception(
-                f"Error in relabel_block {block.write_roi}, {list(block.relabeling_dict.keys())}, {list(block.relabeling_dict.values())}"
-            )
-
-    output_idi.ds[block.write_roi] = data

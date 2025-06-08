@@ -1,27 +1,23 @@
-import types
 import numpy as np
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util import io_util
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
-    dask_computer,
-    guesstimate_npartitions,
 )
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.information_holders import ObjectInformation
 from cellmap_analyze.util.io_util import (
     get_name_from_path,
 )
 import pandas as pd
 import logging
-import dask.bag as db
 
 from cellmap_analyze.util.measure_util import get_object_information
 
 import os
-from tqdm import tqdm
-import time
 
 from cellmap_analyze.util.mixins import ComputeConfigMixin
+import time
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -132,60 +128,35 @@ class Measure(ComputeConfigMixin):
         #     # however if i added os.system calls to touch and rm file named with block index, then it wouldnt hang. so assuming that it has to do with a timing thing in that it only had to load/process a single dataset chunk.
         #     # sleeping for a little bit may therefore help:
         #     # NOTE: this happened after adding concurrency limits=1 when opening tensorstore, but never tested on complete single organelle datasets before that switch
-        #     time.sleep(0.1)
-
         return object_informations
 
     @staticmethod
-    def __summer(object_information_dicts):
-        if type(object_information_dicts) is tuple:
-            object_information_dicts = [object_information_dicts]
-        elif isinstance(object_information_dicts, types.GeneratorType):
-            object_information_dicts = list(object_information_dicts)
-
-        for idx, object_information_dict in enumerate(tqdm(object_information_dicts)):
-            if idx == 0:
-                output_dict = object_information_dict
-                continue
-
-            for id, oi in object_information_dict.items():
-                if id in output_dict:
-                    output_dict[id] += oi
+    def _merge_dicts(dicts) -> dict[int, ObjectInformation]:
+        res = {}
+        for current_dict in dicts:
+            for k, v in current_dict.items():
+                if k not in res:
+                    res[k] = v
                 else:
-                    output_dict[id] = oi
-
-        return output_dict
+                    res[k] += v
+        return res
 
     def measure(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, self.roi)
-        block_indexes = list(range(num_blocks))
-
-        b = (
-            db.from_sequence(
-                block_indexes,
-                npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
-            ).map(
-                Measure.get_measurements_blockwise,
-                self.input_idi,
-                self.roi,
-                self.global_offset,
-                self.contact_sites,
-                **self.get_measurements_blockwise_extra_kwargs,
-            )
-            # .reduction(Measure.__summer, Measure.__summer)
-        )
-
-        with dask_util.start_dask(
+        self.measurements = dask_util.compute_blockwise_partitions(
+            num_blocks,
             self.num_workers,
-            "measure object information",
+            self.compute_args,
             logger,
-        ):
-            with io_util.Timing_Messager("Measuring object information", logger):
-                bagged_results = dask_computer(b, self.num_workers, **self.compute_args)
-
-        # moved this out of dask, seems fast enough without having to daskify
-        with io_util.Timing_Messager("Combining bagged results", logger):
-            self.measurements = Measure.__summer(bagged_results)
+            "measuring object information",
+            Measure.get_measurements_blockwise,
+            self.input_idi,
+            self.roi,
+            self.global_offset,
+            self.contact_sites,
+            **self.get_measurements_blockwise_extra_kwargs,
+            merge_fn=Measure._merge_dicts,
+        )
 
     def write_measurements(self):
         os.makedirs(self.output_path, exist_ok=True)

@@ -62,6 +62,31 @@ def image_with_holes(image_shape):
 
 
 @pytest.fixture(scope="session")
+def random_image_to_delete(image_shape):
+    np.random.seed(42)
+    return np.random.randint(low=0, high=255, size=image_shape, dtype=np.uint8)
+
+
+@pytest.fixture(scope="session")
+def tic_tac_toe(image_shape):
+    seg = np.zeros(image_shape, dtype=np.uint8)
+
+    # Set the two slices along axis-0 (i.e., seg[3, :, :] and seg[7, :, :]) to 1
+    seg[3, :, :] = 1
+    seg[7, :, :] = 1
+
+    # Set the two slices along axis-1 (i.e., A[:, 3, :] and A[:, 7, :]) to 1
+    seg[:, 3, :] = 1
+    seg[:, 7, :] = 1
+
+    # Set the two slices along axis-2 (i.e., seg[:, :, 3] and seg[:, :, 7]) to 1
+    seg[:, :, 3] = 1
+    seg[:, :, 7] = 1
+
+    return seg
+
+
+@pytest.fixture(scope="session")
 def mask_one(image_shape):
     mask = np.zeros(image_shape, dtype=np.uint8)
     mask[:3, :3, :3] = 1
@@ -93,6 +118,11 @@ def image_with_holes_filled(image_with_holes):
             ndimage.binary_fill_holes(image_with_holes == id).astype(np.uint8)
         ) * id
     return filled
+
+
+@pytest.fixture(scope="session")
+def tic_tac_toe_filled(tic_tac_toe):
+    return ndimage.binary_fill_holes(tic_tac_toe).astype(np.uint8)
 
 
 @pytest.fixture(scope="session")
@@ -562,9 +592,12 @@ def test_image_dict(
     intensity_image,
     image_with_holes,
     image_with_holes_filled,
+    tic_tac_toe,
+    tic_tac_toe_filled,
     mask_one,
     mask_two,
     label_mask,
+    random_image_to_delete,
     segmentation_1,
     segmentation_2,
     segmentation_random,
@@ -583,9 +616,12 @@ def test_image_dict(
         "intensity_image": intensity_image,
         "image_with_holes": image_with_holes,
         "image_with_holes_filled": image_with_holes_filled,
+        "tic_tac_toe": tic_tac_toe,
+        "tic_tac_toe_filled": tic_tac_toe_filled,
         "mask_one": mask_one,
         "mask_two": mask_two,
         "label_mask": label_mask,
+        "random_image_to_delete": random_image_to_delete,
         "segmentation_1": segmentation_1,
         "segmentation_cylinders": segmentation_cylinders,
         "segmentation_spheres": segmentation_spheres,

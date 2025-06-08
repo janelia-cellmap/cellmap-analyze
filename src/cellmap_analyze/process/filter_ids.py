@@ -1,23 +1,15 @@
 from typing import List, Union
 import numpy as np
-from tqdm import tqdm
 from cellmap_analyze.process.connected_components import ConnectedComponents
-from cellmap_analyze.util import dask_util
-from cellmap_analyze.util import io_util
-from cellmap_analyze.util.dask_util import (
-    create_block_from_index,
-    dask_computer,
-    guesstimate_npartitions,
-)
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.io_util import (
     get_name_from_path,
     split_dataset_path,
 )
 import logging
-import dask.bag as db
 import os
 import pandas as pd
+import shutil
 
 from cellmap_analyze.util.mixins import ComputeConfigMixin
 
@@ -88,89 +80,22 @@ class FilterIDs(ComputeConfigMixin):
         if self.output_path is None:
             self.output_path = self.input_path
 
+        self.relabeling_dict_path = self.output_path + "_relabeling_dict"
         output_ds_name = get_name_from_path(self.output_path)
         output_ds_basepath = split_dataset_path(self.output_path)[0]
         self.output_ds_path = f"{output_ds_basepath}/{output_ds_name}_filteredIDs"
-        self.temp_block_info_path = self.output_ds_path + "_blocks_tmp"
-
-    @staticmethod
-    def get_object_ids_blockwise(block_index, input_idi: ImageDataInterface):
-        block = create_block_from_index(
-            input_idi,
-            block_index,
-        )
-        data = input_idi.to_ndarray_ts(block.read_roi)
-        block.relabeling_dict = {id: 0 for id in np.unique(data[data > 0])}
-        return [block]
-
-    @staticmethod
-    def __combine_results(results):
-        if type(results) != list:
-            results = list(results)
-
-        for idx, block in enumerate(tqdm(results)):
-            if idx == 0:
-                blocks = block
-            else:
-                blocks += block
-        return blocks
-
-    def get_object_ids(self):
-        num_blocks = dask_util.get_num_blocks(self.input_idi)
-        block_indexes = list(range(num_blocks))
-        b = db.from_sequence(
-            block_indexes,
-            npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
-        ).map(
-            FilterIDs.get_object_ids_blockwise,
-            self.input_idi,
-        )
-
-        with dask_util.start_dask(
-            self.num_workers,
-            "calculate object ids",
-            logger,
-        ):
-            with io_util.Timing_Messager("Calculating object ids", logger):
-                bagged_results = dask_computer(b, self.num_workers, **self.compute_args)
-
-        # moved this out of dask, seems fast enough without having to daskify
-        with io_util.Timing_Messager("Combining bagged results", logger):
-            blocks = FilterIDs.__combine_results(bagged_results)
-
-        self.blocks = [None] * num_blocks
-        for block in blocks:
-            block.relabeling_dict = {
-                id: self.global_relabeling_dict.get(id, 0)
-                for id in block.relabeling_dict.keys()
-            }
-            self.blocks[block.index] = block
-        del self.global_relabeling_dict
 
     def get_filtered_ids(self):
-        self.get_object_ids()
-        ConnectedComponents.write_out_block_objects(
-            self.temp_block_info_path,
-            self.blocks,
-            self.num_local_threads_available,
-            self.local_config,
-            self.num_workers,
-            self.compute_args,
-            use_new_temp_dir=True,
+        ConnectedComponents.write_memmap_relabeling_dicts(
+            self.global_relabeling_dict, self.relabeling_dict_path
         )
         ConnectedComponents.relabel_dataset(
             self.input_idi,
             self.output_ds_path,
-            self.blocks,
             self.roi,
             self.new_dtype,
-            self.num_workers,
-            self.compute_args,
-            self.temp_block_info_path,
-        )
-        dask_util.delete_tmp_dataset(
-            self.temp_block_info_path,
-            self.blocks,
+            self.relabeling_dict_path,
             self.num_workers,
             self.compute_args,
         )
+        shutil.rmtree(self.relabeling_dict_path)

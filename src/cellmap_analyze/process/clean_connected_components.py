@@ -4,8 +4,6 @@ from cellmap_analyze.util import dask_util
 from cellmap_analyze.util import io_util
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
-    dask_computer,
-    guesstimate_npartitions,
 )
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.io_util import (
@@ -14,14 +12,12 @@ from cellmap_analyze.util.io_util import (
 )
 
 import logging
-import dask.bag as db
 import itertools
-import os
 from cellmap_analyze.util.mask_util import MasksFromConfig
 import fastremap
 
 from cellmap_analyze.util.mixins import ComputeConfigMixin
-
+import shutil
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -65,7 +61,7 @@ class CleanConnectedComponents(ComputeConfigMixin):
             output_ds_basepath = split_dataset_path(self.input_path)[0]
             self.output_path = f"{output_ds_basepath}/{output_ds_name}_cleaned"
 
-        self.temp_block_info_path = self.output_path + "_blocks_tmp"
+        self.relabeling_dict_path = f"{self.output_path}_relabeling_dict/"
 
         # evaluate minimum_volume_nm_3 voxels if it is a string
         if type(minimum_volume_nm_3) == str:
@@ -129,50 +125,21 @@ class CleanConnectedComponents(ComputeConfigMixin):
             raise Exception(
                 f"Error in get_connected_component_information_blockwise {block_index}, {connected_components_blockwise_idi.voxel_size}"
             )
-        return [block], id_to_volume_dict, set()
-
-    @staticmethod
-    def combine_id_to_volume_dicts(dict1, dict2):
-        # make dict1 the larger dict
-        if len(dict1) < len(dict2):
-            dict1, dict2 = dict2, dict1
-
-        dict1 = dict1.copy()
-        for id, volume in dict2.items():
-            dict1[id] = dict1.get(id, 0) + volume
-        return dict1
+        return id_to_volume_dict, set()
 
     def get_connected_component_information(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, self.roi)
-        block_indexes = list(range(num_blocks))
-        b = db.from_sequence(
-            block_indexes,
-            npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
-        ).map(
+        self.id_to_volume_dict, _ = dask_util.compute_blockwise_partitions(
+            num_blocks,
+            self.num_workers,
+            self.compute_args,
+            logger,
+            "getting connected component information",
             CleanConnectedComponents.get_connected_component_information_blockwise,
             self.input_idi,
             self.mask,
+            merge_fn=ConnectedComponents._merge_tuples,
         )
-
-        with dask_util.start_dask(
-            self.num_workers,
-            "calculate connected component information",
-            logger,
-        ):
-            with io_util.Timing_Messager(
-                "Calculating connected component information", logger
-            ):
-                bagged_results = dask_computer(b, self.num_workers, **self.compute_args)
-
-        # moved this out of dask, seems fast enough without having to daskify
-        with io_util.Timing_Messager("Combining bagged results", logger):
-            blocks_with_dict, self.id_to_volume_dict, _ = (
-                ConnectedComponents._combine_results(bagged_results)
-            )
-
-        self.blocks = [None] * num_blocks
-        for block in blocks_with_dict:
-            self.blocks[block.index] = block
 
     def get_final_connected_components(self):
         # make it a list of list to be consistence with connectedcomponents volume filter
@@ -194,50 +161,31 @@ class CleanConnectedComponents(ComputeConfigMixin):
 
         if len(new_ids) == 0:
             self.new_dtype = np.uint8
+            relabeling_dict = {}
         else:
             self.new_dtype = np.min_scalar_type(max(new_ids))
             relabeling_dict = dict(zip(old_ids, new_ids))
-            # update blockwise relabeing dicts
-            for block in self.blocks:
-                block.relabeling_dict = {
-                    id: relabeling_dict.get(id, 0)
-                    for id in block.relabeling_dict.keys()
-                }
-            del relabeling_dict
+
+        ConnectedComponents.write_memmap_relabeling_dicts(
+            relabeling_dict, self.relabeling_dict_path
+        )
 
     def clean_connected_components(self):
         # get blockwise connected component information
         self.get_connected_component_information()
         # get final connected components necessary for relabeling, including volume filtering
         self.get_final_connected_components()
-        # write out block information
-        ConnectedComponents.write_out_block_objects(
-            self.temp_block_info_path,
-            self.blocks,
-            self.num_local_threads_available,
-            self.local_config,
-            self.num_workers,
-            self.compute_args,
-            use_new_temp_dir=True,
-        )
+
         ConnectedComponents.relabel_dataset(
             self.input_idi,
             self.output_path,
-            self.blocks,
             self.roi,
             self.new_dtype,
+            self.relabeling_dict_path,
             self.num_workers,
             self.compute_args,
-            block_info_basepath=self.temp_block_info_path,
             mask=self.mask,
         )
-        if self.delete_tmp:
-            dask_util.delete_tmp_dataset(
-                self.temp_block_info_path,
-                self.blocks,
-                self.num_workers,
-                self.compute_args,
-            )
 
         if self.fill_holes:
             from .fill_holes import FillHoles
@@ -248,6 +196,7 @@ class CleanConnectedComponents(ComputeConfigMixin):
                 num_workers=self.num_workers,
                 roi=self.roi,
                 connectivity=self.connectivity,
-                delete_tmp=self.delete_tmp,
             )
             fh.fill_holes()
+
+        shutil.rmtree(self.relabeling_dict_path)

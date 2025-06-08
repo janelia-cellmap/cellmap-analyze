@@ -20,8 +20,6 @@ def create_multiscale_metadata(multsc, levels):
     ]["translation"]
     num_levels = levels
     for level in range(1, num_levels + 1):
-        print(f"{level=}")
-
         # break the slices up into batches, to make things easier for the dask scheduler
         sn = [dim * pow(2, level) for dim in base_scale]
         trn = [

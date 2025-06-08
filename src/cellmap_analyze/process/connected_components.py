@@ -1,15 +1,8 @@
-from collections import defaultdict
-import pickle
-import types
 import numpy as np
-from tqdm import tqdm
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util import io_util
-from cellmap_analyze.util.block_util import relabel_block
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
-    dask_computer,
-    guesstimate_npartitions,
 )
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.io_util import (
@@ -18,9 +11,7 @@ from cellmap_analyze.util.io_util import (
 )
 
 import logging
-from skimage.graph import pixel_graph
 import networkx as nx
-import dask.bag as db
 import itertools
 import fastremap
 import os
@@ -28,6 +19,9 @@ from cellmap_analyze.util.mask_util import MasksFromConfig
 from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
 import cc3d
+from collections import Counter
+import shutil
+from cellmap_analyze.cythonizing.touching import get_touching_ids
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -116,6 +110,8 @@ class ConnectedComponents(ComputeConfigMixin):
                 connected_components_blockwise_path, chunk_shape=chunk_shape
             )
         self.output_path = output_path
+
+        self.relabeling_dict_path = f"{self.output_path}_relabeling_dict/"
 
         # evaluate minimum_volume_nm_3 voxels if it is a string
         if type(minimum_volume_nm_3) == str:
@@ -207,11 +203,12 @@ class ConnectedComponents(ComputeConfigMixin):
 
     def calculate_connected_components_blockwise(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
-        block_indexes = list(range(num_blocks))
-        b = db.from_sequence(
-            block_indexes,
-            npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
-        ).map(
+        dask_util.compute_blockwise_partitions(
+            num_blocks,
+            self.num_workers,
+            self.compute_args,
+            logger,
+            "calculating connected components",
             ConnectedComponents.calculate_block_connected_components,
             self.input_idi,
             self.connected_components_blockwise_idi,
@@ -224,71 +221,10 @@ class ConnectedComponents(ComputeConfigMixin):
             self.connectivity,
         )
 
-        with dask_util.start_dask(
-            self.num_workers,
-            "calculate connected components",
-            logger,
-        ):
-            with io_util.Timing_Messager("Calculating connected components", logger):
-                dask_computer(b, self.num_workers, **self.compute_args)
-
-    @staticmethod
-    def get_touching_ids(data, mask, connectivity=2, object_labels=None):
-        """
-        Find all pairs of different labels in `data` whose pixels touch
-        (with given connectivity), optionally restricted to those within the same object.
-
-        Parameters
-        ----------
-        data : ndarray of int
-            Label image.
-        mask : ndarray of bool
-            Which pixels to consider in building the graph.
-        connectivity : {1, 2}, optional
-            Pixel‐connectivity for the graph (4‐ or 8‐connected in 2D).
-        object_labels : ndarray of int, optional
-            Additional label/image of same shape.  Only touching‐pairs
-            whose object_labels match are kept.
-
-        Returns
-        -------
-        touching_ids : set of tuple(int, int)
-            Each tuple (i, j) with i < j indicates two different `data`-labels that touch.
-        """
-        # initially from here: https://stackoverflow.com/questions/72452267/finding-identity-of-touching-labels-objects-masks-in-images-using-python
-        # build pixel‐adjacency graph
-        g, nodes = pixel_graph(data, mask=mask, connectivity=connectivity)
-
-        # extract all neighbor‐pairs
-        coo = g.tocoo()
-        center_coords = nodes[coo.row]
-        neighbor_coords = nodes[coo.col]
-
-        center_vals = data.ravel()[center_coords]
-        neighbor_vals = data.ravel()[neighbor_coords]
-
-        # if object_labels given, filter to only same-object contacts
-        if object_labels is not None:
-            obj_center = object_labels.ravel()[center_coords]
-            obj_neighbor = object_labels.ravel()[neighbor_coords]
-            same_object = obj_center == obj_neighbor
-            center_vals = center_vals[same_object]
-            neighbor_vals = neighbor_vals[same_object]
-
-        # remove self‐touches, sort pairs so smaller id comes first
-        pairs = np.stack([center_vals, neighbor_vals], axis=1)
-        unequal = pairs[:, 0] != pairs[:, 1]
-        pairs = pairs[unequal]
-        pairs.sort(axis=1)  # row‐wise sort
-
-        # unique set of tuples
-        touching_ids = {tuple(p) for p in pairs}
-        return touching_ids
-
     @staticmethod
     def get_object_sizes(data):
-        labels, counts = np.unique(data[data > 0], return_counts=True)
-        return defaultdict(int, zip(labels, counts))
+        labels, counts = fastremap.unique(data[data > 0], return_counts=True)
+        return Counter(dict(zip(labels, counts)))
 
     @staticmethod
     def get_connected_ids(nodes, edges):
@@ -325,7 +261,10 @@ class ConnectedComponents(ComputeConfigMixin):
                 connected_components_blockwise_idi,
                 block_index,
                 padding=connected_components_blockwise_idi.voxel_size,
+                padding_direction="neg_with_edge_pos",
             )
+            # need to pad into external space (for holes) which - if we only pad in the negative direction - will not happen on the positive ends
+
             data = connected_components_blockwise_idi.to_ndarray_ts(
                 block.read_roi,
             )
@@ -335,121 +274,117 @@ class ConnectedComponents(ComputeConfigMixin):
 
             mask = data.astype(bool)
             mask[2:, 2:, 2:] = False
-            touching_ids = ConnectedComponents.get_touching_ids(
+            touching_ids = get_touching_ids(
                 data, mask=mask, connectivity=connectivity, object_labels=object_labels
             )
-
             # get information only from actual block(not including padding)
-            id_to_volume_dict = ConnectedComponents.get_object_sizes(
-                data[1:-1, 1:-1, 1:-1]
+            actual_padding = np.array(
+                block.read_roi.shape / connected_components_blockwise_idi.voxel_size
+                - connected_components_blockwise_idi.chunk_shape
             )
-            block.relabeling_dict = {id: 0 for id in id_to_volume_dict.keys()}
-        except:
+            if np.any(actual_padding == 2):
+                data = data[1:-1, 1:-1, 1:-1]
+            else:
+                data = data[1:, 1:, 1:]
+
+            id_to_volume_dict = ConnectedComponents.get_object_sizes(data)
+        except Exception as e:
             raise Exception(
-                f"Error in get_connected_component_information_blockwise {block_index}, {connected_components_blockwise_idi.voxel_size}"
+                f"Error {e} in get_connected_component_information_blockwise {block_index}, {connected_components_blockwise_idi.voxel_size}"
             )
-        return [block], id_to_volume_dict, touching_ids
+        return id_to_volume_dict, touching_ids
 
     @staticmethod
-    def combine_id_to_volume_dicts(dict1, dict2):
-        # make dict1 the larger dict
-        if len(dict1) < len(dict2):
-            dict1, dict2 = dict2, dict1
+    def _merge_tuples(tuples) -> tuple[Counter, set]:
+        id_to_volume_dict = Counter()
+        touching_ids = set()
+        for current_tuple in tuples:
+            current_id_to_volume_dict, current_touching_ids = current_tuple
+            id_to_volume_dict.update(current_id_to_volume_dict)  # in-place, C‐loop
+            touching_ids.update(current_touching_ids)  # in-place, C‐loop
 
-        dict1 = dict1.copy()
-        for id, volume in dict2.items():
-            dict1[id] = dict1.get(id, 0) + volume
-        return dict1
-
-    @staticmethod
-    def _combine_results(results):
-        if type(results) is tuple:
-            results = [results]
-        elif isinstance(results, types.GeneratorType):
-            results = list(results)
-
-        for idx, (block, current_id_to_volume_dict, current_touching_ids) in enumerate(
-            tqdm(results)
-        ):
-            if idx == 0:
-                blocks = block
-                id_to_volume_dict = current_id_to_volume_dict
-                touching_ids = current_touching_ids
-                continue
-
-            blocks += block
-            for key, value in current_id_to_volume_dict.items():
-                id_to_volume_dict[key] += value
-            touching_ids.update(current_touching_ids)
-
-        return blocks, id_to_volume_dict, touching_ids
+        return (id_to_volume_dict, touching_ids)
 
     def get_connected_component_information(self):
         num_blocks = dask_util.get_num_blocks(self.connected_components_blockwise_idi)
-        block_indexes = list(range(num_blocks))
-        b = db.from_sequence(
-            block_indexes,
-            npartitions=guesstimate_npartitions(block_indexes, self.num_workers),
-        ).map(
-            ConnectedComponents.get_connected_component_information_blockwise,
-            self.connected_components_blockwise_idi,
-            self.connectivity,
-            self.object_labels_idi,
+        self.id_to_volume_dict, self.touching_ids = (
+            dask_util.compute_blockwise_partitions(
+                num_blocks,
+                self.num_workers,
+                self.compute_args,
+                logger,
+                "calculating connected component information",
+                ConnectedComponents.get_connected_component_information_blockwise,
+                self.connected_components_blockwise_idi,
+                self.connectivity,
+                self.object_labels_idi,
+                merge_fn=ConnectedComponents._merge_tuples,
+            )
         )
 
-        with dask_util.start_dask(
-            self.num_workers,
-            "calculate connected component information",
-            logger,
-        ):
-            with io_util.Timing_Messager(
-                "Calculating connected component information", logger
-            ):
-                bagged_results = dask_computer(b, self.num_workers, **self.compute_args)
+    @staticmethod
+    def write_memmap_relabeling_dicts(relabeling_dict, output_path):
+        os.makedirs(output_path, exist_ok=True)
 
-        # moved this out of dask, seems fast enough without having to daskify
-        with io_util.Timing_Messager("Combining bagged results", logger):
-            blocks_with_dict, self.id_to_volume_dict, self.touching_ids = (
-                ConnectedComponents._combine_results(bagged_results)
-            )
+        if relabeling_dict is None or len(relabeling_dict) == 0:
+            # If the relabeling dict is empty, then it will all be zeros so write out empty arrays
+            old_sorted = np.array([], dtype=np.uint8)
+            new_sorted = np.array([], dtype=np.uint8)
 
-        self.blocks = [None] * num_blocks
-        for block in blocks_with_dict:
-            self.blocks[block.index] = block
+        else:
+            # 1) Extract keys and values
+            first_key, first_val = next(iter(relabeling_dict.items()))
+
+            all_old = np.fromiter(relabeling_dict.keys(), dtype=type(first_key))
+            all_new = np.fromiter(relabeling_dict.values(), dtype=type(first_val))
+
+            # 2) Sort by old keyf
+            sort_idx = np.argsort(all_old)
+            old_sorted = all_old[sort_idx]
+            new_sorted = all_new[sort_idx]
+
+        # 3) Save both arrays to disk in .npy format (which is also memory‐mappable)
+        np.save(f"{output_path}/old_sorted.npy", old_sorted)
+        np.save(f"{output_path}/new_sorted.npy", new_sorted)
 
     @staticmethod
-    def write_out_block_objects(
-        path,
-        blocks,
-        num_local_threads_available,
-        local_config,
-        num_workers,
-        compute_args,
-        use_new_temp_dir=False,
-    ):
-        def write_out_block_object(block, tmp_path, use_new_temp_dir=False):
-            block_coords_string = "/".join([str(c) for c in block.coords])
-            output_path = f"{tmp_path}/{block_coords_string}.pkl"
-            if use_new_temp_dir:
-                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    def get_updated_relabeling_dict(query_ids, relabeling_dict_path):
+        # 1) Load the sorted old→new arrays as memmaps
+        old_sorted_mm = np.load(f"{relabeling_dict_path}/old_sorted.npy", mmap_mode="r")
+        new_sorted_mm = np.load(f"{relabeling_dict_path}/new_sorted.npy", mmap_mode="r")
 
-            # write relabeling dict to pkl file
-            with open(f"{output_path}", "wb") as handle:
-                pickle.dump(block, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        # 2) Start with all outputs = 0
+        out = np.zeros(query_ids.shape, dtype=new_sorted_mm.dtype)
 
-        # NOTE: do it the following way since it should be fast enough with 10 workers and then we don't have to bog down distributed stuff
-        with dask_util.start_dask(
-            num_workers=num_local_threads_available,
-            msg="write out blocks",
-            logger=logger,
-            config=local_config,
-        ):
-            with io_util.Timing_Messager("Writing out blocks", logger):
-                b = db.from_sequence(
-                    blocks,
-                    npartitions=guesstimate_npartitions(blocks, num_workers),
-                ).map(write_out_block_object, path, use_new_temp_dir)
-                dask_computer(b, num_local_threads_available, **compute_args)
+        if len(old_sorted_mm) == 0 and len(new_sorted_mm) == 0:
+            return dict(zip(query_ids, out))
+
+        # 3) Compute insertion indices for each query_id
+        idx = np.searchsorted(old_sorted_mm, query_ids)
+
+        # 4) Build an “in_bounds” mask
+        in_bounds = idx < old_sorted_mm.shape[0]
+
+        # 5) Allocate a boolean array for “matches” (initialize False)
+        matches = np.zeros_like(in_bounds, dtype=bool)
+
+        # 6) Only compare old_sorted_mm[idx] vs. query_ids where in_bounds is True
+        # this is because if volume filtered, they wont be in the array
+        valid_indices = np.nonzero(in_bounds)[0]  # positions where idx is < size
+        if valid_indices.size > 0:
+            # For those positions:
+            sub_idx = idx[valid_indices]  # guaranteed < len(old_sorted_mm)
+            sub_q = query_ids[valid_indices]
+            matches_sub = old_sorted_mm[sub_idx] == sub_q
+            matches[valid_indices] = matches_sub
+
+        # 7) Wherever matches == True, fill out from new_sorted_mm
+        good = np.nonzero(matches)[0]
+        if good.size > 0:
+            out[good] = new_sorted_mm[idx[good]]
+
+        # 8) Return a dict mapping each query_id → (new label or 0)
+        return dict(zip(query_ids, out))
 
     def get_final_connected_components(self):
         with io_util.Timing_Messager("Finding connected components", logger):
@@ -483,43 +418,60 @@ class ConnectedComponents(ComputeConfigMixin):
 
         if len(new_ids) == 0:
             self.new_dtype = np.uint8
+            relabeling_dict = {}
         else:
             self.new_dtype = np.min_scalar_type(max(new_ids))
             relabeling_dict = dict(zip(old_ids, new_ids))
-            # update blockwise relabeing dicts
-            for block in self.blocks:
-                block.relabeling_dict = {
-                    id: relabeling_dict.get(id, 0)
-                    for id in block.relabeling_dict.keys()
-                }
-            del relabeling_dict
+
+        ConnectedComponents.write_memmap_relabeling_dicts(
+            relabeling_dict, self.relabeling_dict_path
+        )
 
     @staticmethod
     def relabel_block_from_path(
-        block_coords,
+        block_index,
         input_idi: ImageDataInterface,
         output_idi: ImageDataInterface,
-        block_info_basepath=None,
+        relabeling_dict_path: str,
         mask: MasksFromConfig = None,
     ):
-        if block_info_basepath is None:
-            block_info_basepath = input_idi.path
-        # read block from pickle file
-        block_coords_string = "/".join([str(c) for c in block_coords])
-        with open(f"{block_info_basepath}/{block_coords_string}.pkl", "rb") as handle:
-            block = pickle.load(handle)
-        relabel_block(block, input_idi, output_idi, mask)
+        # create block from index
+        block = create_block_from_index(input_idi, block_index)
+
+        # All ids must be accounted for in the relabeling dict
+        data = input_idi.to_ndarray_ts(
+            block.write_roi,
+        )
+        ids = fastremap.unique(data[data > 0])
+        relabeling_dict = ConnectedComponents.get_updated_relabeling_dict(
+            ids, relabeling_dict_path
+        )
+
+        if mask:
+            mask_block = mask.process_block(roi=block.write_roi)
+            data *= mask_block
+
+        if len(relabeling_dict) > 0:
+            try:
+                fastremap.remap(
+                    data, relabeling_dict, preserve_missing_labels=True, in_place=True
+                )
+            except:
+                raise Exception(
+                    f"Error in relabel_block {block.write_roi}, {list(relabeling_dict.keys())}, {list(relabeling_dict.values())}"
+                )
+
+        output_idi.ds[block.write_roi] = data
 
     @staticmethod
     def relabel_dataset(
         original_idi,
         output_path,
-        blocks,
         roi,
         dtype,
+        relabeling_dict_path,
         num_workers,
         compute_args,
-        block_info_basepath=None,
         mask=None,
     ):
         output_idi = create_multiscale_dataset_idi(
@@ -530,21 +482,19 @@ class ConnectedComponents(ComputeConfigMixin):
             write_size=original_idi.chunk_shape * original_idi.voxel_size,
         )
 
-        block_coords = [block.coords for block in blocks]
-        b = db.from_sequence(
-            block_coords,
-            npartitions=guesstimate_npartitions(blocks, num_workers),
-        ).map(
+        num_blocks = dask_util.get_num_blocks(original_idi, roi=roi)
+        dask_util.compute_blockwise_partitions(
+            num_blocks,
+            num_workers,
+            compute_args,
+            logger,
+            "relabeling dataset",
             ConnectedComponents.relabel_block_from_path,
             original_idi,
             output_idi,
-            block_info_basepath,
+            relabeling_dict_path,
             mask=mask,
         )
-
-        with dask_util.start_dask(num_workers, "relabel dataset", logger):
-            with io_util.Timing_Messager("Relabeling dataset", logger):
-                dask_computer(b, num_workers, **compute_args)
 
     def get_connected_components(self):
         self.calculate_connected_components_blockwise()
@@ -555,28 +505,20 @@ class ConnectedComponents(ComputeConfigMixin):
         self.get_connected_component_information()
         # get final connected components necessary for relabeling, including volume filtering
         self.get_final_connected_components()
-        # write out block information
-        ConnectedComponents.write_out_block_objects(
-            self.connected_components_blockwise_idi.path,
-            self.blocks,
-            self.num_local_threads_available,
-            self.local_config,
-            self.num_workers,
-            self.compute_args,
-        )
+
         self.relabel_dataset(
             self.connected_components_blockwise_idi,
             self.output_path,
-            self.blocks,
             self.roi,
             self.new_dtype,
+            self.relabeling_dict_path,
             self.num_workers,
             self.compute_args,
         )
+
         if self.delete_tmp:
-            dask_util.delete_tmp_dataset(
-                self.connected_components_blockwise_idi.path,
-                self.blocks,
+            dask_util.delete_tmp_zarr(
+                self.connected_components_blockwise_idi,
                 self.num_workers,
                 self.compute_args,
             )
@@ -590,6 +532,7 @@ class ConnectedComponents(ComputeConfigMixin):
                 num_workers=self.num_workers,
                 roi=self.roi,
                 connectivity=self.connectivity,
-                delete_tmp=self.delete_tmp,
             )
             fh.fill_holes()
+
+        shutil.rmtree(self.relabeling_dict_path)
