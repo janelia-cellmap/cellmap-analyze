@@ -54,7 +54,7 @@ class CleanConnectedComponents(ComputeConfigMixin):
 
         self.voxel_size = self.input_idi.voxel_size
 
-        self.output_path = output_path
+        self.output_path = output_path.rstrip("/")
         if self.output_path is None:
             output_path = self.input_path
             output_ds_name = get_name_from_path(output_path)
@@ -134,11 +134,14 @@ class CleanConnectedComponents(ComputeConfigMixin):
             self.num_workers,
             self.compute_args,
             logger,
-            "getting connected component information",
+            f"getting blockwise connected component information during cleaning for {self.input_idi.path}",
             CleanConnectedComponents.get_connected_component_information_blockwise,
             self.input_idi,
             self.mask,
-            merge_fn=ConnectedComponents._merge_tuples,
+            merge_info=(
+                ConnectedComponents._merge_tuples,
+                self.output_path + "_tmp_cleaned_connected_component_info_to_merge",
+            ),
         )
 
     def get_final_connected_components(self):

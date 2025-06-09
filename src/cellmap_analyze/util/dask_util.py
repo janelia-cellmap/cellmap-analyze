@@ -2,11 +2,11 @@ from contextlib import contextmanager
 import os
 import random
 import dask
-from dask.distributed import Client
+from dask.distributed import Client, wait
 import getpass
 import tempfile
 import shutil
-
+import pickle
 
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from .io_util import (
@@ -31,7 +31,9 @@ import random
 import dask.bag as db
 
 from functools import wraps
-from tqdm import tqdm
+import os
+import pickle
+from multiprocessing.dummy import Pool  # thread-based Pool
 
 
 def with_tqdm(fn):
@@ -394,6 +396,78 @@ def delete_tmp_zarr(
     shutil.rmtree(f"{basepath}/{get_name_from_path(idi.path)}")
 
 
+def get_output_file_from_block_index(output_dir, block_index):
+    block_string = "/".join([str(block_index // 100**i) for i in range(2, -1, -1)])
+    output_path = f"{output_dir}/{block_string}.pkl"
+    return output_path
+
+
+def write_dask_result_to_pkl(block_index, output_dir, fn, *fn_args, **fn_kwargs):
+    """Write a dask block result to a pkl file in the output directory."""
+    result = fn(block_index, *fn_args, **fn_kwargs)
+    output_path = get_output_file_from_block_index(output_dir, block_index)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "wb") as f:
+        pickle.dump(result, f)
+
+
+def is_empty_dir(path: str) -> bool:
+    """
+    Return True if `path` is an empty directory, False otherwise.
+    """
+    # os.scandir() is a generator over DirEntry objects;
+    # next(..., None) returns the first entry or None if empty.
+    if not os.path.exists(path):
+        return False
+
+    with os.scandir(path) as it:
+        return next(it, None) is None
+
+
+def clean_up_dirs(path: str):
+    os.remove(path)
+    parent_path = os.path.dirname(path)
+    grandparent_path = os.path.dirname(parent_path)
+    if is_empty_dir(parent_path):
+        os.rmdir(parent_path)
+        if is_empty_dir(grandparent_path):
+            os.rmdir(grandparent_path)
+
+
+def read_results_to_merge(output_dir, num_blocks, threads=None):
+    """
+    Read 0.pkl…(num_blocks-1).pkl in parallel using a thread pool,
+    displaying progress with tqdm.
+
+    Args:
+        output_dir: str path where your pickles live
+        num_blocks: total number of blocks
+        threads:    how many threads to spin up (None = default)
+
+    Returns:
+        List of unpickled results in order [0,1,…,num_blocks-1].
+    """
+
+    def _load(i):
+        path = get_output_file_from_block_index(output_dir, i)
+        with open(path, "rb") as f:
+            res = pickle.load(f)
+
+        # clean_up_dirs(path)
+
+        return res
+
+    with Pool(threads) as pool:
+        # use imap so we can feed it into tqdm
+        return list(
+            tqdm(
+                pool.imap(_load, range(num_blocks)),
+                total=num_blocks,
+                desc="Loading blocks",
+            )
+        )
+
+
 def compute_blockwise_partitions(
     num_blocks: int,
     num_workers: int,
@@ -403,7 +477,7 @@ def compute_blockwise_partitions(
     fn,
     *fn_args,
     randomize: bool = False,
-    merge_fn=None,
+    merge_info=None,
     **fn_kwargs,
 ):
     """
@@ -411,12 +485,6 @@ def compute_blockwise_partitions(
     collect all raw partitions onto the driver, shut the cluster down,
     then merge locally with a tqdm progress bar.
     """
-
-    def _partitioner(idxs, *args, **kwargs):
-        out = []
-        for i in idxs:
-            out.append(fn(i, *args, **kwargs))
-        return out
 
     # STEP 1) Build & (optionally) shuffle the bag
     npart = guesstimate_npartitions(num_blocks, num_workers)
@@ -429,18 +497,35 @@ def compute_blockwise_partitions(
         )
 
     # STEP 2) Map your work fn over each partition
-    bag = bag.map_partitions(_partitioner, *fn_args, **fn_kwargs)
+    if merge_info is None:
+        bag = bag.map(fn, *fn_args, **fn_kwargs)
+    else:
+        merge_fn, output_directory = merge_info
+        os.makedirs(output_directory, exist_ok=True)
+        bag = bag.map(
+            write_dask_result_to_pkl, output_directory, fn, *fn_args, **fn_kwargs
+        )
 
-    # STEP 3) Spin up Dask, collect ALL partitions to driver
-    with start_dask(num_workers, msg, logger) as client:
+    # STEP 3) Spin up Dask, run
+    with start_dask(num_workers, msg, logger):
         with Timing_Messager(msg.capitalize(), logger):
-            flat = bag.compute(**compute_args)
+            if num_workers == 1:
+                # Then we dont need fancy stuff
+                bag.compute(**compute_args)
+            else:
+                futures = bag.persist(**compute_args)
+                wait(futures)
 
-    # STEP 4) If no merge_fn: flatten and return raw_parts
-    if merge_fn is None:
-        return flat
+            if merge_info is None:
+                return
 
-    # STEP 5) If merge_fn: merge the results with a tqdm progress bar
-    with Timing_Messager(f"Merging {len(flat)} results", logger):
-        result = with_tqdm(merge_fn)(flat)
-    return result
+    with Timing_Messager(f"Reading results for {msg}", logger):
+        list_of_results = read_results_to_merge(
+            output_directory, num_blocks, threads=len(os.sched_getaffinity(0))
+        )
+        # os.rmdir(output_directory)
+
+    with Timing_Messager(f"Merging results for {msg}", logger):
+        merged_results = with_tqdm(merge_fn)(list_of_results)
+
+    return merged_results

@@ -184,7 +184,7 @@ class ContactSites(ComputeConfigMixin):
             self.num_workers,
             self.compute_args,
             logger,
-            "calculating contact sites",
+            f"calculating blockwise contact sites between {self.organelle_1_idi.path} and {self.organelle_2_idi.path}",
             ContactSites.calculate_block_contact_sites,
             self.organelle_1_idi,
             self.organelle_2_idi,

@@ -76,9 +76,10 @@ class FilterIDs(ComputeConfigMixin):
             self.roi = roi
         self.voxel_size = self.input_idi.voxel_size
 
-        self.output_path = output_path
-        if self.output_path is None:
+        if output_path is None:
             self.output_path = self.input_path
+
+        self.output_path = self.output_path.rstrip("/")
 
         self.relabeling_dict_path = self.output_path + "_relabeling_dict"
         output_ds_name = get_name_from_path(self.output_path)

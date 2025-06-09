@@ -17,7 +17,6 @@ from cellmap_analyze.util.measure_util import get_object_information
 import os
 
 from cellmap_analyze.util.mixins import ComputeConfigMixin
-import time
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -76,7 +75,7 @@ class Measure(ComputeConfigMixin):
             )
 
             self.contact_sites = True
-
+        self.output_directory = str(self.output_path) + "/measurements_to_merge/"
         self.global_offset = np.zeros((3,))
         self.num_workers = num_workers
         if roi is None:
@@ -148,14 +147,14 @@ class Measure(ComputeConfigMixin):
             self.num_workers,
             self.compute_args,
             logger,
-            "measuring object information",
+            f"measuring blockwise object information for {self.input_idi.path}",
             Measure.get_measurements_blockwise,
             self.input_idi,
             self.roi,
             self.global_offset,
             self.contact_sites,
             **self.get_measurements_blockwise_extra_kwargs,
-            merge_fn=Measure._merge_dicts,
+            merge_info=(Measure._merge_dicts, self.output_directory),
         )
 
     def write_measurements(self):
@@ -217,6 +216,5 @@ class Measure(ComputeConfigMixin):
 
     def get_measurements(self):
         self.measure()
-        if self.output_path:
-            with io_util.Timing_Messager("Writing object information", logger):
-                self.write_measurements()
+        with io_util.Timing_Messager("Writing object information", logger):
+            self.write_measurements()

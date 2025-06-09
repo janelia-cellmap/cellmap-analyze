@@ -42,7 +42,7 @@ class FillHoles(ComputeConfigMixin):
         self.voxel_size = self.input_idi.voxel_size
         self.connectivity = connectivity
 
-        self.output_path = output_path
+        self.output_path = output_path.rstrip("/")
         if self.output_path is None:
             self.output_path = input_path + "_filled"
         self.relabeling_dict_path = self.output_path + "_relabeling_dict/"
@@ -115,12 +115,15 @@ class FillHoles(ComputeConfigMixin):
             self.num_workers,
             self.compute_args,
             logger,
-            "calculating hole information",
+            f"calculating blockwise hole information for {self.input_idi.path}",
             FillHoles.get_hole_information_blockwise,
             input_idi=self.input_idi,
             holes_idi=self.holes_idi,
             connectivity=self.connectivity,
-            merge_fn=FillHoles._merge_hole_to_object_dicts,
+            merge_info=(
+                FillHoles._merge_hole_to_object_dicts,
+                self.output_path + "_tmp_hole_objects_to_dict_to_merge",
+            ),
         )
 
         hole_to_object_dict = FillHoles.__postprocess_hole_dict(hole_to_object_dict)
@@ -170,7 +173,7 @@ class FillHoles(ComputeConfigMixin):
             self.num_workers,
             self.compute_args,
             logger,
-            "relabeling dataset",
+            f"relabeling dataset with holes filled to {self.output_idi.path}",
             FillHoles.relabel_block,
             self.input_idi,
             self.holes_idi,
