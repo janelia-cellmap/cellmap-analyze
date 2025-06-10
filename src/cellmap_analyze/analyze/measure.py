@@ -150,7 +150,7 @@ class Measure(ComputeConfigMixin):
             self.num_workers,
             self.compute_args,
             logger,
-            f"measuring blockwise object information for {self.input_idi.path}",
+            f"measuring blockwise object information for {self.input_idi.path} and putting it here: {self.output_directory}",
             Measure.get_measurements_blockwise,
             self.input_idi,
             self.roi,

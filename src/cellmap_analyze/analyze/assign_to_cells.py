@@ -10,7 +10,6 @@ import numpy as np
 import os
 from scipy import spatial
 from tqdm import tqdm
-from tqdm.contrib.logging import logging_redirect_tqdm
 import fastremap
 import fastmorph
 
@@ -100,66 +99,65 @@ class AssignToCells:
                 break
 
             # Loop over each unique boundary id.
-            with logging_redirect_tqdm():
-                for unique_id in tqdm(unique_ids):
-                    # Create an update mask for query points that need updates and do not already have this unique_id.
-                    # We check along the row: if the current candidate list already contains this unique_id, skip updating it.
-                    already_has_id = np.any(closest_ids == unique_id, axis=1)
-                    update_mask = global_update_mask & ~already_has_id
-                    if not np.any(update_mask):
-                        continue
+            for unique_id in tqdm(unique_ids):
+                # Create an update mask for query points that need updates and do not already have this unique_id.
+                # We check along the row: if the current candidate list already contains this unique_id, skip updating it.
+                already_has_id = np.any(closest_ids == unique_id, axis=1)
+                update_mask = global_update_mask & ~already_has_id
+                if not np.any(update_mask):
+                    continue
 
-                    # For the current unique object, get its boundary voxel coordinates, adjust by 0.5 for centering and scale.
-                    coords = (
-                        boundary_coords[boundary_ids == unique_id] + 0.5
-                    ) * cell_idi.voxel_size
-                    tree = spatial.KDTree(coords)
+                # For the current unique object, get its boundary voxel coordinates, adjust by 0.5 for centering and scale.
+                coords = (
+                    boundary_coords[boundary_ids == unique_id] + 0.5
+                ) * cell_idi.voxel_size
+                tree = spatial.KDTree(coords)
 
-                    # Query only for the points (coms) that need updating.
-                    current_distances, _ = tree.query(
-                        coms[update_mask],
-                        distance_upper_bound=maximum_distance * iteration,
-                    )
-                    # Check if coms are within a cell
-                    updated_inds = inds[update_mask]
-                    in_bounds = np.all(
-                        (updated_inds >= cell_idi.domain.inclusive_min), axis=1
-                    ) & np.all((updated_inds < cell_idi.domain.exclusive_max), axis=1)
-                    valid_inds = updated_inds[in_bounds]
+                # Query only for the points (coms) that need updating.
+                current_distances, _ = tree.query(
+                    coms[update_mask],
+                    distance_upper_bound=maximum_distance * iteration,
+                )
+                # Check if coms are within a cell
+                updated_inds = inds[update_mask]
+                in_bounds = np.all(
+                    (updated_inds >= cell_idi.domain.inclusive_min), axis=1
+                ) & np.all((updated_inds < cell_idi.domain.exclusive_max), axis=1)
+                valid_inds = updated_inds[in_bounds]
 
-                    # Initialize an array of False of the same length as updated_inds.
-                    within_cell = np.full(updated_inds.shape[0], False, dtype=bool)
+                # Initialize an array of False of the same length as updated_inds.
+                within_cell = np.full(updated_inds.shape[0], False, dtype=bool)
 
-                    # For the indices that are in bounds, assign the comparison result.
-                    within_cell[in_bounds] = (
-                        cell_data[valid_inds[:, 0], valid_inds[:, 1], valid_inds[:, 2]]
-                        == unique_id
-                    )
+                # For the indices that are in bounds, assign the comparison result.
+                within_cell[in_bounds] = (
+                    cell_data[valid_inds[:, 0], valid_inds[:, 1], valid_inds[:, 2]]
+                    == unique_id
+                )
 
-                    # If the com is within a cell, set the distance to 0
-                    current_distances[within_cell] = 0
+                # If the com is within a cell, set the distance to 0
+                current_distances[within_cell] = 0
 
-                    # Combine the current n best distances with the new candidate (this gives n+1 candidates per query point).
-                    combined_distances = np.column_stack(
-                        [closest_distances[update_mask], current_distances]
-                    )
-                    combined_ids = np.column_stack(
-                        [
-                            closest_ids[update_mask],
-                            np.full(np.sum(update_mask), unique_id, dtype=int),
-                        ]
-                    )
+                # Combine the current n best distances with the new candidate (this gives n+1 candidates per query point).
+                combined_distances = np.column_stack(
+                    [closest_distances[update_mask], current_distances]
+                )
+                combined_ids = np.column_stack(
+                    [
+                        closest_ids[update_mask],
+                        np.full(np.sum(update_mask), unique_id, dtype=int),
+                    ]
+                )
 
-                    # For each query point, sort candidates so that the smallest distances come first.
-                    sort_order = np.argsort(combined_distances, axis=1)
-                    sorted_distances = np.take_along_axis(
-                        combined_distances, sort_order, axis=1
-                    )
-                    sorted_ids = np.take_along_axis(combined_ids, sort_order, axis=1)
+                # For each query point, sort candidates so that the smallest distances come first.
+                sort_order = np.argsort(combined_distances, axis=1)
+                sorted_distances = np.take_along_axis(
+                    combined_distances, sort_order, axis=1
+                )
+                sorted_ids = np.take_along_axis(combined_ids, sort_order, axis=1)
 
-                    # Update the candidate arrays for only the query points that needed an update.
-                    closest_distances[update_mask] = sorted_distances[:, :n]
-                    closest_ids[update_mask] = sorted_ids[:, :n]
+                # Update the candidate arrays for only the query points that needed an update.
+                closest_distances[update_mask] = sorted_distances[:, :n]
+                closest_ids[update_mask] = sorted_ids[:, :n]
 
         # Update the DataFrame columns.
         if n > 1:

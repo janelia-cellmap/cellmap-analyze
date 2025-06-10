@@ -26,7 +26,6 @@ from contextlib import contextmanager, nullcontext
 import dask.bag as db
 from cellmap_analyze.util.io_util import Timing_Messager
 from tqdm import tqdm
-from tqdm.contrib.logging import logging_redirect_tqdm
 
 import random
 import dask.bag as db
@@ -41,8 +40,7 @@ def with_tqdm(fn):
     @wraps(fn)
     def wrapper(lst, *args, **kwargs):
         # wrap the list in tqdm, but still pass it to fn
-        with logging_redirect_tqdm():
-            return fn(tqdm(lst, desc=fn.__name__), *args, **kwargs)
+        return fn(tqdm(lst, desc=fn.__name__), *args, **kwargs)
 
     return wrapper
 
@@ -292,13 +290,6 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
     dask.config.update(dask.config.config, config)
     set_local_directory(cluster_type)
 
-    service_kwargs = (
-        {
-            "dashboard": {
-                "session_token_expiration": 60 * 60 * 24,  # 24 hours timeout
-            }
-        },
-    )
     if cluster_type == "local":
         from dask.distributed import LocalCluster
         import socket
@@ -307,7 +298,6 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
         cluster = LocalCluster(
             n_workers=num_workers,
             threads_per_worker=1,
-            service_kwargs=service_kwargs,
         )
     else:
         if cluster_type == "lsf":
@@ -315,7 +305,15 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
 
             cluster = LSFCluster(
                 job_script_prologue=job_script_prologue,
-                service_kwargs=service_kwargs,
+                scheduler_options={
+                    "service_kwargs": {
+                        "dashboard": {
+                            "session_token_expiration": 60
+                            * 60
+                            * 24,  # 24 hours timeout
+                        }
+                    },
+                },
             )
         elif cluster_type == "slurm":
             from dask_jobqueue import SLURMCluster
@@ -440,23 +438,34 @@ def read_results_to_merge(output_dir, num_blocks, threads=None):
 
     def _load(i):
         path = get_output_file_from_block_index(output_dir, i)
-        with open(path, "rb") as f:
-            res = pickle.load(f)
+        # 1) Check existence
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Missing result file: {path}")
 
-        # clean_up_dirs(path)
+        # 2) Check for non-zero size
+        size = os.path.getsize(path)
+        if size == 0:
+            raise RuntimeError(f"Empty/corrupted pickle file (0 bytes): {path}")
 
-        return res
+        # 3) Try loading
+        try:
+            with open(path, "rb") as f:
+                return pickle.load(f)
+        except EOFError as e:
+            # this is the signature of a truncated/invalid pickle
+            raise RuntimeError(
+                f"EOFError reading {path}: file appears truncated"
+            ) from e
 
     with Pool(threads) as pool:
         # use imap so we can feed it into tqdm
-        with logging_redirect_tqdm():
-            return list(
-                tqdm(
-                    pool.imap(_load, range(num_blocks)),
-                    total=num_blocks,
-                    desc="Loading blocks",
-                )
+        return list(
+            tqdm(
+                pool.imap(_load, range(num_blocks)),
+                total=num_blocks,
+                desc="Loading blocks",
             )
+        )
 
 
 def delete_dask_results_in_parallel(output_dir, num_blocks, threads=None):
@@ -490,14 +499,13 @@ def delete_dask_results_in_parallel(output_dir, num_blocks, threads=None):
 
         # 1) delete all the files in parallel
         with Pool(threads) as pool:
-            with logging_redirect_tqdm():
-                list(
-                    tqdm(
-                        pool.imap(_delete, range(num_blocks)),
-                        total=num_blocks,
-                        desc=f"Deleting blocks at depth {depth}",
-                    )
+            list(
+                tqdm(
+                    pool.imap(_delete, range(num_blocks)),
+                    total=num_blocks,
+                    desc=f"Deleting blocks at depth {depth}",
                 )
+            )
 
 
 def compute_blockwise_partitions(
