@@ -365,29 +365,35 @@ def setup_execution_directory(config_path, logger):
     return execution_dir
 
 
-def delete_chunks(block_index, idi, depth=3):
-    block = create_block_from_index(idi, block_index)
-    block_coords = block.coords[
-        :depth
-    ]  # can have duplicates eg 0/0/0 and 0/0/1 go produce the same coords[:2]
-    block_coords_string = "/".join([str(c) for c in block_coords])
-    delete_name = f"{idi.path}/{block_coords_string}"
-    if os.path.exists(delete_name):
-        if os.path.isfile(delete_name):
-            os.remove(delete_name)
-        elif os.listdir(delete_name) == []:
-            shutil.rmtree(delete_name, ignore_errors=True)
+def delete_chunks(block_index, get_delete_path_fn, idi_or_location, depth):
+    delete_path = get_delete_path_fn(block_index, idi_or_location, depth)
+    if os.path.exists(delete_path):
+        if os.path.isfile(delete_path):
+            os.remove(delete_path)
+        elif os.listdir(delete_path) == []:
+            shutil.rmtree(delete_path, ignore_errors=True)
 
 
-def delete_tmp_zarr(
-    idi_or_location: ImageDataInterface | str, num_workers, compute_args
+def delete_tmp_dir_blockwise(
+    idi_or_location: ImageDataInterface | str,
+    num_workers,
+    compute_args,
+    is_zarr=True,
+    num_blocks=None,
 ):
-    if type(idi_or_location) is str:
-        idi = ImageDataInterface(idi_or_location)
+    if is_zarr:
+        if type(idi_or_location) is str:
+            idi = ImageDataInterface(idi_or_location)
+        else:
+            idi = idi_or_location
+        get_delete_path_fn = get_zarr_chunk_path_from_block_index
+        num_blocks = get_num_blocks(idi, idi.roi)
+        idi_or_location = idi
+        basepath, _ = split_dataset_path(idi.path)
+        top_level_dir = f"{basepath}/{get_name_from_path(idi.path)}"
     else:
-        idi = idi_or_location
-
-    num_blocks = get_num_blocks(idi, idi.roi)
+        get_delete_path_fn = get_merge_file_path_from_block_index
+        top_level_dir = idi_or_location
 
     for depth in range(3, 0, -1):
         compute_blockwise_partitions(
@@ -395,17 +401,17 @@ def delete_tmp_zarr(
             num_workers,
             compute_args,
             logger,
-            f"deleting temporary zarr dataset at depth {depth}",
+            f"deleting temporary dataset at depth {depth}",
             delete_chunks,
-            idi,
+            get_delete_path_fn,
+            idi_or_location,
             depth,
         )
 
-    basepath, _ = split_dataset_path(idi.path)
-    shutil.rmtree(f"{basepath}/{get_name_from_path(idi.path)}")
+    shutil.rmtree(top_level_dir)
 
 
-def get_output_file_from_block_index(output_dir, block_index, depth=3):
+def get_merge_file_path_from_block_index(block_index, output_dir, depth=3):
     block_string = "/".join(
         [str(block_index // 100**i) for i in range(2, 2 - depth, -1)]
     )
@@ -413,10 +419,19 @@ def get_output_file_from_block_index(output_dir, block_index, depth=3):
     return output_path
 
 
+def get_zarr_chunk_path_from_block_index(block_index, idi, depth):
+    block = create_block_from_index(idi, block_index)
+    # can have duplicates eg 0/0/0 and 0/0/1 go produce the same coords[:2]
+    block_coords = block.coords[:depth]
+    block_coords_string = "/".join([str(c) for c in block_coords])
+    desired_path = f"{idi.path}/{block_coords_string}"
+    return desired_path
+
+
 def write_dask_result_to_pkl(block_index, output_dir, fn, *fn_args, **fn_kwargs):
     """Write a dask block result to a pkl file in the output directory."""
     result = fn(block_index, *fn_args, **fn_kwargs)
-    output_path = get_output_file_from_block_index(output_dir, block_index)
+    output_path = get_merge_file_path_from_block_index(block_index, output_dir)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "wb") as f:
         pickle.dump(result, f)
@@ -437,7 +452,7 @@ def read_results_to_merge(output_dir, num_blocks, threads=None):
     """
 
     def _load(i):
-        path = get_output_file_from_block_index(output_dir, i)
+        path = get_merge_file_path_from_block_index(i, output_dir)
         # 1) Check existence
         if not os.path.exists(path):
             raise FileNotFoundError(f"Missing result file: {path}")
@@ -466,46 +481,6 @@ def read_results_to_merge(output_dir, num_blocks, threads=None):
                 desc="Loading blocks",
             )
         )
-
-
-def delete_dask_results_in_parallel(output_dir, num_blocks, threads=None):
-    """
-    Delete 0.pkl…(num_blocks-1).pkl (possibly in nested subfolders) in parallel,
-    then remove any empty directories left behind.
-    """
-    for depth in range(3, 0, -1):
-
-        def _delete(i):
-            path = get_output_file_from_block_index(output_dir, i, depth=depth)
-
-            # if nothing’s there, bail out early
-            if not os.path.exists(path):
-                return
-
-            try:
-                if os.path.isfile(path):
-                    os.remove(path)
-                elif os.path.isdir(path):
-                    shutil.rmtree(path)
-                else:
-                    # unexpected file-type (socket, fifo, etc.)
-                    logger.debug(f"Skipping unknown file type: {path}")
-            except (FileNotFoundError, NotADirectoryError):
-                # either already deleted, or we thought it was a dir but it wasn’t
-                pass
-            except Exception as e:
-                # catch-all for permission errors, etc.
-                logger.warning(f"Failed to delete {path}: {e}")
-
-        # 1) delete all the files in parallel
-        with Pool(threads) as pool:
-            list(
-                tqdm(
-                    pool.imap(_delete, range(num_blocks)),
-                    total=num_blocks,
-                    desc=f"Deleting blocks at depth {depth}",
-                )
-            )
 
 
 def compute_blockwise_partitions(
@@ -567,9 +542,12 @@ def compute_blockwise_partitions(
     with TimingMessager(f"Merging results for {msg}", logger):
         merged_results = with_tqdm(merge_fn)(list_of_results)
 
-    with TimingMessager(f"Deleting results for {msg}", logger):
-        delete_dask_results_in_parallel(
-            output_directory, num_blocks, threads=len(os.sched_getaffinity(0))
-        )
+    delete_tmp_dir_blockwise(
+        output_directory,
+        num_workers,
+        compute_args,
+        is_zarr=False,
+        num_blocks=num_blocks,
+    )
 
     return merged_results

@@ -200,12 +200,12 @@ class FillHoles(ComputeConfigMixin):
         # get the assignments of holes to objects or background
         self.get_hole_assignments()
         self.relabel_dataset()
-        dask_util.delete_tmp_zarr(
+        dask_util.delete_tmp_dir_blockwise(
             self.holes_idi,
             self.num_workers,
             self.compute_args,
         )
-        dask_util.delete_tmp_zarr(
+        dask_util.delete_tmp_dir_blockwise(
             self.holes_path + "_blockwise/s0",
             self.num_workers,
             self.compute_args,

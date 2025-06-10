@@ -521,7 +521,7 @@ class ConnectedComponents(ComputeConfigMixin):
         )
 
         if self.delete_tmp:
-            dask_util.delete_tmp_zarr(
+            dask_util.delete_tmp_dir_blockwise(
                 self.connected_components_blockwise_idi,
                 self.num_workers,
                 self.compute_args,
