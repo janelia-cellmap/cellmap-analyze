@@ -10,7 +10,7 @@ import pickle
 
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from .io_util import (
-    Timing_Messager,
+    TimingMessager,
     print_with_datetime,
     split_dataset_path,
     get_name_from_path,
@@ -24,7 +24,7 @@ import numpy as np
 import logging
 from contextlib import contextmanager, nullcontext
 import dask.bag as db
-from cellmap_analyze.util.io_util import Timing_Messager
+from cellmap_analyze.util.io_util import TimingMessager
 from tqdm import tqdm
 
 import random
@@ -185,7 +185,7 @@ def create_blocks(
     # roi = roi.snap_to_grid(ds.chunk_shape * ds.voxel_size)
     num_blocks = get_num_blocks(idi)
 
-    with Timing_Messager(f"Generating {num_blocks} blocks", logger):
+    with TimingMessager(f"Generating {num_blocks} blocks", logger):
 
         # create an empty list with num_expected_blocks elements
         block_rois = [None] * num_blocks
@@ -325,7 +325,7 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
             cluster = SGECluster()
         cluster.scale(num_workers)
     try:
-        with Timing_Messager(
+        with TimingMessager(
             f"Starting {cluster_type} dask cluster for {msg} with {num_workers} workers",
             logger,
         ):
@@ -548,7 +548,7 @@ def compute_blockwise_partitions(
 
     # STEP 3) Spin up Dask, run
     with start_dask(num_workers, msg, logger):
-        with Timing_Messager(msg.capitalize(), logger):
+        with TimingMessager(msg.capitalize(), logger):
             if num_workers == 1:
                 # Then we dont need fancy stuff
                 bag.compute(**compute_args)
@@ -559,15 +559,15 @@ def compute_blockwise_partitions(
             if merge_info is None:
                 return
 
-    with Timing_Messager(f"Reading results for {msg}", logger):
+    with TimingMessager(f"Reading results for {msg}", logger):
         list_of_results = read_results_to_merge(
             output_directory, num_blocks, threads=len(os.sched_getaffinity(0))
         )
 
-    with Timing_Messager(f"Merging results for {msg}", logger):
+    with TimingMessager(f"Merging results for {msg}", logger):
         merged_results = with_tqdm(merge_fn)(list_of_results)
 
-    with Timing_Messager(f"Deleting results for {msg}", logger):
+    with TimingMessager(f"Deleting results for {msg}", logger):
         delete_dask_results_in_parallel(
             output_directory, num_blocks, threads=len(os.sched_getaffinity(0))
         )

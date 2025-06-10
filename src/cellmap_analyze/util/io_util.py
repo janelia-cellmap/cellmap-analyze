@@ -70,34 +70,41 @@ def split_dataset_path(dataset_path, scale=None) -> tuple[str, str]:
     return filename + splitter, dataset
 
 
-class Timing_Messager(ContextDecorator):
-    """Context manager class to time operations"""
+class TimingMessager(ContextDecorator):
+    """Context manager to time operations with aligned messages"""
 
-    def __init__(self, base_message, logger):
-        """Initialize instance with a message and logger
+    # width for aligning 'Started X' and 'Completed X'
+    PREFIX_WIDTH = 25
 
-        Args:
-            base_message ('str'): Message for logger
-            logger: logger to be used
+    def __init__(self, base_message: str, logger):
         """
-
+        Args:
+            base_message: the descriptive part of your log
+            logger: the Python logger to call
+        """
         self._base_message = base_message
         self._logger = logger
 
     def __enter__(self):
-        """Set the start time and print the status message"""
-
-        print_with_datetime(f"Starting: {self._base_message}...", self._logger)
+        first_word = self._base_message.split()[0].lower()
+        # prefix without timing
+        prefix = f"Started {first_word}"
+        # align prefix, then show base_message
+        msg = f"{prefix:<{self.PREFIX_WIDTH}}: {self._base_message}..."
+        print_with_datetime(msg, self._logger)
         self._start_time = time.time()
         return self
 
     def __exit__(self, *exc):
-        """Print the exit message and elapsed time"""
+        first_word = self._base_message.split()[0].lower()
+        elapsed = time.time() - self._start_time
+        # prefix without timing
+        prefix = f"Completed {first_word}"
+        # align prefix, then show base_message and timing after colon
+        msg = f"{prefix:<{self.PREFIX_WIDTH}}: {elapsed}s, {self._base_message}! "
 
-        print_with_datetime(
-            f"Completed in {time.time()-self._start_time}: {self._base_message}!",
-            self._logger,
-        )
+        print_with_datetime(msg, self._logger)
+        # propagate exceptions if any
         return False
 
 

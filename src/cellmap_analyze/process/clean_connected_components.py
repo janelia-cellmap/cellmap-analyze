@@ -148,7 +148,7 @@ class CleanConnectedComponents(ComputeConfigMixin):
         # make it a list of list to be consistence with connectedcomponents volume filter
         old_ids = [[id] for id in self.id_to_volume_dict.keys()]
         if self.minimum_volume_voxels > 0 or self.maximum_volume_voxels < np.inf:
-            with io_util.Timing_Messager("Volume filter connected", logger):
+            with io_util.TimingMessager("Volume filter connected", logger):
                 old_ids, _ = ConnectedComponents.volume_filter_connected_ids(
                     old_ids,
                     self.id_to_volume_dict,

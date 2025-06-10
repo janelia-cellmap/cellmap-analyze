@@ -391,13 +391,13 @@ class ConnectedComponents(ComputeConfigMixin):
         return dict(zip(query_ids, out))
 
     def get_final_connected_components(self):
-        with io_util.Timing_Messager("Finding connected components", logger):
+        with io_util.TimingMessager("Finding connected components", logger):
             connected_ids = self.get_connected_ids(
                 self.id_to_volume_dict.keys(), self.touching_ids
             )
 
         if self.minimum_volume_voxels > 0 or self.maximum_volume_voxels < np.inf:
-            with io_util.Timing_Messager("Volume filter connected", logger):
+            with io_util.TimingMessager("Volume filter connected", logger):
                 connected_ids, _ = ConnectedComponents.volume_filter_connected_ids(
                     connected_ids,
                     self.id_to_volume_dict,

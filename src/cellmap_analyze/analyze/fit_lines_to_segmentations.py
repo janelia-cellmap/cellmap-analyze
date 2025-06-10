@@ -137,14 +137,14 @@ class FitLinesToSegmentations(ComputeConfigMixin):
         meta = pd.DataFrame(columns=self.df.columns)
         ddf_out = ddf.map_partitions(self.fit_lines_to_objects, meta=meta)
         with start_dask(self.num_workers, "line fits", logger):
-            with io_util.Timing_Messager("Fitting lines", logger):
+            with io_util.TimingMessager("Fitting lines", logger):
                 # results = ddf_out.compute()
                 df = ddf_out.compute(**self.compute_args)
         df["Object ID"] = df["Object ID"].astype(int)
         df.to_csv(self.output_csv, index=False)
 
         if self.output_annotations_dir is not None:
-            with io_util.Timing_Messager("Writing annotations", logger):
+            with io_util.TimingMessager("Writing annotations", logger):
                 cols = [f"Line Start {d} (nm)" for d in ["Z", "Y", "X"]] + [
                     f"Line End {d} (nm)" for d in ["Z", "Y", "X"]
                 ]

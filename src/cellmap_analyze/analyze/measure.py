@@ -219,5 +219,5 @@ class Measure(ComputeConfigMixin):
 
     def get_measurements(self):
         self.measure()
-        with io_util.Timing_Messager("Writing object information", logger):
+        with io_util.TimingMessager("Writing object information", logger):
             self.write_measurements()

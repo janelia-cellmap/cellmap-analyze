@@ -279,7 +279,7 @@ class WatershedSegmentation(ComputeConfigMixin):
         with dask_util.start_dask(
             self.num_workers, "calculate distance transform blockwise", logger
         ):
-            with io_util.Timing_Messager("Calculating distance transform", logger):
+            with io_util.TimingMessager("Calculating distance transform", logger):
                 # b now contains one float per partition: the local max for that partition
                 global_dt_max = np.ceil(b.max().compute(**self.compute_args))
 
@@ -387,7 +387,7 @@ class WatershedSegmentation(ComputeConfigMixin):
     def do_global_watershed(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
         block_indexes = list(range(num_blocks))
-        with io_util.Timing_Messager("Calculating watershed", logger):
+        with io_util.TimingMessager("Calculating watershed", logger):
             WatershedSegmentation.global_watershed(
                 block_indexes,
                 self.input_idi,
