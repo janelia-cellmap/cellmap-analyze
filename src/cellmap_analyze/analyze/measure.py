@@ -75,7 +75,10 @@ class Measure(ComputeConfigMixin):
             )
 
             self.contact_sites = True
-        self.output_directory = str(self.output_path) + "/measurements_to_merge/"
+        self.output_directory = (
+            str(self.output_path)
+            + f"/measurements_to_merge_{get_name_from_path(self.input_path)}/"
+        )
         self.global_offset = np.zeros((3,))
         self.num_workers = num_workers
         if roi is None:
