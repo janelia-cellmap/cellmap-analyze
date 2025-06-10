@@ -292,6 +292,13 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
     dask.config.update(dask.config.config, config)
     set_local_directory(cluster_type)
 
+    service_kwargs = (
+        {
+            "dashboard": {
+                "session_token_expiration": 60 * 60 * 24,  # 24 hours timeout
+            }
+        },
+    )
     if cluster_type == "local":
         from dask.distributed import LocalCluster
         import socket
@@ -300,13 +307,16 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
         cluster = LocalCluster(
             n_workers=num_workers,
             threads_per_worker=1,
-            # job_script_prologue=job_script_prologue,
+            service_kwargs=service_kwargs,
         )
     else:
         if cluster_type == "lsf":
             from dask_jobqueue import LSFCluster
 
-            cluster = LSFCluster(job_script_prologue=job_script_prologue)
+            cluster = LSFCluster(
+                job_script_prologue=job_script_prologue,
+                service_kwargs=service_kwargs,
+            )
         elif cluster_type == "slurm":
             from dask_jobqueue import SLURMCluster
 
@@ -316,7 +326,6 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
 
             cluster = SGECluster()
         cluster.scale(num_workers)
-        # cluster.adapt(minimum=0, maximum=num_workers)
     try:
         with Timing_Messager(
             f"Starting {cluster_type} dask cluster for {msg} with {num_workers} workers",
@@ -398,8 +407,10 @@ def delete_tmp_zarr(
     shutil.rmtree(f"{basepath}/{get_name_from_path(idi.path)}")
 
 
-def get_output_file_from_block_index(output_dir, block_index):
-    block_string = "/".join([str(block_index // 100**i) for i in range(2, -1, -1)])
+def get_output_file_from_block_index(output_dir, block_index, depth=3):
+    block_string = "/".join(
+        [str(block_index // 100**i) for i in range(2, 2 - depth, -1)]
+    )
     output_path = f"{output_dir}/{block_string}.pkl"
     return output_path
 
@@ -411,29 +422,6 @@ def write_dask_result_to_pkl(block_index, output_dir, fn, *fn_args, **fn_kwargs)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "wb") as f:
         pickle.dump(result, f)
-
-
-def is_empty_dir(path: str) -> bool:
-    """
-    Return True if `path` is an empty directory, False otherwise.
-    """
-    # os.scandir() is a generator over DirEntry objects;
-    # next(..., None) returns the first entry or None if empty.
-    if not os.path.exists(path):
-        return False
-
-    with os.scandir(path) as it:
-        return next(it, None) is None
-
-
-def clean_up_dirs(path: str):
-    os.remove(path)
-    parent_path = os.path.dirname(path)
-    grandparent_path = os.path.dirname(parent_path)
-    if is_empty_dir(parent_path):
-        os.rmdir(parent_path)
-        if is_empty_dir(grandparent_path):
-            os.rmdir(grandparent_path)
 
 
 def read_results_to_merge(output_dir, num_blocks, threads=None):
@@ -469,6 +457,47 @@ def read_results_to_merge(output_dir, num_blocks, threads=None):
                     desc="Loading blocks",
                 )
             )
+
+
+def delete_dask_results_in_parallel(output_dir, num_blocks, threads=None):
+    """
+    Delete 0.pkl…(num_blocks-1).pkl (possibly in nested subfolders) in parallel,
+    then remove any empty directories left behind.
+    """
+    for depth in range(3, 0, -1):
+
+        def _delete(i):
+            path = get_output_file_from_block_index(output_dir, i, depth=depth)
+
+            # if nothing’s there, bail out early
+            if not os.path.exists(path):
+                return
+
+            try:
+                if os.path.isfile(path):
+                    os.remove(path)
+                elif os.path.isdir(path):
+                    shutil.rmtree(path)
+                else:
+                    # unexpected file-type (socket, fifo, etc.)
+                    logger.debug(f"Skipping unknown file type: {path}")
+            except (FileNotFoundError, NotADirectoryError):
+                # either already deleted, or we thought it was a dir but it wasn’t
+                pass
+            except Exception as e:
+                # catch-all for permission errors, etc.
+                logger.warning(f"Failed to delete {path}: {e}")
+
+        # 1) delete all the files in parallel
+        with Pool(threads) as pool:
+            with logging_redirect_tqdm():
+                list(
+                    tqdm(
+                        pool.imap(_delete, range(num_blocks)),
+                        total=num_blocks,
+                        desc=f"Deleting blocks at depth {depth}",
+                    )
+                )
 
 
 def compute_blockwise_partitions(
@@ -526,9 +555,13 @@ def compute_blockwise_partitions(
         list_of_results = read_results_to_merge(
             output_directory, num_blocks, threads=len(os.sched_getaffinity(0))
         )
-        # os.rmdir(output_directory)
 
     with Timing_Messager(f"Merging results for {msg}", logger):
         merged_results = with_tqdm(merge_fn)(list_of_results)
+
+    with Timing_Messager(f"Deleting results for {msg}", logger):
+        delete_dask_results_in_parallel(
+            output_directory, num_blocks, threads=len(os.sched_getaffinity(0))
+        )
 
     return merged_results
