@@ -2,6 +2,7 @@
 import cc3d
 import numpy as np
 from tqdm import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
 from cellmap_analyze.process.connected_components import ConnectedComponents
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util import io_util
@@ -359,13 +360,16 @@ class WatershedSegmentation(ComputeConfigMixin):
                 connectivity=1,
             )
         watershed = watershed.astype(watershed_seeds.dtype)
-        for block_index in tqdm(block_indexes):
-            block = create_block_from_index(
-                watershed_idi,
-                block_index,
-            )
-            write_roi_voxels = block.write_roi / watershed_idi.voxel_size
-            watershed_idi.ds[block.write_roi] = watershed[write_roi_voxels.to_slices()]
+        with logging_redirect_tqdm():
+            for block_index in tqdm(block_indexes):
+                block = create_block_from_index(
+                    watershed_idi,
+                    block_index,
+                )
+                write_roi_voxels = block.write_roi / watershed_idi.voxel_size
+                watershed_idi.ds[block.write_roi] = watershed[
+                    write_roi_voxels.to_slices()
+                ]
 
     def do_deprecated_flawed_watershed(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)

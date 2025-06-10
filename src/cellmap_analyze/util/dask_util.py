@@ -26,6 +26,7 @@ from contextlib import contextmanager, nullcontext
 import dask.bag as db
 from cellmap_analyze.util.io_util import Timing_Messager
 from tqdm import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 import random
 import dask.bag as db
@@ -40,7 +41,8 @@ def with_tqdm(fn):
     @wraps(fn)
     def wrapper(lst, *args, **kwargs):
         # wrap the list in tqdm, but still pass it to fn
-        return fn(tqdm(lst, desc=fn.__name__), *args, **kwargs)
+        with logging_redirect_tqdm():
+            return fn(tqdm(lst, desc=fn.__name__), *args, **kwargs)
 
     return wrapper
 
@@ -459,13 +461,14 @@ def read_results_to_merge(output_dir, num_blocks, threads=None):
 
     with Pool(threads) as pool:
         # use imap so we can feed it into tqdm
-        return list(
-            tqdm(
-                pool.imap(_load, range(num_blocks)),
-                total=num_blocks,
-                desc="Loading blocks",
+        with logging_redirect_tqdm():
+            return list(
+                tqdm(
+                    pool.imap(_load, range(num_blocks)),
+                    total=num_blocks,
+                    desc="Loading blocks",
+                )
             )
-        )
 
 
 def compute_blockwise_partitions(

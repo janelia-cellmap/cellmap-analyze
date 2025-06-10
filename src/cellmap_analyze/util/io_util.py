@@ -110,6 +110,9 @@ def print_with_datetime(output, logger):
     """
     now = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
     logger.info(f"{now}: {output}")
+    # force every handler to flush
+    for h in logger.handlers:
+        h.flush()
 
 
 def read_run_config(config_path):
