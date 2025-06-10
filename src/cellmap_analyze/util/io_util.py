@@ -87,7 +87,7 @@ class Timing_Messager(ContextDecorator):
     def __enter__(self):
         """Set the start time and print the status message"""
 
-        print_with_datetime(f"{self._base_message}...", self._logger)
+        print_with_datetime(f"Starting: {self._base_message}...", self._logger)
         self._start_time = time.time()
         return self
 
@@ -95,7 +95,7 @@ class Timing_Messager(ContextDecorator):
         """Print the exit message and elapsed time"""
 
         print_with_datetime(
-            f"{self._base_message} completed in {time.time()-self._start_time}!",
+            f"Completed in {time.time()-self._start_time}: {self._base_message}!",
             self._logger,
         )
         return False

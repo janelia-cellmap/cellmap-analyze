@@ -333,7 +333,7 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
         dashboard_link = client.cluster.dashboard_link
         if cluster_type == "local":
             dashboard_link = dashboard_link.replace("127.0.0.1", hostname)
-        print_with_datetime(f"Check {dashboard_link} for {msg} status.", logger)
+        print_with_datetime(f"Check {dashboard_link} for: {msg} status.", logger)
         yield client
     finally:
         client.shutdown()
