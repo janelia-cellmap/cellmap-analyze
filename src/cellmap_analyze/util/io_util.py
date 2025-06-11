@@ -70,6 +70,13 @@ def split_dataset_path(dataset_path, scale=None) -> tuple[str, str]:
     return filename + splitter, dataset
 
 
+def get_output_path_from_input_path(input_path, suffix="_output"):
+    output_path = input_path
+    output_ds_name = get_name_from_path(output_path)
+    output_ds_basepath = split_dataset_path(input_path)[0]
+    return f"{output_ds_basepath}/{output_ds_name}{suffix}"
+
+
 class TimingMessager(ContextDecorator):
     """Context manager to time operations with aligned messages"""
 

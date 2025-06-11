@@ -9,6 +9,7 @@ from cellmap_analyze.util.image_data_interface import ImageDataInterface
 
 import logging
 import fastremap
+from cellmap_analyze.util.io_util import get_output_path_from_input_path
 from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.cythonizing.touching import get_touching_ids
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
@@ -42,9 +43,9 @@ class FillHoles(ComputeConfigMixin):
         self.voxel_size = self.input_idi.voxel_size
         self.connectivity = connectivity
 
+        if output_path is None:
+            output_path = get_output_path_from_input_path(input_path, "_filled")
         self.output_path = output_path.rstrip("/")
-        if self.output_path is None:
-            self.output_path = input_path + "_filled"
         self.relabeling_dict_path = self.output_path + "_relabeling_dict/"
         self.holes_path = self.output_path + "_holes"
 

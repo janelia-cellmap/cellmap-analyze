@@ -6,11 +6,7 @@ from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
-from cellmap_analyze.util.io_util import (
-    get_name_from_path,
-    split_dataset_path,
-)
-
+from cellmap_analyze.util.io_util import get_output_path_from_input_path
 import logging
 import itertools
 from cellmap_analyze.util.mask_util import MasksFromConfig
@@ -56,11 +52,10 @@ class CleanConnectedComponents(ComputeConfigMixin):
 
         self.output_path = output_path.rstrip("/")
         if self.output_path is None:
-            output_path = self.input_path
-            output_ds_name = get_name_from_path(output_path)
-            output_ds_basepath = split_dataset_path(self.input_path)[0]
-            self.output_path = f"{output_ds_basepath}/{output_ds_name}_cleaned"
-
+            self.output_path = get_output_path_from_input_path(
+                self.input_path, "_cleaned"
+            )
+        self.output_path = self.output_path.rstrip("/")
         self.relabeling_dict_path = f"{self.output_path}_relabeling_dict/"
 
         # evaluate minimum_volume_nm_3 voxels if it is a string

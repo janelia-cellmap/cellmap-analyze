@@ -10,11 +10,7 @@ from cellmap_analyze.util.dask_util import (
     guesstimate_npartitions,
 )
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
-from cellmap_analyze.util.io_util import (
-    get_name_from_path,
-    split_dataset_path,
-)
-
+from cellmap_analyze.util.io_util import get_output_path_from_input_path
 import logging
 import dask.bag as db
 import numpy as np
@@ -129,14 +125,11 @@ class WatershedSegmentation(ComputeConfigMixin):
             np.round(pseudo_neighborhood_radius_nm / self.voxel_size[0])
         )
 
-        output_path = output_path
         if output_path is None:
-            output_path = self.input_path
-            output_ds_name = get_name_from_path(output_path)
-            output_ds_basepath = split_dataset_path(self.input_path)[0]
-            output_path = f"{output_ds_basepath}/{output_ds_name}_watersheded"
-
-        self.output_path = output_path
+            output_path = get_output_path_from_input_path(
+                self.input_path, "_watersheded"
+            )
+        self.output_path = output_path.rstrip("/")
 
         self.distance_transform_idi = create_multiscale_dataset_idi(
             self.output_path + "_distance_transform",
