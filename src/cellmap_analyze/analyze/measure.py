@@ -1,3 +1,4 @@
+# %%
 import numpy as np
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util import io_util
@@ -13,7 +14,7 @@ import pandas as pd
 import logging
 
 from cellmap_analyze.util.measure_util import get_object_information
-
+from funlib.geometry import Roi
 import os
 
 from cellmap_analyze.util.mixins import ComputeConfigMixin
@@ -88,6 +89,45 @@ class Measure(ComputeConfigMixin):
         self.voxel_size = self.input_idi.voxel_size
 
     @staticmethod
+    def pad_with_face_neighbor_blocks(idi, block, voxel_size):
+        main_block = idi.to_ndarray_ts(block.read_roi)
+        data = np.zeros(np.array(main_block.shape) + 2, dtype=main_block.dtype)
+        data[1:-1, 1:-1, 1:-1] = main_block
+        roi_starts = np.array(block.read_roi.begin)
+        roi_ends = np.array(block.read_roi.end)
+        interior = [slice(1, -1)] * 3
+
+        for d in range(3):
+            roi_shape = np.array(block.read_roi.shape)
+            roi_shape[d] = voxel_size
+
+            neg_off = roi_starts.copy()
+            pos_off = roi_starts.copy()
+
+            neg_off[d] -= voxel_size
+            pos_off[d] = roi_ends[d]
+
+            negative_roi = Roi(neg_off, roi_shape)
+            positive_roi = Roi(pos_off, roi_shape)
+
+            # build slice objects dynamically
+            neg_idx = interior.copy()
+            neg_idx[d] = slice(0, 1)  # face at the “minus” side
+            data[tuple(neg_idx)] = idi.to_ndarray_ts(negative_roi)
+
+            pos_idx = interior.copy()
+            pos_idx[d] = slice(-1, None)  # face at the “plus” side
+            if positive_roi.begin[d] >= idi.roi.end[d]:
+                # need this check since positive side can extend beyond roi
+                data[tuple(pos_idx)] = (
+                    idi.custom_fill_value if idi.custom_fill_value is not None else 0
+                )
+            else:
+                data[tuple(pos_idx)] = idi.to_ndarray_ts(positive_roi)
+
+        return data
+
+    @staticmethod
     def get_measurements_blockwise(
         block_index,
         input_idi: ImageDataInterface,
@@ -100,19 +140,21 @@ class Measure(ComputeConfigMixin):
             input_idi,
             block_index,
             roi=roi,
-            padding=input_idi.voxel_size[0],
         )
-        data = input_idi.to_ndarray_ts(block.read_roi)
+        # main block
+        data = Measure.pad_with_face_neighbor_blocks(
+            input_idi, block, voxel_size=input_idi.voxel_size[0]
+        )
 
         extra_kwargs = {}
         if contact_sites:
             organelle_1_idi = kwargs.get("organelle_1_idi")
             organelle_2_idi = kwargs.get("organelle_2_idi")
-            extra_kwargs["organelle_1"] = organelle_1_idi.to_ndarray_ts(
-                block.read_roi,
+            extra_kwargs["organelle_1"] = Measure.pad_with_face_neighbor_blocks(
+                organelle_1_idi, block, voxel_size=input_idi.voxel_size[0]
             )
-            extra_kwargs["organelle_2"] = organelle_2_idi.to_ndarray_ts(
-                block.read_roi,
+            extra_kwargs["organelle_2"] = Measure.pad_with_face_neighbor_blocks(
+                organelle_2_idi, block, voxel_size=input_idi.voxel_size[0]
             )
 
         # get information only from actual block(not including padding)
