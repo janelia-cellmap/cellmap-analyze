@@ -19,26 +19,6 @@ def trim_array(array, trim=1):
     return array
 
 
-def calculate_surface_areas_voxelwise(
-    data: np.ndarray, voxel_face_area=1, do_zero_padding=True
-):
-    # mirror the edges of the array to calculate the surface areas
-    if do_zero_padding:
-        data = np.pad(data, 1)
-
-    face_counts = np.zeros_like(data, dtype=int)
-    for d in range(data.ndim):
-        for delta in [-1, 1]:
-            shifted_data = np.roll(data, delta, axis=d)
-            face_counts += np.logical_and(data > 0, shifted_data != data)
-    surface_areas = face_counts * voxel_face_area
-
-    if do_zero_padding:
-        surface_areas = trim_array(surface_areas, 1)
-
-    return surface_areas
-
-
 # chatgpt
 def calculate_surface_areas_voxelwise(
     data: np.ndarray, voxel_face_area: float = 1, do_zero_padding: bool = True
