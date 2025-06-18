@@ -2,7 +2,7 @@ from contextlib import contextmanager
 import os
 import random
 import dask
-from dask.distributed import Client, wait
+from dask.distributed import Client
 import getpass
 import tempfile
 import shutil
@@ -524,12 +524,15 @@ def compute_blockwise_partitions(
     # STEP 3) Spin up Dask, run
     with start_dask(num_workers, msg, logger):
         with TimingMessager(msg.capitalize(), logger):
-            if num_workers == 1:
-                # Then we dont need fancy stuff
+            try:
+                # This will block until everything finishes (or errors),
+                # then return the in-memory result or raise.
                 bag.compute(**compute_args)
-            else:
-                futures = bag.persist(**compute_args)
-                wait(futures)
+
+            except Exception as e:
+                # Any other Python-level exception your function raised
+                print("Compute raised an exception:", e)
+                raise
 
             if merge_info is None:
                 return
