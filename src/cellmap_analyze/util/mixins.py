@@ -6,6 +6,6 @@ class ComputeConfigMixin:
         super().__init__(*args, **kwargs)
         self.num_workers = num_workers
         if num_workers == 1:
-            self.compute_args = {"scheduler": "single-threaded"}
+            self.compute_args = {"scheduler": "single-threaded", "retries": 5}
         else:
-            self.compute_args = {}
+            self.compute_args = {"retries": 5}
