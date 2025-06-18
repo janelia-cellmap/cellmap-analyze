@@ -89,8 +89,12 @@ class Measure(ComputeConfigMixin):
         self.voxel_size = self.input_idi.voxel_size
 
     @staticmethod
-    def pad_with_face_neighbor_blocks(idi, block, voxel_size):
+    def pad_with_face_neighbor_blocks(
+        idi, block, voxel_size, return_none_if_main_block_empty=False
+    ):
         main_block = idi.to_ndarray_ts(block.read_roi)
+        if return_none_if_main_block_empty and not np.any(main_block):
+            return None
         data = np.zeros(np.array(main_block.shape) + 2, dtype=main_block.dtype)
         data[1:-1, 1:-1, 1:-1] = main_block
         roi_starts = np.array(block.read_roi.begin)
@@ -143,8 +147,13 @@ class Measure(ComputeConfigMixin):
         )
         # main block
         data = Measure.pad_with_face_neighbor_blocks(
-            input_idi, block, voxel_size=input_idi.voxel_size[0]
+            input_idi,
+            block,
+            voxel_size=input_idi.voxel_size[0],
+            return_none_if_main_block_empty=True,
         )
+        if data is None:
+            return {}
 
         extra_kwargs = {}
         if contact_sites:
