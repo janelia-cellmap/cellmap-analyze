@@ -2,7 +2,7 @@ from contextlib import contextmanager
 import os
 import random
 import dask
-from dask.distributed import Client
+from dask.distributed import Client, wait
 import getpass
 import tempfile
 import shutil
@@ -527,7 +527,22 @@ def compute_blockwise_partitions(
             try:
                 # This will block until everything finishes (or errors),
                 # then return the in-memory result or raise.
-                bag.compute(**compute_args)
+                if num_workers == 1:
+                    bag.compute(**compute_args)
+
+                else:
+                    futures = bag.persist(**compute_args)
+                    [completed, _] = wait(futures)
+                    failed = [f for f in completed if f.exception() is not None]
+
+                    # cancel so errors from shutdown don't propagate
+                    for completed_future in completed:
+                        completed_future.cancel()
+
+                    if failed:
+                        raise RuntimeError(
+                            f"Failed to compute {len(failed)} blocks: {failed}"
+                        )
 
             except Exception as e:
                 # Any other Python-level exception your function raised
