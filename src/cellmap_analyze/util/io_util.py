@@ -83,7 +83,7 @@ class TimingMessager(ContextDecorator):
     # width for aligning 'Started X' and 'Completed X'
     PREFIX_WIDTH = 25
 
-    def __init__(self, base_message: str, logger):
+    def __init__(self, base_message: str, logger, final_message: str = "Completed"):
         """
         Args:
             base_message: the descriptive part of your log
@@ -91,6 +91,7 @@ class TimingMessager(ContextDecorator):
         """
         self._base_message = base_message
         self._logger = logger
+        self._final_message = final_message
 
     def __enter__(self):
         first_word = self._base_message.split()[0].lower()
@@ -102,20 +103,27 @@ class TimingMessager(ContextDecorator):
         self._start_time = time.time()
         return self
 
-    def __exit__(self, *exc):
+    def __exit__(self, exc_type, exc_value, traceback_obj):
         first_word = self._base_message.split()[0].lower()
         elapsed = time.time() - self._start_time
-        # prefix without timing
-        prefix = f"Completed {first_word}"
-        # align prefix, then show base_message and timing after colon
-        msg = f"{prefix:<{self.PREFIX_WIDTH}}: {elapsed}s, {self._base_message}! "
+
+        if exc_type is not None:
+            # An exception was raised in the block
+            prefix = f"FAILED {first_word}"
+            msg = f"{prefix:<{self.PREFIX_WIDTH}}: {self._base_message}! after {elapsed:.2f}s because {exc_value}"
+        else:
+            # Normal completion
+            prefix = f"{self._final_message} {first_word}"
+            msg = (
+                f"{prefix:<{self.PREFIX_WIDTH}}: {elapsed:.2f}s, {self._base_message}!"
+            )
 
         print_with_datetime(msg, self._logger)
-        # propagate exceptions if any
+        # Returning False ensures any exception is propagated
         return False
 
 
-def print_with_datetime(output, logger):
+def print_with_datetime(output, logger, log_type="info"):
     """[summary]
 
     Args:
@@ -123,7 +131,12 @@ def print_with_datetime(output, logger):
         logger ([type]): [description]
     """
     now = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-    logger.info(f"{now}: {output}")
+    if log_type == "info":
+        logger.info(f"{now}: {output}")
+    elif log_type == "warning":
+        logger.warning(f"{now}: {output}")
+    elif log_type == "error":
+        logger.error(f"{now}: {output}")
     # force every handler to flush
     for h in logger.handlers:
         h.flush()
