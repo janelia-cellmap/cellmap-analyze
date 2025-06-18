@@ -6,13 +6,60 @@ import numpy as np
 from funlib.geometry import Coordinate
 from funlib.geometry import Roi
 
-from cellmap_analyze.util.io_util import split_dataset_path
+from cellmap_analyze.util.io_util import split_dataset_path, print_with_datetime
 from funlib.persistence import open_ds
 from skimage.measure import block_reduce
+import time
+import random
 
 # Much below taken from flyemflows: https://github.com/janelia-flyem/flyemflows/blob/master/flyemflows/util/util.py
 logging.basicConfig(format="%(levelname)s:%(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def read_with_retries(dataset, valid_slices, max_retries=10, timeout=5, base_delay=1):
+    """
+    Attempt to read from TensorStore up to `max_retries` times on TimeoutError.
+
+    Parameters
+    ----------
+    dataset : tensorstore.TensorStore
+        Opened TensorStore handle.
+    valid_slices : tuple of slice
+        The slices you want to read.
+    max_retries : int, optional
+        How many times to retry on TimeoutError (default: 3).
+    timeout : float, optional
+        Seconds to wait on each .result(timeout=…) call (default: 30).
+
+           Returns
+    -------
+    numpy.ndarray
+        The result of the successful read.
+
+    Raises
+    ------
+    TimeoutError
+        If all attempts time out.
+    """
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            return dataset[valid_slices].read().result(timeout=timeout * attempt)
+        except TimeoutError as e:
+            print_with_datetime(
+                f"[Attempt {attempt}/{max_retries}] "
+                f"Timeout reading {dataset} slices={valid_slices!r}: {e}",
+                logger,
+                log_type="error",
+            )
+            if attempt == max_retries:
+                # re-raise the last timeout
+                raise
+            # exponential backoff with jitter
+            delay = base_delay * (1.3 ** (attempt - 1))
+            jitter = random.uniform(0, base_delay)
+            time.sleep(delay + jitter)
 
 
 def open_ds_tensorstore(dataset_path: str, mode="r", concurrency_limit=None):
@@ -57,6 +104,8 @@ def to_ndarray_tensorstore(
     output_voxel_size=None,
     swap_axes=False,
     custom_fill_value=None,
+    max_retries=10,
+    timeout=5,
 ):
     """Read a region of a tensorstore dataset and return it as a numpy array
 
@@ -89,8 +138,8 @@ def to_ndarray_tensorstore(
         domain = domain[1:]
 
     if roi is None:
-        with ts.Transaction() as txn:
-            data = dataset.with_transaction(txn).read().result()
+        # with ts.Transaction() as txn:
+        data = dataset.read().result()
         if rescale_factor > 1:
             data = (
                 data.repeat(rescale_factor, axis=0 + channel_offset)
@@ -145,9 +194,17 @@ def to_ndarray_tensorstore(
         fill_value = 0
     if custom_fill_value:
         fill_value = custom_fill_value
-    with ts.Transaction() as txn:
-        data = dataset.with_transaction(txn)[valid_slices].read().result()
 
+    # with ts.Transaction() as txn:
+    try:
+        data = read_with_retries(dataset, valid_slices, max_retries, timeout)
+    except TimeoutError:
+        logger.error(
+            f"Timeout while reading dataset {dataset} with slices {valid_slices}"
+        )
+        raise TimeoutError(
+            f"Failed to read dataset {dataset} with slices {valid_slices} after {max_retries} retries."
+        )
     if np.any(np.array(pad_width)):
         if fill_value == "edge":
             data = np.pad(
@@ -208,6 +265,8 @@ class ImageDataInterface:
         custom_fill_value=None,
         concurrency_limit=1,
         chunk_shape=None,
+        max_retries=10,
+        timeout=5,
     ):
         dataset_path = str(Path(dataset_path).resolve())
         self.path = dataset_path
@@ -247,6 +306,9 @@ class ImageDataInterface:
         else:
             self.output_voxel_size = self.voxel_size
 
+        self.max_retries = max_retries
+        self.timeout = timeout
+
     def to_ndarray_ts(self, roi=None):
         if not self.ts:
             self.ts = open_ds_tensorstore(
@@ -261,6 +323,8 @@ class ImageDataInterface:
             self.output_voxel_size,
             self.swap_axes,
             self.custom_fill_value,
+            self.max_retries,
+            self.timeout,
         )
         self.ts = None
         return res
