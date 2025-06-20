@@ -2,15 +2,15 @@ from contextlib import contextmanager
 import os
 import random
 import dask
-from dask.distributed import Client
+from dask.distributed import Client, wait
 import getpass
 import tempfile
 import shutil
-
+import pickle
 
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from .io_util import (
-    Timing_Messager,
+    TimingMessager,
     print_with_datetime,
     split_dataset_path,
     get_name_from_path,
@@ -24,21 +24,34 @@ import numpy as np
 import logging
 from contextlib import contextmanager, nullcontext
 import dask.bag as db
-from cellmap_analyze.util.io_util import Timing_Messager
+from cellmap_analyze.util.io_util import TimingMessager
 from tqdm import tqdm
 
 import random
 import dask.bag as db
 
 from functools import wraps
-from tqdm import tqdm
+import os
+import pickle
+from multiprocessing.dummy import Pool  # thread-based Pool
 
 
 def with_tqdm(fn):
     @wraps(fn)
     def wrapper(lst, *args, **kwargs):
+        N = len(lst)
         # wrap the list in tqdm, but still pass it to fn
-        return fn(tqdm(lst, desc=fn.__name__), *args, **kwargs)
+        return fn(
+            tqdm(
+                lst,
+                total=N,
+                miniters=max(1, N // 10),
+                maxinterval=120,
+                desc=fn.__name__,
+            ),
+            *args,
+            **kwargs,
+        )
 
     return wrapper
 
@@ -183,7 +196,7 @@ def create_blocks(
     # roi = roi.snap_to_grid(ds.chunk_shape * ds.voxel_size)
     num_blocks = get_num_blocks(idi)
 
-    with Timing_Messager(f"Generating {num_blocks} blocks", logger):
+    with TimingMessager(f"Generating {num_blocks} blocks", logger):
 
         # create an empty list with num_expected_blocks elements
         block_rois = [None] * num_blocks
@@ -296,13 +309,23 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
         cluster = LocalCluster(
             n_workers=num_workers,
             threads_per_worker=1,
-            # job_script_prologue=job_script_prologue,
         )
     else:
         if cluster_type == "lsf":
             from dask_jobqueue import LSFCluster
 
-            cluster = LSFCluster(job_script_prologue=job_script_prologue)
+            cluster = LSFCluster(
+                job_script_prologue=job_script_prologue,
+                scheduler_options={
+                    "service_kwargs": {
+                        "dashboard": {
+                            "session_token_expiration": 60
+                            * 60
+                            * 24,  # 24 hours timeout
+                        }
+                    },
+                },
+            )
         elif cluster_type == "slurm":
             from dask_jobqueue import SLURMCluster
 
@@ -312,9 +335,8 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
 
             cluster = SGECluster()
         cluster.scale(num_workers)
-        # cluster.adapt(minimum=0, maximum=num_workers)
     try:
-        with Timing_Messager(
+        with TimingMessager(
             f"Starting {cluster_type} dask cluster for {msg} with {num_workers} workers",
             logger,
         ):
@@ -322,7 +344,7 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
         dashboard_link = client.cluster.dashboard_link
         if cluster_type == "local":
             dashboard_link = dashboard_link.replace("127.0.0.1", hostname)
-        print_with_datetime(f"Check {dashboard_link} for {msg} status.", logger)
+        print_with_datetime(f"Check {dashboard_link} for: {msg} status.", logger)
         yield client
     finally:
         client.shutdown()
@@ -354,29 +376,35 @@ def setup_execution_directory(config_path, logger):
     return execution_dir
 
 
-def delete_chunks(block_index, idi, depth=3):
-    block = create_block_from_index(idi, block_index)
-    block_coords = block.coords[
-        :depth
-    ]  # can have duplicates eg 0/0/0 and 0/0/1 go produce the same coords[:2]
-    block_coords_string = "/".join([str(c) for c in block_coords])
-    delete_name = f"{idi.path}/{block_coords_string}"
-    if os.path.exists(delete_name):
-        if os.path.isfile(delete_name):
-            os.remove(delete_name)
-        elif os.listdir(delete_name) == []:
-            shutil.rmtree(delete_name, ignore_errors=True)
+def delete_chunks(block_index, get_delete_path_fn, idi_or_location, depth):
+    delete_path = get_delete_path_fn(block_index, idi_or_location, depth)
+    if os.path.exists(delete_path):
+        if os.path.isfile(delete_path):
+            os.remove(delete_path)
+        elif os.listdir(delete_path) == []:
+            shutil.rmtree(delete_path, ignore_errors=True)
 
 
-def delete_tmp_zarr(
-    idi_or_location: ImageDataInterface | str, num_workers, compute_args
+def delete_tmp_dir_blockwise(
+    idi_or_location: ImageDataInterface | str,
+    num_workers,
+    compute_args,
+    is_zarr=True,
+    num_blocks=None,
 ):
-    if type(idi_or_location) is str:
-        idi = ImageDataInterface(idi_or_location)
+    if is_zarr:
+        if type(idi_or_location) is str:
+            idi = ImageDataInterface(idi_or_location)
+        else:
+            idi = idi_or_location
+        get_delete_path_fn = get_zarr_chunk_path_from_block_index
+        num_blocks = get_num_blocks(idi, idi.roi)
+        idi_or_location = idi
+        basepath, _ = split_dataset_path(idi.path)
+        top_level_dir = f"{basepath}/{get_name_from_path(idi.path)}"
     else:
-        idi = idi_or_location
-
-    num_blocks = get_num_blocks(idi, idi.roi)
+        get_delete_path_fn = get_merge_file_path_from_block_index
+        top_level_dir = idi_or_location
 
     for depth in range(3, 0, -1):
         compute_blockwise_partitions(
@@ -384,14 +412,88 @@ def delete_tmp_zarr(
             num_workers,
             compute_args,
             logger,
-            f"deleting temporary zarr dataset at depth {depth}",
+            f"deleting temporary dataset at depth {depth}",
             delete_chunks,
-            idi,
+            get_delete_path_fn,
+            idi_or_location,
             depth,
         )
 
-    basepath, _ = split_dataset_path(idi.path)
-    shutil.rmtree(f"{basepath}/{get_name_from_path(idi.path)}")
+    shutil.rmtree(top_level_dir)
+
+
+def get_merge_file_path_from_block_index(block_index, output_dir, depth=3):
+    block_string = "/".join(
+        [str(block_index // 100**i) for i in range(2, 2 - depth, -1)]
+    )
+    output_path = f"{output_dir}/{block_string}.pkl"
+    return output_path
+
+
+def get_zarr_chunk_path_from_block_index(block_index, idi, depth):
+    block = create_block_from_index(idi, block_index)
+    # can have duplicates eg 0/0/0 and 0/0/1 go produce the same coords[:2]
+    block_coords = block.coords[:depth]
+    block_coords_string = "/".join([str(c) for c in block_coords])
+    desired_path = f"{idi.path}/{block_coords_string}"
+    return desired_path
+
+
+def write_dask_result_to_pkl(block_index, output_dir, fn, *fn_args, **fn_kwargs):
+    """Write a dask block result to a pkl file in the output directory."""
+    result = fn(block_index, *fn_args, **fn_kwargs)
+    output_path = get_merge_file_path_from_block_index(block_index, output_dir)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "wb") as f:
+        pickle.dump(result, f)
+
+
+def read_results_to_merge(output_dir, num_blocks, threads=None):
+    """
+    Read 0.pkl…(num_blocks-1).pkl in parallel using a thread pool,
+    displaying progress with tqdm.
+
+    Args:
+        output_dir: str path where your pickles live
+        num_blocks: total number of blocks
+        threads:    how many threads to spin up (None = default)
+
+    Returns:
+        List of unpickled results in order [0,1,…,num_blocks-1].
+    """
+
+    def _load(i):
+        path = get_merge_file_path_from_block_index(i, output_dir)
+        # 1) Check existence
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Missing result file: {path}")
+
+        # 2) Check for non-zero size
+        size = os.path.getsize(path)
+        if size == 0:
+            raise RuntimeError(f"Empty/corrupted pickle file (0 bytes): {path}")
+
+        # 3) Try loading
+        try:
+            with open(path, "rb") as f:
+                return pickle.load(f)
+        except EOFError as e:
+            # this is the signature of a truncated/invalid pickle
+            raise RuntimeError(
+                f"EOFError reading {path}: file appears truncated"
+            ) from e
+
+    with Pool(threads) as pool:
+        # use imap so we can feed it into tqdm
+        return list(
+            tqdm(
+                pool.imap(_load, range(num_blocks)),
+                total=num_blocks,
+                miniters=max(1, num_blocks // 10),
+                maxinterval=120,  # 120 seconds between updates
+                desc="Loading blocks",
+            )
+        )
 
 
 def compute_blockwise_partitions(
@@ -403,7 +505,7 @@ def compute_blockwise_partitions(
     fn,
     *fn_args,
     randomize: bool = False,
-    merge_fn=None,
+    merge_info=None,
     **fn_kwargs,
 ):
     """
@@ -411,12 +513,6 @@ def compute_blockwise_partitions(
     collect all raw partitions onto the driver, shut the cluster down,
     then merge locally with a tqdm progress bar.
     """
-
-    def _partitioner(idxs, *args, **kwargs):
-        out = []
-        for i in idxs:
-            out.append(fn(i, *args, **kwargs))
-        return out
 
     # STEP 1) Build & (optionally) shuffle the bag
     npart = guesstimate_npartitions(num_blocks, num_workers)
@@ -429,18 +525,60 @@ def compute_blockwise_partitions(
         )
 
     # STEP 2) Map your work fn over each partition
-    bag = bag.map_partitions(_partitioner, *fn_args, **fn_kwargs)
+    if merge_info is None:
+        bag = bag.map(fn, *fn_args, **fn_kwargs)
+    else:
+        merge_fn, output_directory = merge_info
+        os.makedirs(output_directory, exist_ok=True)
+        bag = bag.map(
+            write_dask_result_to_pkl, output_directory, fn, *fn_args, **fn_kwargs
+        )
 
-    # STEP 3) Spin up Dask, collect ALL partitions to driver
-    with start_dask(num_workers, msg, logger) as client:
-        with Timing_Messager(msg.capitalize(), logger):
-            flat = bag.compute(**compute_args)
+    # STEP 3) Spin up Dask, run
+    with start_dask(num_workers, msg, logger):
+        with TimingMessager(msg.capitalize(), logger):
+            try:
+                # This will block until everything finishes (or errors),
+                # then return the in-memory result or raise.
+                if num_workers == 1:
+                    bag.compute(**compute_args)
 
-    # STEP 4) If no merge_fn: flatten and return raw_parts
-    if merge_fn is None:
-        return flat
+                else:
+                    futures = bag.persist(**compute_args)
+                    [completed, _] = wait(futures)
+                    failed = [f for f in completed if f.exception() is not None]
 
-    # STEP 5) If merge_fn: merge the results with a tqdm progress bar
-    with Timing_Messager(f"Merging {len(flat)} results", logger):
-        result = with_tqdm(merge_fn)(flat)
-    return result
+                    # cancel so errors from shutdown don't propagate
+                    for completed_future in completed:
+                        completed_future.cancel()
+
+                    if failed:
+                        raise RuntimeError(
+                            f"Failed to compute {len(failed)} blocks: {failed}"
+                        )
+
+            except Exception as e:
+                # Any other Python-level exception your function raised
+                print("Compute raised an exception:", e)
+                raise
+
+            if merge_info is None:
+                return
+
+    with TimingMessager(f"Reading results for {msg}", logger):
+        list_of_results = read_results_to_merge(
+            output_directory, num_blocks, threads=len(os.sched_getaffinity(0))
+        )
+
+    with TimingMessager(f"Merging results for {msg}", logger):
+        merged_results = with_tqdm(merge_fn)(list_of_results)
+
+    delete_tmp_dir_blockwise(
+        output_directory,
+        num_workers,
+        compute_args,
+        is_zarr=False,
+        num_blocks=num_blocks,
+    )
+
+    return merged_results

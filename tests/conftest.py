@@ -350,8 +350,8 @@ def tmp_cylinders_information_csv(segmentation_cylinders, shared_tmpdir, voxel_s
         ]
         df.loc[i] = row
 
-    df.to_csv(output_path + "/cylinders.csv", index=False)
-    return str(output_path + "/cylinders.csv")
+    df.to_csv(output_path + "/segmentation_cylinders.csv", index=False)
+    return str(output_path + "/segmentation_cylinders.csv")
 
 
 @pytest.fixture(scope="session")

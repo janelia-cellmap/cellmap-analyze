@@ -115,7 +115,8 @@ class AssignToCells:
 
                 # Query only for the points (coms) that need updating.
                 current_distances, _ = tree.query(
-                    coms[update_mask], distance_upper_bound=maximum_distance * iteration
+                    coms[update_mask],
+                    distance_upper_bound=maximum_distance * iteration,
                 )
                 # Check if coms are within a cell
                 updated_inds = inds[update_mask]
@@ -167,7 +168,7 @@ class AssignToCells:
             df["Cell Distance (nm)"] = closest_distances[:, 0]
 
     def assign_to_cells(self):
-        with io_util.Timing_Messager("Assigning objects to cells", logger):
+        with io_util.TimingMessager("Assigning objects to cells", logger):
             for organelle_csv, df in self.organelle_info_dict.items():
                 # get filename from organelle_csv
                 filename = os.path.basename(organelle_csv)
@@ -189,7 +190,7 @@ class AssignToCells:
                 )
 
     def write_updated_csvs(self):
-        with io_util.Timing_Messager("Writing out updated dataframes", logger):
+        with io_util.TimingMessager("Writing out updated dataframes", logger):
             os.makedirs(self.output_path, exist_ok=True)
             for csv, df in self.organelle_info_dict.items():
                 csv_name = os.path.basename(csv.split(".csv")[0])

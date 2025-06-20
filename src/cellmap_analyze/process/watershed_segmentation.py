@@ -10,11 +10,7 @@ from cellmap_analyze.util.dask_util import (
     guesstimate_npartitions,
 )
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
-from cellmap_analyze.util.io_util import (
-    get_name_from_path,
-    split_dataset_path,
-)
-
+from cellmap_analyze.util.io_util import get_output_path_from_input_path
 import logging
 import dask.bag as db
 import numpy as np
@@ -129,14 +125,11 @@ class WatershedSegmentation(ComputeConfigMixin):
             np.round(pseudo_neighborhood_radius_nm / self.voxel_size[0])
         )
 
-        output_path = output_path
         if output_path is None:
-            output_path = self.input_path
-            output_ds_name = get_name_from_path(output_path)
-            output_ds_basepath = split_dataset_path(self.input_path)[0]
-            output_path = f"{output_ds_basepath}/{output_ds_name}_watersheded"
-
-        self.output_path = output_path
+            output_path = get_output_path_from_input_path(
+                self.input_path, "_watersheded"
+            )
+        self.output_path = output_path.rstrip("/")
 
         self.distance_transform_idi = create_multiscale_dataset_idi(
             self.output_path + "_distance_transform",
@@ -243,7 +236,7 @@ class WatershedSegmentation(ComputeConfigMixin):
             self.num_workers,
             self.compute_args,
             logger,
-            "calculating blockwise watershed seeds",
+            f"calculating blockwise watershed seeds for {self.input_idi.path}",
             WatershedSegmentation.calculate_blockwise_watershed_seeds_blockwise,
             self.input_idi,
             self.distance_transform_idi,
@@ -279,7 +272,7 @@ class WatershedSegmentation(ComputeConfigMixin):
         with dask_util.start_dask(
             self.num_workers, "calculate distance transform blockwise", logger
         ):
-            with io_util.Timing_Messager("Calculating distance transform", logger):
+            with io_util.TimingMessager("Calculating distance transform", logger):
                 # b now contains one float per partition: the local max for that partition
                 global_dt_max = np.ceil(b.max().compute(**self.compute_args))
 
@@ -374,7 +367,7 @@ class WatershedSegmentation(ComputeConfigMixin):
             self.num_workers,
             self.compute_args,
             logger,
-            "calculating watershed blockwise",
+            f"calculating deprecated and flawed blockwise watershed for {self.input_idi.path}",
             WatershedSegmentation.watershed_blockwise,
             self.input_idi,
             self.distance_transform_idi,
@@ -387,7 +380,7 @@ class WatershedSegmentation(ComputeConfigMixin):
     def do_global_watershed(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
         block_indexes = list(range(num_blocks))
-        with io_util.Timing_Messager("Calculating watershed", logger):
+        with io_util.TimingMessager("Calculating watershed", logger):
             WatershedSegmentation.global_watershed(
                 block_indexes,
                 self.input_idi,
@@ -429,12 +422,12 @@ class WatershedSegmentation(ComputeConfigMixin):
             self.do_global_watershed()
 
         if self.delete_tmp:
-            dask_util.delete_tmp_zarr(
+            dask_util.delete_tmp_dir_blockwise(
                 self.watershed_seeds_idi,
                 self.num_workers,
                 self.compute_args,
             )
-            dask_util.delete_tmp_zarr(
+            dask_util.delete_tmp_dir_blockwise(
                 self.distance_transform_idi,
                 self.num_workers,
                 self.compute_args,

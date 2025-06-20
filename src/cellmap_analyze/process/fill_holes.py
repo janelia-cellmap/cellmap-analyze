@@ -9,6 +9,7 @@ from cellmap_analyze.util.image_data_interface import ImageDataInterface
 
 import logging
 import fastremap
+from cellmap_analyze.util.io_util import get_output_path_from_input_path
 from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.cythonizing.touching import get_touching_ids
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
@@ -42,9 +43,9 @@ class FillHoles(ComputeConfigMixin):
         self.voxel_size = self.input_idi.voxel_size
         self.connectivity = connectivity
 
-        self.output_path = output_path
-        if self.output_path is None:
-            self.output_path = input_path + "_filled"
+        if output_path is None:
+            output_path = get_output_path_from_input_path(input_path, "_filled")
+        self.output_path = output_path.rstrip("/")
         self.relabeling_dict_path = self.output_path + "_relabeling_dict/"
         self.holes_path = self.output_path + "_holes"
 
@@ -115,12 +116,15 @@ class FillHoles(ComputeConfigMixin):
             self.num_workers,
             self.compute_args,
             logger,
-            "calculating hole information",
+            f"calculating blockwise hole information for {self.input_idi.path}",
             FillHoles.get_hole_information_blockwise,
             input_idi=self.input_idi,
             holes_idi=self.holes_idi,
             connectivity=self.connectivity,
-            merge_fn=FillHoles._merge_hole_to_object_dicts,
+            merge_info=(
+                FillHoles._merge_hole_to_object_dicts,
+                self.output_path + "_tmp_hole_objects_to_dict_to_merge",
+            ),
         )
 
         hole_to_object_dict = FillHoles.__postprocess_hole_dict(hole_to_object_dict)
@@ -170,7 +174,7 @@ class FillHoles(ComputeConfigMixin):
             self.num_workers,
             self.compute_args,
             logger,
-            "relabeling dataset",
+            f"relabeling dataset with holes filled to {self.output_idi.path}",
             FillHoles.relabel_block,
             self.input_idi,
             self.holes_idi,
@@ -197,12 +201,12 @@ class FillHoles(ComputeConfigMixin):
         # get the assignments of holes to objects or background
         self.get_hole_assignments()
         self.relabel_dataset()
-        dask_util.delete_tmp_zarr(
+        dask_util.delete_tmp_dir_blockwise(
             self.holes_idi,
             self.num_workers,
             self.compute_args,
         )
-        dask_util.delete_tmp_zarr(
+        dask_util.delete_tmp_dir_blockwise(
             self.holes_path + "_blockwise/s0",
             self.num_workers,
             self.compute_args,

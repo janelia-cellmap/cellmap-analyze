@@ -28,8 +28,11 @@ def connected_components():
     rp = RunProperties()
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
-        cc = ConnectedComponents(**rp.run_config)
-        cc.get_connected_components()
+        with io_util.TimingMessager(
+            "ConnectedComponents", logger, final_message="Complete success"
+        ):
+            cc = ConnectedComponents(**rp.run_config)
+            cc.get_connected_components()
 
 
 def clean_connected_components():
@@ -40,8 +43,11 @@ def clean_connected_components():
     rp = RunProperties()
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
-        ccc = CleanConnectedComponents(**rp.run_config)
-        ccc.clean_connected_components()
+        with io_util.TimingMessager(
+            "CleanConnectedComponents", logger, final_message="Complete success"
+        ):
+            ccc = CleanConnectedComponents(**rp.run_config)
+            ccc.clean_connected_components()
 
 
 def contact_sites():
@@ -50,8 +56,11 @@ def contact_sites():
     rp = RunProperties()
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
-        contact_sites = ContactSites(**rp.run_config)
-        contact_sites.get_contact_sites()
+        with io_util.TimingMessager(
+            "ContactSites", logger, final_message="Complete success"
+        ):
+            contact_sites = ContactSites(**rp.run_config)
+            contact_sites.get_contact_sites()
 
 
 def mutex_watershed():
@@ -60,8 +69,11 @@ def mutex_watershed():
     rp = RunProperties()
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
-        mws = MutexWatershed(**rp.run_config)
-        mws.get_connected_components()
+        with io_util.TimingMessager(
+            "MutexWatershed", logger, final_message="Complete success"
+        ):
+            mws = MutexWatershed(**rp.run_config)
+            mws.get_connected_components()
 
 
 def watershed_segmentation():
@@ -72,8 +84,11 @@ def watershed_segmentation():
     rp = RunProperties()
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
-        ws = WatershedSegmentation(**rp.run_config)
-        ws.get_watershed_segmentation()
+        with io_util.TimingMessager(
+            "WatershedSegmentation", logger, final_message="Complete success"
+        ):
+            ws = WatershedSegmentation(**rp.run_config)
+            ws.get_watershed_segmentation()
 
 
 def filter_ids():
@@ -82,8 +97,11 @@ def filter_ids():
     rp = RunProperties()
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
-        filter_ids = FilterIDs(**rp.run_config)
-        filter_ids.get_filtered_ids()
+        with io_util.TimingMessager(
+            "FilterIDs", logger, final_message="Complete success"
+        ):
+            filter_ids = FilterIDs(**rp.run_config)
+            filter_ids.get_filtered_ids()
 
 
 def label_with_mask():
@@ -92,8 +110,11 @@ def label_with_mask():
     rp = RunProperties()
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
-        lwm = LabelWithMask(**rp.run_config)
-        lwm.get_label_with_mask()
+        with io_util.TimingMessager(
+            "LabelWithMask", logger, final_message="Complete success"
+        ):
+            lwm = LabelWithMask(**rp.run_config)
+            lwm.get_label_with_mask()
 
 
 def measure():
@@ -102,8 +123,11 @@ def measure():
     rp = RunProperties()
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
-        measure = Measure(**rp.run_config)
-        measure.get_measurements()
+        with io_util.TimingMessager(
+            "Measure", logger, final_message="Complete success"
+        ):
+            measure = Measure(**rp.run_config)
+            measure.get_measurements()
 
 
 def fit_lines_to_segmentations():
@@ -114,8 +138,11 @@ def fit_lines_to_segmentations():
     rp = RunProperties()
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
-        fit_lines = FitLinesToSegmentations(**rp.run_config)
-        fit_lines.get_fit_lines_to_segmentations()
+        with io_util.TimingMessager(
+            "FitLinesToSegmentations", logger, final_message="Complete success"
+        ):
+            fit_lines = FitLinesToSegmentations(**rp.run_config)
+            fit_lines.get_fit_lines_to_segmentations()
 
 
 def assign_to_cells():
@@ -124,5 +151,8 @@ def assign_to_cells():
     rp = RunProperties()
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
-        atc = AssignToCells(**rp.run_config)
-        atc.get_cell_assignments()
+        with io_util.TimingMessager(
+            "AssignToCells", logger, final_message="Complete success"
+        ):
+            atc = AssignToCells(**rp.run_config)
+            atc.get_cell_assignments()

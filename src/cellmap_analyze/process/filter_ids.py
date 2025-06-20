@@ -2,10 +2,7 @@ from typing import List, Union
 import numpy as np
 from cellmap_analyze.process.connected_components import ConnectedComponents
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
-from cellmap_analyze.util.io_util import (
-    get_name_from_path,
-    split_dataset_path,
-)
+from cellmap_analyze.util.io_util import get_output_path_from_input_path
 import logging
 import os
 import pandas as pd
@@ -76,14 +73,10 @@ class FilterIDs(ComputeConfigMixin):
             self.roi = roi
         self.voxel_size = self.input_idi.voxel_size
 
-        self.output_path = output_path
-        if self.output_path is None:
-            self.output_path = self.input_path
-
+        if output_path is None:
+            output_path = get_output_path_from_input_path(input_path, "_filteredIDs")
+        self.output_path = output_path.rstrip("/")
         self.relabeling_dict_path = self.output_path + "_relabeling_dict"
-        output_ds_name = get_name_from_path(self.output_path)
-        output_ds_basepath = split_dataset_path(self.output_path)[0]
-        self.output_ds_path = f"{output_ds_basepath}/{output_ds_name}_filteredIDs"
 
     def get_filtered_ids(self):
         ConnectedComponents.write_memmap_relabeling_dicts(
@@ -91,7 +84,7 @@ class FilterIDs(ComputeConfigMixin):
         )
         ConnectedComponents.relabel_dataset(
             self.input_idi,
-            self.output_ds_path,
+            self.output_path,
             self.roi,
             self.new_dtype,
             self.relabeling_dict_path,

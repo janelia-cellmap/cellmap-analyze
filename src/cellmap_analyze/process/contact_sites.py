@@ -162,7 +162,19 @@ class ContactSites(ComputeConfigMixin):
             padding=padding_voxels * contact_sites_blockwise_idi.voxel_size[0],
         )
         organelle_1 = organelle_1_idi.to_ndarray_ts(block.read_roi)
+        if not np.any(organelle_1):
+            # if organelle_1 is empty, we can skip this block
+            contact_sites_blockwise_idi.ds[block.write_roi] = trim_array(
+                np.zeros(organelle_1.shape, dtype=np.uint64), padding_voxels
+            )
+            return
         organelle_2 = organelle_2_idi.to_ndarray_ts(block.read_roi)
+        if not np.any(organelle_2):
+            # if organelle_2 is empty, we can skip this block
+            contact_sites_blockwise_idi.ds[block.write_roi] = trim_array(
+                np.zeros(organelle_1.shape, dtype=np.uint64), padding_voxels
+            )
+            return
         global_id_offset = block_index * np.prod(
             block.full_block_size / contact_sites_blockwise_idi.voxel_size[0],
             dtype=np.uint64,
@@ -184,7 +196,7 @@ class ContactSites(ComputeConfigMixin):
             self.num_workers,
             self.compute_args,
             logger,
-            "calculating contact sites",
+            f"calculating blockwise contact sites between {self.organelle_1_idi.path} and {self.organelle_2_idi.path}",
             ContactSites.calculate_block_contact_sites,
             self.organelle_1_idi,
             self.organelle_2_idi,

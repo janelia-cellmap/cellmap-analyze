@@ -4,6 +4,7 @@ from cellmap_analyze.util.information_holders import ObjectInformation
 from cellmap_analyze.util.measure_util import get_object_information
 
 import numpy as np
+import pandas as pd
 
 
 def simple_surface_area(data, voxel_surface_area):
@@ -77,8 +78,8 @@ def simple_id_to_surface_area_dict(contact_site, segmentation, voxel_surface_are
 
 
 def simple_object_information_dict(segmentation, voxel_size):
-    voxel_volume = voxel_size**3
-    voxel_surface_area = voxel_size**2
+    voxel_volume = 1.0 * voxel_size**3
+    voxel_surface_area = 1.0 * voxel_size**2
     object_information_dict = {}
     for id in np.unique(segmentation[segmentation > 0]):
         obj = segmentation == id
@@ -157,7 +158,12 @@ def test_measure_whole_objects(
 
 
 def test_measure_blockwise_objects(
-    tmp_zarr, segmentation_1, segmentation_2, segmentation_1_downsampled, voxel_size
+    shared_tmpdir,
+    tmp_zarr,
+    segmentation_1,
+    segmentation_2,
+    segmentation_1_downsampled,
+    voxel_size,
 ):
     for segmentation, segmentation_name, vs in [
         (segmentation_1, "segmentation_1", voxel_size),
@@ -171,7 +177,11 @@ def test_measure_blockwise_objects(
         assert object_information_dict == test_object_information_dict
 
         compare_measurements(
-            f"{tmp_zarr}/{segmentation_name}/s0", None, None, object_information_dict
+            shared_tmpdir,
+            f"{tmp_zarr}/{segmentation_name}/s0",
+            None,
+            None,
+            object_information_dict,
         )
 
 
@@ -235,6 +245,7 @@ def test_measure_whole_contact_sites_distance_3(
 
 
 def compare_measurements(
+    shared_tmpdir,
     input_ds_path,
     segmentation_1_path,
     segmentation_2_path,
@@ -244,32 +255,45 @@ def compare_measurements(
         input_ds_path,
         organelle_1_path=segmentation_1_path,
         organelle_2_path=segmentation_2_path,
-        output_path=None,
+        output_path=shared_tmpdir,
+        num_workers=1,
+    )
+    m.measure()
+    assert m.measurements == contact_site_information_dict
+
+
+def test_writeout(shared_tmpdir, tmp_zarr, tmp_cylinders_information_csv):
+    m = Measure(
+        input_path=f"{tmp_zarr}/segmentation_cylinders/s0",
+        output_path=f"{shared_tmpdir}/test_csvs",
         num_workers=1,
     )
     m.get_measurements()
-    assert m.measurements == contact_site_information_dict
+    gt_df = pd.read_csv(tmp_cylinders_information_csv)
+    test_df = pd.read_csv(f"{shared_tmpdir}/test_csvs/segmentation_cylinders.csv")
+    assert gt_df.equals(test_df)
 
 
 @pytest.mark.parametrize(
     "segmentation_name", ["segmentation_1", "segmentation_2", "segmentation_random"]
 )
-def test_measure_blockwise(tmp_zarr, segmentation_name, request):
+def test_measure_blockwise(shared_tmpdir, tmp_zarr, segmentation_name, request):
     m = Measure(
         input_path=f"{tmp_zarr}/{segmentation_name}/s0",
-        output_path=None,
+        output_path=shared_tmpdir,
         num_workers=1,
     )
-    m.get_measurements()
+    m.measure()
     assert m.measurements == simple_object_information_dict(
         request.getfixturevalue(segmentation_name), m.input_idi.voxel_size[0]
     )
 
 
 def test_measure_blockwise_contact_sites_distance_1(
-    tmp_zarr, contact_site_information_dict_contact_distance_1
+    shared_tmpdir, tmp_zarr, contact_site_information_dict_contact_distance_1
 ):
     compare_measurements(
+        shared_tmpdir,
         f"{tmp_zarr}/contact_sites_distance_1/s0",
         f"{tmp_zarr}/segmentation_1/s0",
         f"{tmp_zarr}/segmentation_2/s0",
@@ -278,9 +302,10 @@ def test_measure_blockwise_contact_sites_distance_1(
 
 
 def test_measure_blockwise_contact_sites_distance_2(
-    tmp_zarr, contact_site_information_dict_contact_distance_2
+    shared_tmpdir, tmp_zarr, contact_site_information_dict_contact_distance_2
 ):
     compare_measurements(
+        shared_tmpdir,
         f"{tmp_zarr}/contact_sites_distance_2/s0",
         f"{tmp_zarr}/segmentation_1/s0",
         f"{tmp_zarr}/segmentation_2/s0",
@@ -289,9 +314,10 @@ def test_measure_blockwise_contact_sites_distance_2(
 
 
 def test_measure_blockwise_contact_sites_distance_3(
-    tmp_zarr, contact_site_information_dict_contact_distance_3
+    shared_tmpdir, tmp_zarr, contact_site_information_dict_contact_distance_3
 ):
     compare_measurements(
+        shared_tmpdir,
         f"{tmp_zarr}/contact_sites_distance_3/s0",
         f"{tmp_zarr}/segmentation_1/s0",
         f"{tmp_zarr}/segmentation_2/s0",
@@ -300,9 +326,10 @@ def test_measure_blockwise_contact_sites_distance_3(
 
 
 def test_measure_blockwise_downsampled_contact_sites_distance_1(
-    tmp_zarr, contact_site_information_dict_contact_distance_1
+    shared_tmpdir, tmp_zarr, contact_site_information_dict_contact_distance_1
 ):
     compare_measurements(
+        shared_tmpdir,
         f"{tmp_zarr}/contact_sites_distance_1/s0",
         f"{tmp_zarr}/segmentation_1_downsampled/s0",
         f"{tmp_zarr}/segmentation_2/s0",
@@ -311,9 +338,10 @@ def test_measure_blockwise_downsampled_contact_sites_distance_1(
 
 
 def test_measure_blockwise_downsampled_contact_sites_distance_2(
-    tmp_zarr, contact_site_information_dict_contact_distance_2
+    shared_tmpdir, tmp_zarr, contact_site_information_dict_contact_distance_2
 ):
     compare_measurements(
+        shared_tmpdir,
         f"{tmp_zarr}/contact_sites_distance_2/s0",
         f"{tmp_zarr}/segmentation_1_downsampled/s0",
         f"{tmp_zarr}/segmentation_2/s0",
@@ -322,9 +350,10 @@ def test_measure_blockwise_downsampled_contact_sites_distance_2(
 
 
 def test_measure_blockwise_downsampled_contact_sites_distance_3(
-    tmp_zarr, contact_site_information_dict_contact_distance_3
+    shared_tmpdir, tmp_zarr, contact_site_information_dict_contact_distance_3
 ):
     compare_measurements(
+        shared_tmpdir,
         f"{tmp_zarr}/contact_sites_distance_3/s0",
         f"{tmp_zarr}/segmentation_1_downsampled/s0",
         f"{tmp_zarr}/segmentation_2/s0",

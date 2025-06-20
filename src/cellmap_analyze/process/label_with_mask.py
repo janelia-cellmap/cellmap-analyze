@@ -93,7 +93,7 @@ class LabelWithMask(ComputeConfigMixin):
             self.num_workers,
             self.compute_args,
             logger,
-            "labeling with mask",
+            f"labeling {self.input_idi.path} with mask {self.mask_idi.path}",
             LabelWithMask.label_with_mask_blockwise,
             self.input_idi,
             self.mask_idi,

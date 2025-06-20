@@ -88,6 +88,7 @@ class ConnectedComponents(ComputeConfigMixin):
         self.voxel_size = template_idi.voxel_size
 
         self.do_full_connected_components = False
+        output_path = output_path.rstrip("/")
         output_ds_name = get_name_from_path(output_path)
         output_ds_basepath = split_dataset_path(output_path)[0]
         os.makedirs(output_ds_basepath, exist_ok=True)
@@ -208,7 +209,7 @@ class ConnectedComponents(ComputeConfigMixin):
             self.num_workers,
             self.compute_args,
             logger,
-            "calculating connected components",
+            f"calculating blockwise connected components for {self.input_idi.path}",
             ConnectedComponents.calculate_block_connected_components,
             self.input_idi,
             self.connected_components_blockwise_idi,
@@ -313,12 +314,15 @@ class ConnectedComponents(ComputeConfigMixin):
                 self.num_workers,
                 self.compute_args,
                 logger,
-                "calculating connected component information",
+                f"getting blockwise connected component information for {self.connected_components_blockwise_idi.path}",
                 ConnectedComponents.get_connected_component_information_blockwise,
                 self.connected_components_blockwise_idi,
                 self.connectivity,
                 self.object_labels_idi,
-                merge_fn=ConnectedComponents._merge_tuples,
+                merge_info=(
+                    ConnectedComponents._merge_tuples,
+                    self.output_path + "_tmp_connected_component_info_to_merge/",
+                ),
             )
         )
 
@@ -387,13 +391,13 @@ class ConnectedComponents(ComputeConfigMixin):
         return dict(zip(query_ids, out))
 
     def get_final_connected_components(self):
-        with io_util.Timing_Messager("Finding connected components", logger):
+        with io_util.TimingMessager("Finding connected components", logger):
             connected_ids = self.get_connected_ids(
                 self.id_to_volume_dict.keys(), self.touching_ids
             )
 
         if self.minimum_volume_voxels > 0 or self.maximum_volume_voxels < np.inf:
-            with io_util.Timing_Messager("Volume filter connected", logger):
+            with io_util.TimingMessager("Volume filter connected", logger):
                 connected_ids, _ = ConnectedComponents.volume_filter_connected_ids(
                     connected_ids,
                     self.id_to_volume_dict,
@@ -488,7 +492,7 @@ class ConnectedComponents(ComputeConfigMixin):
             num_workers,
             compute_args,
             logger,
-            "relabeling dataset",
+            f"relabeling dataset for {original_idi.path}",
             ConnectedComponents.relabel_block_from_path,
             original_idi,
             output_idi,
@@ -517,7 +521,7 @@ class ConnectedComponents(ComputeConfigMixin):
         )
 
         if self.delete_tmp:
-            dask_util.delete_tmp_zarr(
+            dask_util.delete_tmp_dir_blockwise(
                 self.connected_components_blockwise_idi,
                 self.num_workers,
                 self.compute_args,

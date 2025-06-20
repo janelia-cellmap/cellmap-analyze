@@ -70,38 +70,60 @@ def split_dataset_path(dataset_path, scale=None) -> tuple[str, str]:
     return filename + splitter, dataset
 
 
-class Timing_Messager(ContextDecorator):
-    """Context manager class to time operations"""
+def get_output_path_from_input_path(input_path, suffix="_output"):
+    output_path = input_path
+    output_ds_name = get_name_from_path(output_path)
+    output_ds_basepath = split_dataset_path(input_path)[0]
+    return f"{output_ds_basepath}/{output_ds_name}{suffix}"
 
-    def __init__(self, base_message, logger):
-        """Initialize instance with a message and logger
 
-        Args:
-            base_message ('str'): Message for logger
-            logger: logger to be used
+class TimingMessager(ContextDecorator):
+    """Context manager to time operations with aligned messages"""
+
+    # width for aligning 'Started X' and 'Completed X'
+    PREFIX_WIDTH = 25
+
+    def __init__(self, base_message: str, logger, final_message: str = "Completed"):
         """
-
+        Args:
+            base_message: the descriptive part of your log
+            logger: the Python logger to call
+        """
         self._base_message = base_message
         self._logger = logger
+        self._final_message = final_message
 
     def __enter__(self):
-        """Set the start time and print the status message"""
-
-        print_with_datetime(f"{self._base_message}...", self._logger)
+        first_word = self._base_message.split()[0].lower()
+        # prefix without timing
+        prefix = f"Started {first_word}"
+        # align prefix, then show base_message
+        msg = f"{prefix:<{self.PREFIX_WIDTH}}: {self._base_message}..."
+        print_with_datetime(msg, self._logger)
         self._start_time = time.time()
         return self
 
-    def __exit__(self, *exc):
-        """Print the exit message and elapsed time"""
+    def __exit__(self, exc_type, exc_value, traceback_obj):
+        first_word = self._base_message.split()[0].lower()
+        elapsed = time.time() - self._start_time
 
-        print_with_datetime(
-            f"{self._base_message} completed in {time.time()-self._start_time}!",
-            self._logger,
-        )
+        if exc_type is not None:
+            # An exception was raised in the block
+            prefix = f"FAILED {first_word}"
+            msg = f"{prefix:<{self.PREFIX_WIDTH}}: {self._base_message}! after {elapsed:.2f}s because {exc_value}"
+        else:
+            # Normal completion
+            prefix = f"{self._final_message} {first_word}"
+            msg = (
+                f"{prefix:<{self.PREFIX_WIDTH}}: {elapsed:.2f}s, {self._base_message}!"
+            )
+
+        print_with_datetime(msg, self._logger)
+        # Returning False ensures any exception is propagated
         return False
 
 
-def print_with_datetime(output, logger):
+def print_with_datetime(output, logger, log_type="info"):
     """[summary]
 
     Args:
@@ -109,7 +131,15 @@ def print_with_datetime(output, logger):
         logger ([type]): [description]
     """
     now = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-    logger.info(f"{now}: {output}")
+    if log_type == "info":
+        logger.info(f"{now}: {output}")
+    elif log_type == "warning":
+        logger.warning(f"{now}: {output}")
+    elif log_type == "error":
+        logger.error(f"{now}: {output}")
+    # force every handler to flush
+    for h in logger.handlers:
+        h.flush()
 
 
 def read_run_config(config_path):
@@ -276,115 +306,3 @@ def tee_streams(output_path, append=False):
         with open(output_path, "a") as f:
             traceback.print_exc(file=f)
         raise
-
-
-@contextmanager
-def email_on_exit(email_config, workflow_name, execution_dir, logpath):
-    """
-    Context manager.
-
-    Sends an email when the context exits with success/fail status in the subject line.
-    Doesn't work unless sendmail() works without a password
-    (i.e. probably won't work on your laptop, will work on a Janelia cluster node).
-
-    Args:
-        email_config:
-            See flyemflows.workflow.base.base_schemas.ExitEmailSchema
-
-        workflow_name:
-            Name of the workflow class to be reported in the email.
-
-        execution_dir:
-            Location of the workflow config/data files to be reported in the email.
-
-        logpath:
-            Location of the logfile whose contents will be included in
-            the email if email_config["include-log"] is True.
-
-    """
-    if not email_config["send"]:
-        yield
-        return
-
-    if not email_config["addresses"]:
-        logger.warning(
-            "Your config enabled the exit-email feature, but "
-            "no email addresses were listed. Nothing will be sent."
-        )
-        yield
-        return
-
-    user = getpass.getuser()
-    host = socket.gethostname()
-    jobname = os.environ.get("LSB_JOBNAME", None)
-
-    addresses = []
-    for address in email_config["addresses"]:
-        if address == "JANELIA_USER":
-            address = f"{user}@janelia.hhmi.org"
-        addresses.append(address)
-
-    with Timer() as timer:
-
-        def send_email(headline, result, error_str=None):
-            body = (
-                headline + f"Duration: {timer.timedelta}\n"
-                f"Execution directory: {execution_dir}\n"
-            )
-
-            if jobname:
-                body += f"Job name: {jobname}\n"
-
-            if error_str:
-                body += f"Error: {error_str}\n"
-
-            if email_config["include-log"]:
-                # Sync first, in the hope that the log will flush to disk before we read it.
-                # Note:
-                #    Currently raised exceptions haven't been printed yet,
-                #    so they aren't yet in the log file in your email.
-                #    They'll only be present in the on-disk logfile.
-                try:
-                    # This can hang, apparently.
-                    # Hangs like this might be fairly damaging, unfortunately.
-                    # According to Ken:
-                    #   >If sync is trying to write a file down to disk that was deleted,
-                    #   >it can hang like that. Unfortunately, the node will have to be
-                    #   >power cycled to deal with this situation.
-                    #
-                    # Let's hope that's not common.
-                    # We'll just timeout the ordinary way and hope for the best.
-                    subprocess_run("sync", timeout=10.0)
-                    time.sleep(2.0)
-                except TimeoutExpired:
-                    logger.warning("Timed out while waiting for filesystem sync")
-
-                body += "\nLOG (possibly truncated):\n\n"
-                with open(f"{logpath}", "r") as log:
-                    body += log.read()
-
-            msg = MIMEText(body)
-            msg["Subject"] = f"Workflow exited: {result}"
-            msg["From"] = f"flyemflows <{user}@{host}>"
-            msg["To"] = ",".join(addresses)
-
-            try:
-                s = smtplib.SMTP("mail.hhmi.org")
-                s.sendmail(msg["From"], addresses, msg.as_string())
-                s.quit()
-            except:
-                msg = (
-                    "Failed to send completion email.  Perhaps your machine "
-                    "is not configured to send login-less email, which is required for this feature."
-                )
-                logger.error(msg)
-
-        try:
-            yield
-        except BaseException as ex:
-            send_email(
-                f"Workflow {workflow_name} failed: {type(ex)}\n", "FAILED", str(ex)
-            )
-            raise
-        else:
-            send_email(f"Workflow {workflow_name} exited successfully.\n", "success")

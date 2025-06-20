@@ -6,11 +6,7 @@ from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
-from cellmap_analyze.util.io_util import (
-    get_name_from_path,
-    split_dataset_path,
-)
-
+from cellmap_analyze.util.io_util import get_output_path_from_input_path
 import logging
 import itertools
 from cellmap_analyze.util.mask_util import MasksFromConfig
@@ -54,13 +50,12 @@ class CleanConnectedComponents(ComputeConfigMixin):
 
         self.voxel_size = self.input_idi.voxel_size
 
-        self.output_path = output_path
+        self.output_path = output_path.rstrip("/")
         if self.output_path is None:
-            output_path = self.input_path
-            output_ds_name = get_name_from_path(output_path)
-            output_ds_basepath = split_dataset_path(self.input_path)[0]
-            self.output_path = f"{output_ds_basepath}/{output_ds_name}_cleaned"
-
+            self.output_path = get_output_path_from_input_path(
+                self.input_path, "_cleaned"
+            )
+        self.output_path = self.output_path.rstrip("/")
         self.relabeling_dict_path = f"{self.output_path}_relabeling_dict/"
 
         # evaluate minimum_volume_nm_3 voxels if it is a string
@@ -134,18 +129,21 @@ class CleanConnectedComponents(ComputeConfigMixin):
             self.num_workers,
             self.compute_args,
             logger,
-            "getting connected component information",
+            f"getting blockwise connected component information during cleaning for {self.input_idi.path}",
             CleanConnectedComponents.get_connected_component_information_blockwise,
             self.input_idi,
             self.mask,
-            merge_fn=ConnectedComponents._merge_tuples,
+            merge_info=(
+                ConnectedComponents._merge_tuples,
+                self.output_path + "_tmp_cleaned_connected_component_info_to_merge",
+            ),
         )
 
     def get_final_connected_components(self):
         # make it a list of list to be consistence with connectedcomponents volume filter
         old_ids = [[id] for id in self.id_to_volume_dict.keys()]
         if self.minimum_volume_voxels > 0 or self.maximum_volume_voxels < np.inf:
-            with io_util.Timing_Messager("Volume filter connected", logger):
+            with io_util.TimingMessager("Volume filter connected", logger):
                 old_ids, _ = ConnectedComponents.volume_filter_connected_ids(
                     old_ids,
                     self.id_to_volume_dict,

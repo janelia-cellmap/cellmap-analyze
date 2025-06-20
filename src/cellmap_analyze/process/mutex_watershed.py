@@ -279,7 +279,7 @@ class MutexWatershed(ComputeConfigMixin):
             self.num_workers,
             self.compute_args,
             logger,
-            "calculating connected components blockwise",
+            f"calculating blockwise connected components with mws for {self.affinities_idi.path}",
             MutexWatershed.calculate_block_connected_components,
             self.affinities_idi,
             self.connected_components_blockwise_idi,
