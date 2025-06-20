@@ -39,8 +39,19 @@ from multiprocessing.dummy import Pool  # thread-based Pool
 def with_tqdm(fn):
     @wraps(fn)
     def wrapper(lst, *args, **kwargs):
+        N = len(lst)
         # wrap the list in tqdm, but still pass it to fn
-        return fn(tqdm(lst, desc=fn.__name__), *args, **kwargs)
+        return fn(
+            tqdm(
+                lst,
+                total=N,
+                miniters=max(1, N // 10),
+                maxinterval=120,
+                desc=fn.__name__,
+            ),
+            *args,
+            **kwargs,
+        )
 
     return wrapper
 
@@ -478,6 +489,8 @@ def read_results_to_merge(output_dir, num_blocks, threads=None):
             tqdm(
                 pool.imap(_load, range(num_blocks)),
                 total=num_blocks,
+                miniters=max(1, num_blocks // 10),
+                maxinterval=120,  # 120 seconds between updates
                 desc="Loading blocks",
             )
         )
