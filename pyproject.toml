@@ -1,6 +1,6 @@
 [project]
 name = "cellmap-analyze"
-version = "0.0.1"
+version = "0.0.2"
 description = "Code to perform analysis on segmentations like those produced by CellMap"
 readme = "README.md"
 license-files = ["LICENSE"]
