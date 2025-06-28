@@ -41,6 +41,7 @@ class ConnectedComponents(ComputeConfigMixin):
         mask_config=None,
         connected_components_blockwise_path=None,
         object_labels_path=None,
+        fix_duplicate_ids=False,
         roi=None,
         minimum_volume_nm_3=0,
         maximum_volume_nm_3=np.inf,
@@ -72,6 +73,14 @@ class ConnectedComponents(ComputeConfigMixin):
             self.object_labels_idi = ImageDataInterface(
                 object_labels_path, chunk_shape=chunk_shape
             )
+
+        self.fix_duplicate_ids = fix_duplicate_ids
+        if fix_duplicate_ids:
+            if self.object_labels_idi is not None:
+                raise Exception(
+                    "If fix_duplicate_ids is True, object_labels_path must be empty"
+                )
+            self.object_labels_idi = self.input_idi
 
         if roi is None:
             self.roi = template_idi.roi
@@ -148,6 +157,7 @@ class ConnectedComponents(ComputeConfigMixin):
         invert=None,
         mask: MasksFromConfig = None,
         connectivity=2,
+        fix_duplicate_ids=False,
     ):
         if calculating_holes:
             invert = True
@@ -157,23 +167,32 @@ class ConnectedComponents(ComputeConfigMixin):
             block_index,
         )
         input = input_idi.to_ndarray_ts(block.read_roi)
-        if invert:
-            thresholded = input == 0
-        else:
-            thresholded = (input >= intensity_threshold_minimum) & (
-                input < intensity_threshold_maximum
+        cc3d_connectivity = 6 + 12 * (connectivity >= 2) + 8 * (connectivity >= 3)
+
+        if fix_duplicate_ids:
+            connected_components = cc3d.connected_components(
+                input,
+                connectivity=cc3d_connectivity,
+                out_dtype=np.uint64,
             )
+        else:
+            if invert:
+                thresholded = input == 0
+            else:
+                thresholded = (input >= intensity_threshold_minimum) & (
+                    input < intensity_threshold_maximum
+                )
 
-        if mask:
-            mask_block = mask.process_block(roi=block.read_roi)
-            thresholded &= mask_block
+            if mask:
+                mask_block = mask.process_block(roi=block.read_roi)
+                thresholded &= mask_block
 
-        connected_components = cc3d.connected_components(
-            thresholded,
-            connectivity=6 + 12 * (connectivity >= 2) + 8 * (connectivity >= 3),
-            binary_image=True,
-            out_dtype=np.uint64,
-        )
+            connected_components = cc3d.connected_components(
+                thresholded,
+                connectivity=cc3d_connectivity,
+                binary_image=True,
+                out_dtype=np.uint64,
+            )
 
         global_id_offset = block_index * np.prod(
             block.full_block_size / connected_components_blockwise_idi.voxel_size[0],
@@ -220,6 +239,7 @@ class ConnectedComponents(ComputeConfigMixin):
             self.invert,
             self.mask,
             self.connectivity,
+            self.fix_duplicate_ids,
         )
 
     @staticmethod

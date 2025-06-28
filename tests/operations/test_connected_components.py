@@ -9,6 +9,8 @@ from cellmap_analyze.util.image_data_interface import (
     ImageDataInterface,
 )
 
+import cc3d
+
 
 @pytest.mark.parametrize(
     "minimum_volume_voxels, maximum_volume_voxels",
@@ -136,4 +138,27 @@ def test_connected_components_chunk_shape(
             ground_truth,
         )
         and test_data_idi.chunk_shape == original_chunk_shape * 2
+    )
+
+
+def test_fix_duplicate_ids(
+    tmp_zarr,
+    duplicate_ids,
+):
+    cc = ConnectedComponents(
+        input_path=f"{tmp_zarr}/duplicate_ids/s0",
+        output_path=f"{tmp_zarr}/duplicate_ids_fixed",
+        num_workers=1,
+        connectivity=1,
+        fix_duplicate_ids=True,
+    )
+    cc.get_connected_components()
+    test_data_idi = ImageDataInterface(f"{tmp_zarr}/duplicate_ids_fixed/s0")
+    test_data = test_data_idi.to_ndarray_ts()
+
+    ground_truth = cc3d.connected_components(duplicate_ids)
+
+    assert np.array_equal(
+        test_data,
+        ground_truth,
     )
