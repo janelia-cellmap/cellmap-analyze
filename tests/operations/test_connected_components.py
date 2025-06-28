@@ -141,7 +141,7 @@ def test_connected_components_chunk_shape(
     )
 
 
-def test_fix_duplicate_ids(
+def test_deduplicate_ids(
     tmp_zarr,
     duplicate_ids,
 ):
@@ -150,7 +150,7 @@ def test_fix_duplicate_ids(
         output_path=f"{tmp_zarr}/duplicate_ids_fixed",
         num_workers=1,
         connectivity=1,
-        fix_duplicate_ids=True,
+        deduplicate_ids=True,
     )
     cc.get_connected_components()
     test_data_idi = ImageDataInterface(f"{tmp_zarr}/duplicate_ids_fixed/s0")

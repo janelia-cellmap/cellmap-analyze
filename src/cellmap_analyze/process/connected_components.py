@@ -41,7 +41,7 @@ class ConnectedComponents(ComputeConfigMixin):
         mask_config=None,
         connected_components_blockwise_path=None,
         object_labels_path=None,
-        fix_duplicate_ids=False,
+        deduplicate_ids=False,
         roi=None,
         minimum_volume_nm_3=0,
         maximum_volume_nm_3=np.inf,
@@ -74,11 +74,11 @@ class ConnectedComponents(ComputeConfigMixin):
                 object_labels_path, chunk_shape=chunk_shape
             )
 
-        self.fix_duplicate_ids = fix_duplicate_ids
-        if fix_duplicate_ids:
+        self.deduplicate_ids = deduplicate_ids
+        if deduplicate_ids:
             if self.object_labels_idi is not None:
                 raise Exception(
-                    "If fix_duplicate_ids is True, object_labels_path must be empty"
+                    "If deduplicate_ids is True, object_labels_path must be empty"
                 )
             self.object_labels_idi = self.input_idi
 
@@ -157,7 +157,7 @@ class ConnectedComponents(ComputeConfigMixin):
         invert=None,
         mask: MasksFromConfig = None,
         connectivity=2,
-        fix_duplicate_ids=False,
+        deduplicate_ids=False,
     ):
         if calculating_holes:
             invert = True
@@ -169,7 +169,7 @@ class ConnectedComponents(ComputeConfigMixin):
         input = input_idi.to_ndarray_ts(block.read_roi)
         cc3d_connectivity = 6 + 12 * (connectivity >= 2) + 8 * (connectivity >= 3)
 
-        if fix_duplicate_ids:
+        if deduplicate_ids:
             connected_components = cc3d.connected_components(
                 input,
                 connectivity=cc3d_connectivity,
@@ -239,7 +239,7 @@ class ConnectedComponents(ComputeConfigMixin):
             self.invert,
             self.mask,
             self.connectivity,
-            self.fix_duplicate_ids,
+            self.deduplicate_ids,
         )
 
     @staticmethod
