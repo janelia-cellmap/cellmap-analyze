@@ -97,6 +97,16 @@ def duplicate_ids(image_shape):
 
 
 @pytest.fixture(scope="session")
+def no_duplicate_ids(image_shape):
+    seg = np.zeros(image_shape, dtype=np.uint8)
+    seg[:7, :7, :7] = 1
+    seg[:7, 7:9, 7:9] = 2
+    seg[:7, 7:11, 9:11] = 3
+
+    return seg
+
+
+@pytest.fixture(scope="session")
 def mask_one(image_shape):
     mask = np.zeros(image_shape, dtype=np.uint8)
     mask[:3, :3, :3] = 1
@@ -604,6 +614,7 @@ def test_image_dict(
     image_with_holes_filled,
     tic_tac_toe,
     tic_tac_toe_filled,
+    no_duplicate_ids,
     duplicate_ids,
     mask_one,
     mask_two,
@@ -630,6 +641,7 @@ def test_image_dict(
         "tic_tac_toe": tic_tac_toe,
         "tic_tac_toe_filled": tic_tac_toe_filled,
         "duplicate_ids": duplicate_ids,
+        "no_duplicate_ids": no_duplicate_ids,
         "mask_one": mask_one,
         "mask_two": mask_two,
         "label_mask": label_mask,

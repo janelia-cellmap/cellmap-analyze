@@ -7,6 +7,7 @@ from cellmap_analyze.util.dask_util import (
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.io_util import (
     get_name_from_path,
+    print_with_datetime,
     split_dataset_path,
 )
 
@@ -313,38 +314,68 @@ class ConnectedComponents(ComputeConfigMixin):
             raise Exception(
                 f"Error {e} in get_connected_component_information_blockwise {block_index}, {connected_components_blockwise_idi.voxel_size}"
             )
+
+        if object_labels_idi is not None:
+            unique_object_labels = fastremap.unique(object_labels[object_labels > 0])
+            return (
+                set(unique_object_labels),
+                id_to_volume_dict,
+                touching_ids,
+            )
+
         return id_to_volume_dict, touching_ids
 
     @staticmethod
     def _merge_tuples(tuples) -> tuple[Counter, set]:
+        # then is deduplicate_ids
+        original_ids = set()
         id_to_volume_dict = Counter()
         touching_ids = set()
         for current_tuple in tuples:
-            current_id_to_volume_dict, current_touching_ids = current_tuple
+            if len(current_tuple) == 3:
+                # then is deduplicate_ids
+                doing_deduplication = True
+                (
+                    current_original_ids,
+                    current_id_to_volume_dict,
+                    current_touching_ids,
+                ) = current_tuple
+                original_ids.update(current_original_ids)
+            else:
+                doing_deduplication = False
+                current_id_to_volume_dict, current_touching_ids = current_tuple
             id_to_volume_dict.update(current_id_to_volume_dict)  # in-place, C‐loop
             touching_ids.update(current_touching_ids)  # in-place, C‐loop
-
-        return (id_to_volume_dict, touching_ids)
+        if doing_deduplication:
+            return (original_ids, id_to_volume_dict, touching_ids)
+        else:
+            return (id_to_volume_dict, touching_ids)
 
     def get_connected_component_information(self):
         num_blocks = dask_util.get_num_blocks(self.connected_components_blockwise_idi)
-        self.id_to_volume_dict, self.touching_ids = (
-            dask_util.compute_blockwise_partitions(
-                num_blocks,
-                self.num_workers,
-                self.compute_args,
-                logger,
-                f"getting blockwise connected component information for {self.connected_components_blockwise_idi.path}",
-                ConnectedComponents.get_connected_component_information_blockwise,
-                self.connected_components_blockwise_idi,
-                self.connectivity,
-                self.object_labels_idi,
-                merge_info=(
-                    ConnectedComponents._merge_tuples,
-                    self.output_path + "_tmp_connected_component_info_to_merge/",
-                ),
-            )
+        output_tuple = dask_util.compute_blockwise_partitions(
+            num_blocks,
+            self.num_workers,
+            self.compute_args,
+            logger,
+            f"getting blockwise connected component information for {self.connected_components_blockwise_idi.path}",
+            ConnectedComponents.get_connected_component_information_blockwise,
+            self.connected_components_blockwise_idi,
+            self.connectivity,
+            self.object_labels_idi,
+            merge_info=(
+                ConnectedComponents._merge_tuples,
+                self.output_path + "_tmp_connected_component_info_to_merge/",
+            ),
         )
+        if self.object_labels_idi:
+            (
+                self.original_ids,
+                self.id_to_volume_dict,
+                self.touching_ids,
+            ) = output_tuple
+        else:
+            self.id_to_volume_dict, self.touching_ids = output_tuple
 
     @staticmethod
     def write_memmap_relabeling_dicts(relabeling_dict, output_path):
@@ -411,10 +442,20 @@ class ConnectedComponents(ComputeConfigMixin):
         return dict(zip(query_ids, out))
 
     def get_final_connected_components(self):
+        self.continue_processing = True
         with io_util.TimingMessager("Finding connected components", logger):
             connected_ids = self.get_connected_ids(
                 self.id_to_volume_dict.keys(), self.touching_ids
             )
+
+        if self.deduplicate_ids and len(connected_ids) == len(self.original_ids):
+            # No duplicates found, skipping processing
+            self.continue_processing = False
+            print_with_datetime(
+                f"No duplicate ids found ({len(connected_ids)=},{len(self.original_ids)=}, skipping remaining connected components processing.",
+                logger,
+            )
+            return
 
         if self.minimum_volume_voxels > 0 or self.maximum_volume_voxels < np.inf:
             with io_util.TimingMessager("Volume filter connected", logger):
@@ -530,15 +571,16 @@ class ConnectedComponents(ComputeConfigMixin):
         # get final connected components necessary for relabeling, including volume filtering
         self.get_final_connected_components()
 
-        self.relabel_dataset(
-            self.connected_components_blockwise_idi,
-            self.output_path,
-            self.roi,
-            self.new_dtype,
-            self.relabeling_dict_path,
-            self.num_workers,
-            self.compute_args,
-        )
+        if self.continue_processing:
+            self.relabel_dataset(
+                self.connected_components_blockwise_idi,
+                self.output_path,
+                self.roi,
+                self.new_dtype,
+                self.relabeling_dict_path,
+                self.num_workers,
+                self.compute_args,
+            )
 
         if self.delete_tmp:
             dask_util.delete_tmp_dir_blockwise(
@@ -546,6 +588,9 @@ class ConnectedComponents(ComputeConfigMixin):
                 self.num_workers,
                 self.compute_args,
             )
+
+        if not self.continue_processing:
+            return
 
         if self.fill_holes:
             from .fill_holes import FillHoles

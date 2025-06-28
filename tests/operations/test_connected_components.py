@@ -10,6 +10,7 @@ from cellmap_analyze.util.image_data_interface import (
 )
 
 import cc3d
+import os
 
 
 @pytest.mark.parametrize(
@@ -162,3 +163,41 @@ def test_deduplicate_ids(
         test_data,
         ground_truth,
     )
+
+
+def test_noduplicate_ids(
+    tmp_zarr,
+    no_duplicate_ids,
+):
+    cc = ConnectedComponents(
+        input_path=f"{tmp_zarr}/no_duplicate_ids/s0",
+        output_path=f"{tmp_zarr}/no_duplicate_ids_fixed",
+        num_workers=1,
+        connectivity=1,
+        deduplicate_ids=True,
+    )
+    cc.get_connected_components()
+    test_data_idi = ImageDataInterface(f"{tmp_zarr}/no_duplicate_ids/s0")
+    test_data = test_data_idi.to_ndarray_ts()
+
+    ground_truth = cc3d.connected_components(no_duplicate_ids)
+
+    assert np.array_equal(
+        test_data,
+        ground_truth,
+    ) and not os.path.exists(f"{tmp_zarr}/no_duplicate_ids_fixed")
+
+
+# %%
+from cellmap_analyze.process.connected_components import ConnectedComponents
+
+cc = ConnectedComponents(
+    input_path=f"/tmp/pytest-of-ackermand/pytest-current/tmpcurrent/tmp.zarr/no_duplicate_ids/s0",
+    output_path=f"/tmp/pytest-of-ackermand/pytest-current/tmpcurrent/tmp.zarr/no_duplicate_ids_fixed",
+    num_workers=1,
+    connectivity=1,
+    deduplicate_ids=True,
+)
+cc.get_connected_components()
+
+# %%
