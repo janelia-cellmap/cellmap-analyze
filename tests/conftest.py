@@ -69,19 +69,19 @@ def random_image_to_delete(image_shape):
 
 @pytest.fixture(scope="session")
 def tic_tac_toe(image_shape):
-    seg = np.zeros(image_shape, dtype=np.uint8)
-
+    seg = np.zeros(image_shape, dtype=np.uint16)
+    id = 2**8 + 1000
     # Set the two slices along axis-0 (i.e., seg[3, :, :] and seg[7, :, :]) to 1
-    seg[3, :, :] = 1
-    seg[7, :, :] = 1
+    seg[3, :, :] = id
+    seg[7, :, :] = id
 
     # Set the two slices along axis-1 (i.e., A[:, 3, :] and A[:, 7, :]) to 1
-    seg[:, 3, :] = 1
-    seg[:, 7, :] = 1
+    seg[:, 3, :] = id
+    seg[:, 7, :] = id
 
     # Set the two slices along axis-2 (i.e., seg[:, :, 3] and seg[:, :, 7]) to 1
-    seg[:, :, 3] = 1
-    seg[:, :, 7] = 1
+    seg[:, :, 3] = id
+    seg[:, :, 7] = id
 
     return seg
 
@@ -103,6 +103,15 @@ def no_duplicate_ids(image_shape):
     seg[:7, 7:9, 7:9] = 2
     seg[:7, 7:11, 9:11] = 3
 
+    return seg
+
+
+@pytest.fixture(scope="session")
+def binarizable_image(image_shape):
+    seg = np.zeros(image_shape, dtype=np.uint8)
+    seg[0, 0, 0] = 1
+    seg[0, 1, 0] = 2
+    seg[0, 1:, 1] = 1
     return seg
 
 
@@ -142,7 +151,9 @@ def image_with_holes_filled(image_with_holes):
 
 @pytest.fixture(scope="session")
 def tic_tac_toe_filled(tic_tac_toe):
-    return ndimage.binary_fill_holes(tic_tac_toe).astype(np.uint8)
+    seg = ndimage.binary_fill_holes(tic_tac_toe).astype(np.uint16)
+    seg[seg > 0] = 2**8 + 1000
+    return seg
 
 
 @pytest.fixture(scope="session")
@@ -616,6 +627,7 @@ def test_image_dict(
     tic_tac_toe_filled,
     no_duplicate_ids,
     duplicate_ids,
+    binarizable_image,
     mask_one,
     mask_two,
     label_mask,
@@ -640,6 +652,7 @@ def test_image_dict(
         "image_with_holes_filled": image_with_holes_filled,
         "tic_tac_toe": tic_tac_toe,
         "tic_tac_toe_filled": tic_tac_toe_filled,
+        "binarizable_image": binarizable_image,
         "duplicate_ids": duplicate_ids,
         "no_duplicate_ids": no_duplicate_ids,
         "mask_one": mask_one,
