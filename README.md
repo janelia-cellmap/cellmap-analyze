@@ -16,7 +16,7 @@ A suite of Dask-powered tools for processing and analyzing terabyte-scale 3D seg
 | **Connected Components** | `connected-components`       | Threshold and mask segmentations.                           |
 | **Clean Components**     | `clean-connected-components` | Refine and clean existing segmentations.                    |
 | **Contact Sites**        | `contact-sites`              | Identify object contact regions with configurable contact distance. |
-| **Fill Holes**           | `filling-holes`              | Fill interior gaps in segmented volumes.                    |
+| **Fill Holes**           | `fill-holes`              | Fill interior gaps in segmented volumes.                    |
 | **Filter IDs**           | `filter-ids`                 | Exclude unwanted segmentation IDs.                          |
 | **Mutex Watershed**           | `mws`                 | Mutex watershed agglomeration from affinities                          |
 | **Label With Mask**           | `label-with-mask`                 | Label one dataset with ids from another                          |
