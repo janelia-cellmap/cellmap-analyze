@@ -43,6 +43,7 @@ class ConnectedComponents(ComputeConfigMixin):
         connected_components_blockwise_path=None,
         object_labels_path=None,
         deduplicate_ids=False,
+        binarize=True,  # usually want to threshold and binarize
         roi=None,
         minimum_volume_nm_3=0,
         maximum_volume_nm_3=np.inf,
@@ -75,6 +76,7 @@ class ConnectedComponents(ComputeConfigMixin):
                 object_labels_path, chunk_shape=chunk_shape
             )
 
+        self.binarize = binarize
         self.deduplicate_ids = deduplicate_ids
         if deduplicate_ids:
             if self.object_labels_idi is not None:
@@ -82,6 +84,7 @@ class ConnectedComponents(ComputeConfigMixin):
                     "If deduplicate_ids is True, object_labels_path must be empty"
                 )
             self.object_labels_idi = self.input_idi
+            self.binarize = False
 
         if roi is None:
             self.roi = template_idi.roi
@@ -158,7 +161,7 @@ class ConnectedComponents(ComputeConfigMixin):
         invert=None,
         mask: MasksFromConfig = None,
         connectivity=2,
-        deduplicate_ids=False,
+        binarize=True,
     ):
         if calculating_holes:
             invert = True
@@ -170,13 +173,7 @@ class ConnectedComponents(ComputeConfigMixin):
         input = input_idi.to_ndarray_ts(block.read_roi)
         cc3d_connectivity = 6 + 12 * (connectivity >= 2) + 8 * (connectivity >= 3)
 
-        if deduplicate_ids:
-            connected_components = cc3d.connected_components(
-                input,
-                connectivity=cc3d_connectivity,
-                out_dtype=np.uint64,
-            )
-        else:
+        if binarize:
             if invert:
                 thresholded = input == 0
             else:
@@ -192,6 +189,12 @@ class ConnectedComponents(ComputeConfigMixin):
                 thresholded,
                 connectivity=cc3d_connectivity,
                 binary_image=True,
+                out_dtype=np.uint64,
+            )
+        else:
+            connected_components = cc3d.connected_components(
+                input,
+                connectivity=cc3d_connectivity,
                 out_dtype=np.uint64,
             )
 
@@ -240,7 +243,7 @@ class ConnectedComponents(ComputeConfigMixin):
             self.invert,
             self.mask,
             self.connectivity,
-            self.deduplicate_ids,
+            self.binarize,
         )
 
     @staticmethod
@@ -296,8 +299,24 @@ class ConnectedComponents(ComputeConfigMixin):
 
             mask = data.astype(bool)
             mask[2:, 2:, 2:] = False
+            # most of the time it doesnt matter about the "original data region" since we
+            # are using the same connectivity for blockwise and this. however if we generated blockwise
+            # independently and want to ensure that is consistent, then we need this
+            original_data_region_mask = np.zeros_like(data, dtype=np.bool)
+            if (
+                block.read_roi.shape - block.write_roi.shape
+            ) == connected_components_blockwise_idi.voxel_size * 2:
+                # then we have expanded in the positive direction as well:
+                original_data_region_mask[1:-1, 1:-1, 1:-1] = True
+            else:
+                original_data_region_mask[1:, 1:, 1:] = True
+
             touching_ids = get_touching_ids(
-                data, mask=mask, connectivity=connectivity, object_labels=object_labels
+                data,
+                mask=mask,
+                connectivity=connectivity,
+                original_data_region_mask=original_data_region_mask,
+                object_labels=object_labels,
             )
             # get information only from actual block(not including padding)
             actual_padding = np.array(
@@ -448,14 +467,20 @@ class ConnectedComponents(ComputeConfigMixin):
                 self.id_to_volume_dict.keys(), self.touching_ids
             )
 
-        if self.deduplicate_ids and len(connected_ids) == len(self.original_ids):
-            # No duplicates found, skipping processing
-            self.continue_processing = False
-            print_with_datetime(
-                f"No duplicate ids found ({len(connected_ids)=},{len(self.original_ids)=}, skipping remaining connected components processing.",
-                logger,
-            )
-            return
+        if self.deduplicate_ids:
+            if len(connected_ids) == len(self.original_ids):
+                # No duplicates found, skipping processing
+                self.continue_processing = False
+                print_with_datetime(
+                    f"No duplicate ids found ({len(connected_ids)=},{len(self.original_ids)=}, skipping remaining connected components processing.",
+                    logger,
+                )
+                return
+            else:
+                print_with_datetime(
+                    f"Duplicate ids found ({len(connected_ids)=},{len(self.original_ids)=}.",
+                    logger,
+                )
 
         if self.minimum_volume_voxels > 0 or self.maximum_volume_voxels < np.inf:
             with io_util.TimingMessager("Volume filter connected", logger):

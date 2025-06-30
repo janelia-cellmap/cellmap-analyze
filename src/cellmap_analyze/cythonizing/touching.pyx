@@ -17,6 +17,7 @@ ctypedef fused DTYPE_obj:
     np.uint32_t
     np.uint64_t
 
+
 ctypedef np.uint8_t U8_t  # mask is always uint8
 
 cdef inline int abs_i(int x):
@@ -26,6 +27,7 @@ def get_touching_ids(
         np.ndarray[DTYPE_data, ndim=3] data not None,
         np.ndarray[U8_t,      ndim=3] mask not None,
         int connectivity = 2,
+        np.ndarray[U8_t,      ndim=3] original_data_region_mask = None,
         np.ndarray[DTYPE_obj, ndim=3] object_labels = None):
     """
     Cython‐accelerated 3D touching‐labels.
@@ -46,8 +48,12 @@ def get_touching_ids(
         # fast memoryviews
         DTYPE_data[:, :, :] dv = data
         U8_t[:,       :, :] mv = mask
+
         DTYPE_obj[:, :, :] ov
         bint has_obj = object_labels is not None
+        
+        U8_t[:,       :, :] odrmv
+        bint has_odrmv = original_data_region_mask is not None
 
         # Python‐level result
         object result = set()
@@ -56,6 +62,9 @@ def get_touching_ids(
     if has_obj:
         ov = object_labels
 
+    if has_odrmv:
+        odrmv = original_data_region_mask
+    
     # Build neighbor‐offset list based on connectivity
     for dz in (-1, 0, 1):
         for dy in (-1, 0, 1):
@@ -77,6 +86,7 @@ def get_touching_ids(
             for x in range(D2):
                 if not mv[z, y, x]:
                     continue
+
                 lbl0 = dv[z, y, x]
 
                 for n_off in range(m_off):
@@ -93,6 +103,11 @@ def get_touching_ids(
 
                     if not mv[nz, ny, nx]:
                         continue
+                    
+                    if has_odrmv and odrmv[nz, ny, nx] == odrmv[z, y, x]:
+                        # only want to keep if one is in the original mask, otherwise we will get self-self contacts which may override blockwise
+                        continue
+
                     lbl1 = dv[nz, ny, nx]
                     if lbl1 == lbl0:
                         continue
