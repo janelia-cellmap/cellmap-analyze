@@ -220,16 +220,3 @@ class FillHoles(ComputeConfigMixin):
         )
 
         shutil.rmtree(self.relabeling_dict_path)
-
-
-# %%
-# from cellmap_analyze.process.connected_components import ConnectedComponents
-
-# relabeling_dict = ConnectedComponents.get_updated_relabeling_dict(
-#     np.array([16381]),
-#     "/nrs/cellmap/ackermand/cellmap/jrc_mus-liver-zon-1/test_hole_filling.zarr/ld_deduplicated_ids_filled_relabeling_dict/",
-# )
-# a = np.array([16381, 16382, 16383, 16384],dtype=np.uint16)
-# fastremap.remap(a, relabeling_dict, preserve_missing_labels=True, in_place=True)
-# print(a.astype(np.uint32))
-# %%
