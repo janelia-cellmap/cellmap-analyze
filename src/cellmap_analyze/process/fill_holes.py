@@ -66,8 +66,12 @@ class FillHoles(ComputeConfigMixin):
         holes = holes_idi.to_ndarray_ts(block.read_roi)
         input = input_idi.to_ndarray_ts(block.read_roi)
 
-        input_boundaries = find_boundaries(input, mode="inner").astype(np.uint64)
-        hole_boundaries = find_boundaries(holes, mode="inner").astype(np.uint64)
+        input_boundaries = find_boundaries(
+            input, mode="inner", connectivity=connectivity
+        ).astype(np.uint64)
+        hole_boundaries = find_boundaries(
+            holes, mode="inner", connectivity=connectivity
+        ).astype(np.uint64)
 
         max_input_id = np.max(input)
         holes = holes.astype(np.uint64)
@@ -151,13 +155,16 @@ class FillHoles(ComputeConfigMixin):
             hole_ids, relabeling_dict_path
         )
         if len(relabeling_dict) > 0:
+            if input.dtype.itemsize > holes.dtype.itemsize:
+                holes = holes.astype(input.dtype)
             fastremap.remap(
                 holes,
                 relabeling_dict,
                 preserve_missing_labels=True,
                 in_place=True,
             )
-        output_idi.ds[block.write_roi] = input + holes
+
+        output_idi.ds[block.write_roi] = input + holes.astype(input.dtype)
 
     def relabel_dataset(self):
         self.output_idi = create_multiscale_dataset_idi(

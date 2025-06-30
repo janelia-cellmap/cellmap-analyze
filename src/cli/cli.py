@@ -91,6 +91,19 @@ def watershed_segmentation():
             ws.get_watershed_segmentation()
 
 
+def fill_holes():
+    from cellmap_analyze.process.fill_holes import FillHoles
+
+    rp = RunProperties()
+    with io_util.tee_streams(rp.logpath):
+        os.chdir(rp.execution_directory)
+        with io_util.TimingMessager(
+            "FillHoles", logger, final_message="Complete success"
+        ):
+            fill_holes = FillHoles(**rp.run_config)
+            fill_holes.fill_holes()
+
+
 def filter_ids():
     from cellmap_analyze.process.filter_ids import FilterIDs
 

@@ -9,6 +9,9 @@ from cellmap_analyze.util.image_data_interface import (
     ImageDataInterface,
 )
 
+import cc3d
+import os
+
 
 @pytest.mark.parametrize(
     "minimum_volume_voxels, maximum_volume_voxels",
@@ -136,4 +139,76 @@ def test_connected_components_chunk_shape(
             ground_truth,
         )
         and test_data_idi.chunk_shape == original_chunk_shape * 2
+    )
+
+
+def test_deduplicate_ids(
+    tmp_zarr,
+    duplicate_ids,
+):
+    cc = ConnectedComponents(
+        input_path=f"{tmp_zarr}/duplicate_ids/s0",
+        output_path=f"{tmp_zarr}/duplicate_ids_fixed",
+        num_workers=1,
+        connectivity=1,
+        deduplicate_ids=True,
+    )
+    cc.get_connected_components()
+    test_data_idi = ImageDataInterface(f"{tmp_zarr}/duplicate_ids_fixed/s0")
+    test_data = test_data_idi.to_ndarray_ts()
+
+    ground_truth = cc3d.connected_components(duplicate_ids, connectivity=6)
+
+    assert np.array_equal(
+        test_data,
+        ground_truth,
+    )
+
+
+def test_noduplicate_ids(
+    tmp_zarr,
+    no_duplicate_ids,
+):
+    cc = ConnectedComponents(
+        input_path=f"{tmp_zarr}/no_duplicate_ids/s0",
+        output_path=f"{tmp_zarr}/no_duplicate_ids_fixed",
+        num_workers=1,
+        connectivity=1,
+        deduplicate_ids=True,
+    )
+    cc.get_connected_components()
+    test_data_idi = ImageDataInterface(f"{tmp_zarr}/no_duplicate_ids/s0")
+    test_data = test_data_idi.to_ndarray_ts()
+
+    ground_truth = cc3d.connected_components(no_duplicate_ids, connectivity=6)
+
+    assert np.array_equal(
+        test_data,
+        ground_truth,
+    ) and not os.path.exists(f"{tmp_zarr}/no_duplicate_ids_fixed")
+
+
+@pytest.mark.parametrize("binarize", [True, False])
+def test_binarize(tmp_zarr, binarizable_image, binarize):
+    cc = ConnectedComponents(
+        input_path=f"{tmp_zarr}/binarizable_image/s0",
+        output_path=f"{tmp_zarr}/binarizable_image_binarize_{binarize}",
+        num_workers=1,
+        connectivity=1,
+        intensity_threshold_minimum=1 if binarize else -1,
+        binarize=binarize,
+    )
+    cc.get_connected_components()
+    test_data_idi = ImageDataInterface(
+        f"{tmp_zarr}/binarizable_image_binarize_{binarize}/s0"
+    )
+    test_data = test_data_idi.to_ndarray_ts()
+
+    ground_truth = cc3d.connected_components(
+        binarizable_image, binary_image=binarize, connectivity=6
+    )
+
+    assert np.array_equal(
+        test_data,
+        ground_truth,
     )

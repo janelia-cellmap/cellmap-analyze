@@ -9,7 +9,7 @@ import shutil
 import pickle
 
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
-from .io_util import (
+from cellmap_analyze.util.io_util import (
     TimingMessager,
     print_with_datetime,
     split_dataset_path,
@@ -219,7 +219,10 @@ def create_blocks(
 def guesstimate_npartitions(elements, num_workers, scaling=4):
     if not isinstance(elements, int):
         elements = len(elements)
-    return min(elements, num_workers * scaling)
+    approximate_npartitions = min(elements, num_workers * scaling)
+    elements_per_worker = elements // approximate_npartitions
+    actual_partitions = elements // elements_per_worker
+    return actual_partitions
 
 
 def set_local_directory(cluster_type):
@@ -426,7 +429,10 @@ def get_merge_file_path_from_block_index(block_index, output_dir, depth=3):
     block_string = "/".join(
         [str(block_index // 100**i) for i in range(2, 2 - depth, -1)]
     )
-    output_path = f"{output_dir}/{block_string}.pkl"
+    output_path = f"{output_dir}/{block_string}"
+    if depth == 3:
+        output_path += ".pkl"
+
     return output_path
 
 
