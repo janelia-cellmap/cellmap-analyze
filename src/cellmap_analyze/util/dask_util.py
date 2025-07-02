@@ -384,8 +384,14 @@ def delete_chunks(block_index, get_delete_path_fn, idi_or_location, depth):
     if os.path.exists(delete_path):
         if os.path.isfile(delete_path):
             os.remove(delete_path)
-        elif os.listdir(delete_path) == []:
-            shutil.rmtree(delete_path, ignore_errors=True)
+        else:
+            try:
+                if os.listdir(delete_path) == []:
+                    shutil.rmtree(delete_path, ignore_errors=True)
+            except FileNotFoundError:
+                # then already removed
+                # TODO: Be smarter about deletions
+                pass
 
 
 def delete_tmp_dir_blockwise(
