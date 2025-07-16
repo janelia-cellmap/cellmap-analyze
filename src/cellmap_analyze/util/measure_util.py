@@ -1,3 +1,4 @@
+# %%
 import numpy as np
 from cellmap_analyze.util.information_holders import (
     ContactingOrganelleInformation,
@@ -125,7 +126,9 @@ def get_region_properties(data, voxel_edge_length=1, trim=1):
     coms = []
     # coms = np.array(center_of_mass(data, data, index=ids))
 
-    coms = find_centers(data, ids)
+    coms, sum_r2 = find_centers(data, ids, compute_sum_r2=True)
+    #TODO: do stuff with sum_r2
+    add 0.5 to sum_r2...
     center_on_voxel = 0.5
     coms = np.array(coms) + center_on_voxel
 
@@ -288,3 +291,32 @@ def get_object_information(
                 **extra_args,
             )
     return ois
+# %%
+import numpy as np
+seg = np.random.randint(0, 5, size=(212, 212, 212))  # Example segmentation array
+%timeit find_centers(seg,[1,2,3,4], compute_sum_r2=True)
+# # seg: your (nx,ny,nz) integer array of labels (0=background)
+# def calc(seg):
+#     # 1) Precompute r² weights
+#     X, Y, Z = np.indices(seg.shape, dtype=np.int64)
+#     r2 = (X*X + Y*Y + Z*Z).ravel()
+
+#     # 2) Flatten labels and mask out zeros
+#     labels = seg.ravel()
+#     mask   = labels != 0
+
+#     # 3) Bin only the nonzero labels
+#     sum_r2 = np.bincount(labels[mask], weights=r2[mask])
+#     # sum_r2[i-1] is now ∑‖r‖² for object label i, for i=1…max(seg)
+
+#     # If you want it aligned so that sum_r2_nonzero[i] is for label i:
+#     maxlabel = seg.max()
+#     sum_r2_full = np.zeros(maxlabel+1, dtype=r2.dtype)
+#     sum_r2_full[1:] = sum_r2      # index 0 stays zero
+#     # sum_r2_full[L] gives ∑‖r‖² for label L; sum_r2_full[0] == 0
+#     return sum_r2
+# %%
+%timeit calc(seg)
+# %%
+1+2
+# %%
