@@ -508,6 +508,19 @@ def read_results_to_merge(output_dir, num_blocks, threads=None):
         )
 
 
+# STEP 2) Batch elements per partition to amortize overhead
+def partition_worker(indices, fn, *worker_args, **worker_kwargs):
+    for idx in indices:
+        fn(idx, *worker_args, **worker_kwargs)
+    return []  # discard results
+
+
+def partition_worker_with_write(indices, fn, output_dir, *worker_args, **worker_kwargs):
+    for idx in indices:
+        write_dask_result_to_pkl(idx, output_dir, fn, *worker_args, **worker_kwargs)
+    return []  # discard results
+
+
 def compute_blockwise_partitions(
     num_blocks: int,
     num_workers: int,
@@ -538,12 +551,12 @@ def compute_blockwise_partitions(
 
     # STEP 2) Map your work fn over each partition
     if merge_info is None:
-        bag = bag.map(fn, *fn_args, **fn_kwargs)
+        bag = bag.map_partitions(partition_worker, fn, *fn_args, **fn_kwargs)
     else:
         merge_fn, output_directory = merge_info
         os.makedirs(output_directory, exist_ok=True)
-        bag = bag.map(
-            write_dask_result_to_pkl, output_directory, fn, *fn_args, **fn_kwargs
+        bag = bag.map_partitions(
+            partition_worker_with_write, fn, output_directory, *fn_args, **fn_kwargs
         )
 
     # STEP 3) Spin up Dask, run
