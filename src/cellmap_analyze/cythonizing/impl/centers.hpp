@@ -37,25 +37,29 @@ centers(
         size_t size_y,
         size_t size_x,
         const T* labels,
-        bool compute_sum_r2 = false) {
-
+        bool compute_sum_r2 = false,
+        bool center_on_voxels = true) {
     std::map<T, Center> centers;
     size_t total = size_z * size_y * size_x;
     std::array<int, 3> pos = {{0, 0, 0}};
-
+    double extra_addon = center_on_voxels ? 0.5 : 0.0;
     for (size_t i = 0; i < total; ++i) {
         T l = labels[i];
         if (l > 0) {
             auto& c = centers[l];
-            c.z += pos[0];
-            c.y += pos[1];
-            c.x += pos[2];
+            double p0 = pos[0] + extra_addon;
+            double p1 = pos[1] + extra_addon;
+            double p2 = pos[2] + extra_addon;
+
+            c.z += p0;
+            c.y += p1;
+            c.x += p2;
             c.n++;
             if (compute_sum_r2) {
                 c.sum_r2 +=
-                    static_cast<double>(pos[0]) * pos[0] +
-                    static_cast<double>(pos[1]) * pos[1] +
-                    static_cast<double>(pos[2]) * pos[2];
+                    static_cast<double>(p0) * p0 +
+                    static_cast<double>(p1) * p1 +
+                    static_cast<double>(p2) * p2;
             }
         }
 

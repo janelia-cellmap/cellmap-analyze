@@ -125,12 +125,10 @@ def get_region_properties(data, voxel_edge_length=1, trim=1):
     volumes = counts * voxel_volume
     coms = []
     # coms = np.array(center_of_mass(data, data, index=ids))
-
-    coms, sum_r2 = find_centers(data, ids, compute_sum_r2=True)
+    center_on_voxels = True
+    coms, sum_r2 = find_centers(data, ids, compute_sum_r2=True, center_on_voxels=center_on_voxels)
     #TODO: do stuff with sum_r2
-    add 0.5 to sum_r2...
-    center_on_voxel = 0.5
-    coms = np.array(coms) + center_on_voxel
+    #coms = np.array(coms) + center_on_voxel
 
     find_objects_array = data.copy()
     find_objects_ids = list(range(1, len(ids) + 1))
@@ -150,7 +148,7 @@ def get_region_properties(data, voxel_edge_length=1, trim=1):
         # append to numpy array
         bounding_boxes_coords.append([zmin, ymin, xmin, zmax, ymax, xmax])
 
-    bounding_boxes_coords = np.array(bounding_boxes_coords) + center_on_voxel
+    bounding_boxes_coords = np.array(bounding_boxes_coords) + center_on_voxels*0.5
     df = pd.DataFrame(
         {
             "ID": ids,
@@ -292,9 +290,7 @@ def get_object_information(
             )
     return ois
 # %%
-import numpy as np
-seg = np.random.randint(0, 5, size=(212, 212, 212))  # Example segmentation array
-%timeit find_centers(seg,[1,2,3,4], compute_sum_r2=True)
+# # %timeit find_centers(seg,[1,2,3,4], compute_sum_r2=True)
 # # seg: your (nx,ny,nz) integer array of labels (0=background)
 # def calc(seg):
 #     # 1) Precompute r² weights
@@ -315,8 +311,8 @@ seg = np.random.randint(0, 5, size=(212, 212, 212))  # Example segmentation arra
 #     sum_r2_full[1:] = sum_r2      # index 0 stays zero
 #     # sum_r2_full[L] gives ∑‖r‖² for label L; sum_r2_full[0] == 0
 #     return sum_r2
-# %%
-%timeit calc(seg)
-# %%
-1+2
-# %%
+# # %%
+# %timeit calc(seg)
+# # %%
+# 1+2
+# # %%

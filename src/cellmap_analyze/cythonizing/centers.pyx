@@ -6,7 +6,7 @@ import numpy as np
 cimport numpy as np
 import scipy.ndimage
 
-def find_centers_cpp(np.ndarray[uint64_t, ndim=3] labels, bool compute_sum_r2=False):
+def find_centers_cpp(np.ndarray[uint64_t, ndim=3] labels, bool compute_sum_r2=False, center_on_voxels=True):
 
     # the C++ part assumes contiguous memory, make sure we have it (and do 
     # nothing, if we do)
@@ -22,7 +22,9 @@ def find_centers_cpp(np.ndarray[uint64_t, ndim=3] labels, bool compute_sum_r2=Fa
         labels.shape[1],
         labels.shape[2],
         labels_data,
-        compute_sum_r2)
+        compute_sum_r2,
+        center_on_voxels
+    )
 
 cdef extern from "impl/centers.hpp":
 
@@ -37,7 +39,8 @@ cdef extern from "impl/centers.hpp":
             size_t size_y,
             size_t size_x,
             const uint64_t* labels,
-            bool compute_sum_r2);
+            bool compute_sum_r2,
+            bool center_on_voxels);
 
 
 def find_centers_scipy(components, ids):
@@ -47,11 +50,11 @@ def find_centers_scipy(components, ids):
             ids))
 
 
-def find_centers(components, ids, compute_sum_r2=False):
+def find_centers(components, ids, compute_sum_r2=False, center_on_voxels=True):
 
     if len(components.shape) == 3:
 
-        centers = find_centers_cpp(components.astype(np.uint64), compute_sum_r2)
+        centers = find_centers_cpp(components.astype(np.uint64), compute_sum_r2, center_on_voxels)
         if compute_sum_r2:
             return np.array([
                 [centers[i]['z'], centers[i]['y'], centers[i]['x']] for i in ids
