@@ -7,6 +7,57 @@ import numpy as np
 import pandas as pd
 
 
+def radius_of_gyration_3d(segmentation, label=None, voxel_size=(1.0, 1.0, 1.0)):
+    """
+    Compute the radius of gyration for a 3D segmentation.
+
+    Parameters
+    ----------
+    segmentation : ndarray, shape (Z, Y, X)
+        3D numpy array of integer labels or binary mask.
+    label : int or None
+        If integer, compute Rg for that label (all voxels == label).
+        If None, segmentation is treated as a binary mask (non-zero is foreground).
+    voxel_size : tuple of float, length 3
+        Physical size of a voxel in each dimension (dz, dy, dx).
+
+    Returns
+    -------
+    Rg : float
+        Radius of gyration in the same units as voxel_size.
+    """
+    # Create binary mask for the region of interest
+    if label is None:
+        mask = segmentation != 0
+    else:
+        mask = segmentation == label
+
+    # Get voxel coordinates of the mask
+    # coords will be an array of shape (N, 3): rows are (z, y, x)
+    coords = np.array(np.nonzero(mask)).T
+    if coords.size == 0:
+        raise ValueError(f"No voxels found for label={label!r}")
+
+    # If you want to weight by intensity instead of uniform mass per voxel,
+    # you could extract values = segmentation[mask].astype(float) here.
+    masses = np.ones(coords.shape[0], dtype=float)
+
+    # Convert to physical coordinates
+    voxel_size = np.asarray(voxel_size, dtype=float)
+    phys_coords = coords * voxel_size
+
+    # Compute center of mass
+    total_mass = masses.sum()
+    com = (phys_coords * masses[:, None]).sum(axis=0) / total_mass
+
+    # Compute squared distances to the center of mass
+    sq_dists = np.sum((phys_coords - com) ** 2, axis=1)
+
+    # Radius of gyration is sqrt of mass‐weighted mean squared distance
+    Rg = np.sqrt((sq_dists * masses).sum() / total_mass)
+    return Rg
+
+
 def simple_surface_area(data, voxel_surface_area):
     data = np.pad(data, 1)
     s = data.shape
@@ -77,18 +128,34 @@ def simple_id_to_surface_area_dict(contact_site, segmentation, voxel_surface_are
     return id_to_surface_area_dict
 
 
+def simple_sum_r2(data, voxel_size):
+    idxs = np.where(data)
+    positions = np.array(idxs).T + 0.5  # center on voxel
+    positions *= voxel_size
+    return np.sum(np.sum(positions**2, axis=1))
+
+
 def simple_object_information_dict(segmentation, voxel_size):
     voxel_volume = 1.0 * voxel_size**3
     voxel_surface_area = 1.0 * voxel_size**2
     object_information_dict = {}
     for id in np.unique(segmentation[segmentation > 0]):
         obj = segmentation == id
+        # get positions of obj
+        counts = np.sum(obj)
         object_information_dict[id] = ObjectInformation(
-            volume=np.sum(obj) * voxel_volume,
+            counts=counts,
+            volume=counts * voxel_volume,
             com=simple_com(obj, voxel_size),
             surface_area=simple_surface_area(obj, voxel_surface_area),
+            sum_r2=simple_sum_r2(obj, voxel_size),
             bounding_box=simple_bounding_box(obj, voxel_size),
         )
+        assert np.allclose(
+            object_information_dict[id].radius_of_gyration,
+            radius_of_gyration_3d(segmentation, label=id, voxel_size=voxel_size),
+        )
+
     return object_information_dict
 
 
@@ -101,8 +168,10 @@ def simple_contact_site_information_dict(
     for id in np.unique(contact_site[contact_site > 0]):
         cs = contact_site == id
         contact_site_information_dict[id] = ObjectInformation(
+            counts=np.sum(cs),
             volume=np.sum(cs) * voxel_volume,
             com=simple_com(cs, voxel_size),
+            sum_r2=simple_sum_r2(cs, voxel_size),
             surface_area=simple_surface_area(cs, voxel_surface_area),
             bounding_box=simple_bounding_box(cs, voxel_size),
             id_to_surface_area_dict_1=simple_id_to_surface_area_dict(
@@ -175,7 +244,6 @@ def test_measure_blockwise_objects(
             segmentation, voxel_edge_length=vs
         )
         assert object_information_dict == test_object_information_dict
-
         compare_measurements(
             shared_tmpdir,
             f"{tmp_zarr}/{segmentation_name}/s0",

@@ -1,4 +1,3 @@
-# %%
 import numpy as np
 from cellmap_analyze.util.information_holders import (
     ContactingOrganelleInformation,
@@ -112,7 +111,7 @@ def get_volumes(data, voxel_volume=1, trim=1):
     return dict(zip(labels, counts * voxel_volume))
 
 
-def get_region_properties(data, voxel_edge_length=1, trim=1):
+def get_region_properties(data, voxel_edge_length=1, trim=1, offset=np.zeros((3,))):
     voxel_face_area = voxel_edge_length**2
     voxel_volume = voxel_edge_length**3
     surface_areas = get_surface_areas(data, voxel_face_area=voxel_face_area, trim=trim)
@@ -126,9 +125,14 @@ def get_region_properties(data, voxel_edge_length=1, trim=1):
     coms = []
     # coms = np.array(center_of_mass(data, data, index=ids))
     center_on_voxels = True
-    coms, sum_r2 = find_centers(data, ids, compute_sum_r2=True, center_on_voxels=center_on_voxels)
-    #TODO: do stuff with sum_r2
-    #coms = np.array(coms) + center_on_voxel
+    coms, sum_r2 = find_centers(
+        data,
+        ids,
+        compute_sum_r2=True,
+        center_on_voxels=center_on_voxels,
+        voxel_edge_length=voxel_edge_length,
+        offset=offset,
+    )
 
     find_objects_array = data.copy()
     find_objects_ids = list(range(1, len(ids) + 1))
@@ -148,15 +152,17 @@ def get_region_properties(data, voxel_edge_length=1, trim=1):
         # append to numpy array
         bounding_boxes_coords.append([zmin, ymin, xmin, zmax, ymax, xmax])
 
-    bounding_boxes_coords = np.array(bounding_boxes_coords) + center_on_voxels*0.5
+    bounding_boxes_coords = np.array(bounding_boxes_coords) + center_on_voxels * 0.5
     df = pd.DataFrame(
         {
             "ID": ids,
+            "Counts": counts,
             "Volume (nm^3)": volumes,
             "Surface Area (nm^2)": surface_areas,
-            "COM X (nm)": coms[:, 2] * voxel_edge_length,
-            "COM Y (nm)": coms[:, 1] * voxel_edge_length,
-            "COM Z (nm)": coms[:, 0] * voxel_edge_length,
+            "COM X (nm)": coms[:, 2],
+            "COM Y (nm)": coms[:, 1],
+            "COM Z (nm)": coms[:, 0],
+            "sum_r2 (nm^2)": sum_r2,
             "MIN X (nm)": bounding_boxes_coords[:, 2] * voxel_edge_length,
             "MIN Y (nm)": bounding_boxes_coords[:, 1] * voxel_edge_length,
             "MIN Z (nm)": bounding_boxes_coords[:, 0] * voxel_edge_length,
@@ -239,6 +245,7 @@ def get_object_information(
             object_data,
             voxel_edge_length,
             trim=trim,
+            offset=offset,
         )
 
         if is_contact_site:
@@ -273,10 +280,11 @@ def get_object_information(
             # need to add global_id_offset here rather than before because region_props find_objects creates an array that is the length of the max id in the array
             id = region_prop["ID"] + id_offset
             ois[id] = ObjectInformation(
+                counts=region_prop["Counts"],
                 volume=region_prop["Volume (nm^3)"],
                 surface_area=region_prop["Surface Area (nm^2)"],
-                com=region_prop[["COM Z (nm)", "COM Y (nm)", "COM X (nm)"]].to_numpy()
-                + offset,
+                com=region_prop[["COM Z (nm)", "COM Y (nm)", "COM X (nm)"]].to_numpy(),
+                sum_r2=region_prop["sum_r2 (nm^2)"],
                 bounding_box=[
                     region_prop["MIN Z (nm)"] + offset[0],
                     region_prop["MIN Y (nm)"] + offset[1],
@@ -289,30 +297,3 @@ def get_object_information(
                 **extra_args,
             )
     return ois
-# %%
-# # %timeit find_centers(seg,[1,2,3,4], compute_sum_r2=True)
-# # seg: your (nx,ny,nz) integer array of labels (0=background)
-# def calc(seg):
-#     # 1) Precompute r² weights
-#     X, Y, Z = np.indices(seg.shape, dtype=np.int64)
-#     r2 = (X*X + Y*Y + Z*Z).ravel()
-
-#     # 2) Flatten labels and mask out zeros
-#     labels = seg.ravel()
-#     mask   = labels != 0
-
-#     # 3) Bin only the nonzero labels
-#     sum_r2 = np.bincount(labels[mask], weights=r2[mask])
-#     # sum_r2[i-1] is now ∑‖r‖² for object label i, for i=1…max(seg)
-
-#     # If you want it aligned so that sum_r2_nonzero[i] is for label i:
-#     maxlabel = seg.max()
-#     sum_r2_full = np.zeros(maxlabel+1, dtype=r2.dtype)
-#     sum_r2_full[1:] = sum_r2      # index 0 stays zero
-#     # sum_r2_full[L] gives ∑‖r‖² for label L; sum_r2_full[0] == 0
-#     return sum_r2
-# # %%
-# %timeit calc(seg)
-# # %%
-# 1+2
-# # %%

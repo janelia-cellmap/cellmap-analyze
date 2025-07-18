@@ -32,16 +32,26 @@ class ContactingOrganelleInformation:
 class ObjectInformation:
     def __init__(
         self,
+        counts: int = 0,
         volume: float = 0,
         surface_area: float = 0,
         com: np.ndarray = np.array([0, 0, 0]),
+        sum_r2: float = 0,
         bounding_box: list = [np.inf, np.inf, np.inf, -np.inf, -np.inf, -np.inf],
         **kwargs,
     ):
+        self.counts = counts
         self.volume = volume
         self.surface_area = surface_area
         self.bounding_box = bounding_box
         self.com = com
+        self.sum_r2 = sum_r2
+        if counts > 0:
+            self.radius_of_gyration = np.sqrt(
+                self.sum_r2 / counts - np.dot(self.com, self.com)
+            )
+        else:
+            self.radius_of_gyration = np.nan
         self.is_contact_site = False
         if (
             "id_to_surface_area_dict_1" in kwargs.keys()
@@ -65,13 +75,14 @@ class ObjectInformation:
 
     def __add__(self, other: "ObjectInformation"):
         oi = ObjectInformation()
-
+        oi.counts = self.counts + other.counts
         oi.com = ((self.com * self.volume) + (other.com * other.volume)) / (
             self.volume + other.volume
         )
         oi.volume = self.volume + other.volume
         oi.surface_area = self.surface_area + other.surface_area
-
+        oi.sum_r2 = self.sum_r2 + other.sum_r2
+        oi.radius_of_gyration = np.sqrt(oi.sum_r2 / oi.counts - np.dot(oi.com, oi.com))
         if self.is_contact_site != other.is_contact_site:
             raise ValueError(
                 "Cannot add ObjectInformation objects with different is_contact_site values"
@@ -105,6 +116,13 @@ class ObjectInformation:
             self.volume == other.volume
             and self.surface_area == other.surface_area
             and np.allclose(self.com, other.com, rtol=1e-13, atol=1e-13)
+            and np.allclose(self.sum_r2, other.sum_r2, rtol=1e-13, atol=1e-13)
+            and np.allclose(
+                self.radius_of_gyration,
+                other.radius_of_gyration,
+                rtol=1e-13,
+                atol=1e-13,
+            )
             and self.bounding_box == other.bounding_box
             and self.is_contact_site == other.is_contact_site
         )
