@@ -38,7 +38,10 @@ centers(
         size_t size_x,
         const T* labels,
         bool compute_sum_r2 = false,
-        bool center_on_voxels = true) {
+        bool center_on_voxels = true,
+        double voxel_edge_length = 1.0,
+        const double* offset = nullptr   // pointer, default nullptr => {0,0,0}
+    ) {
     std::map<T, Center> centers;
     size_t total = size_z * size_y * size_x;
     std::array<int, 3> pos = {{0, 0, 0}};
@@ -47,9 +50,9 @@ centers(
         T l = labels[i];
         if (l > 0) {
             auto& c = centers[l];
-            double p0 = pos[0] + extra_addon;
-            double p1 = pos[1] + extra_addon;
-            double p2 = pos[2] + extra_addon;
+            double p0 = (pos[0] + extra_addon) * voxel_edge_length + offset[0];
+            double p1 = (pos[1] + extra_addon) * voxel_edge_length + offset[1];
+            double p2 = (pos[2] + extra_addon) * voxel_edge_length + offset[2];
 
             c.z += p0;
             c.y += p1;
