@@ -217,7 +217,12 @@ class Measure(ComputeConfigMixin):
         output_file = self.output_path + "/" + file_name + ".csv"
 
         # create dataframe
-        columns = ["Object ID", "Volume (nm^3)", "Surface Area (nm^2)"]
+        columns = [
+            "Object ID",
+            "Volume (nm^3)",
+            "Surface Area (nm^2)",
+            "Radius of Gyration (nm)",
+        ]
         for category in ["COM", "MIN", "MAX"]:
             for d in ["X", "Y", "Z"]:
                 columns.append(f"{category} {d} (nm)")
@@ -242,6 +247,7 @@ class Measure(ComputeConfigMixin):
                 id,
                 oi.volume,
                 oi.surface_area,
+                oi.radius_of_gyration,
                 *oi.com[::-1],
                 *oi.bounding_box[:3][::-1],
                 *oi.bounding_box[3:][::-1],

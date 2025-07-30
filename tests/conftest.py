@@ -362,7 +362,12 @@ def tmp_cylinders_information_csv(segmentation_cylinders, shared_tmpdir, voxel_s
         segmentation_cylinders, voxel_size
     )
     # create dataframe
-    columns = ["Object ID", "Volume (nm^3)", "Surface Area (nm^2)"]
+    columns = [
+        "Object ID",
+        "Volume (nm^3)",
+        "Surface Area (nm^2)",
+        "Radius of Gyration (nm)",
+    ]
     for category in ["COM", "MIN", "MAX"]:
         for d in ["X", "Y", "Z"]:
             columns.append(f"{category} {d} (nm)")
@@ -375,6 +380,7 @@ def tmp_cylinders_information_csv(segmentation_cylinders, shared_tmpdir, voxel_s
             id,
             oi.volume,
             oi.surface_area,
+            oi.radius_of_gyration,
             *oi.com[::-1],
             *oi.bounding_box[:3][::-1],
             *oi.bounding_box[3:][::-1],
