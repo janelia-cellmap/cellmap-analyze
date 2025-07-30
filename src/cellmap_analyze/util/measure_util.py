@@ -95,12 +95,7 @@ def get_surface_areas(
     # 5) group and sum without huge arrays:
     #    - unique_labels: sorted unique IDs (still uint64)
     #    - inverse: map each label → index in unique_labels
-    try:
-        unique_labels, inverse = fastremap.unique(labels, return_inverse=True)
-    except Exception as e:
-        # write output
-        np.save("error_unique_labels.npy", labels)
-        raise (e, labels)
+    unique_labels, inverse = fastremap.unique(labels, return_inverse=True)
 
     #    - sums[i] = total SA for unique_labels[i]
     sums = np.bincount(inverse, weights=sa_vals)
