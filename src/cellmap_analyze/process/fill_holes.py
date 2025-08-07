@@ -73,7 +73,7 @@ class FillHoles(ComputeConfigMixin):
             holes, mode="inner", connectivity=connectivity
         ).astype(np.uint64)
 
-        max_input_id = np.max(input)
+        max_input_id = np.max(input).astype(np.uint64)
         holes = holes.astype(np.uint64)
         holes[holes > 0] += max_input_id  # so there is no id overlap
         data = holes + input
