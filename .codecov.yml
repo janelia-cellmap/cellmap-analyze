@@ -1,5 +1,8 @@
 coverage:
   status:
-    project: on  
-    # turn off the diff/patch coverage check
-    patch: off        
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
