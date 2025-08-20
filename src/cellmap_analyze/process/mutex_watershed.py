@@ -56,6 +56,7 @@ class MutexWatershed(ComputeConfigMixin):
         maximum_volume_nm_3=np.inf,
         num_workers=10,
         connectivity=2,
+        padding_voxels=None,
         do_opening=False,
         delete_tmp=False,
         chunk_shape=None,
@@ -71,6 +72,7 @@ class MutexWatershed(ComputeConfigMixin):
         self.adjacent_edge_bias = adjacent_edge_bias
         self.lr_bias_ratio = lr_bias_ratio
         self.filter_val = filter_val
+        self.padding_voxels = padding_voxels
         self.do_opening = do_opening
 
         if roi is None:
@@ -232,12 +234,12 @@ class MutexWatershed(ComputeConfigMixin):
         filter_val,
         mask: MasksFromConfig = None,
         connectivity=2,
+        padding_voxels=None,
         do_opening=True,
     ):
-        padding_voxels = max(
-            len(neighborhood),
-            connected_components_blockwise_idi.chunk_shape[0] // 2,
-        )
+        if not padding_voxels:
+            padding_voxels = np.amax(neighborhood)
+
         padding = padding_voxels * connected_components_blockwise_idi.voxel_size[0]
         # add half a block of padding
         block = create_block_from_index(
@@ -289,6 +291,7 @@ class MutexWatershed(ComputeConfigMixin):
             self.filter_val,
             self.mask,
             self.connectivity,
+            self.padding_voxels,
             self.do_opening,
         )
 
