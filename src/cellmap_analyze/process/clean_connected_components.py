@@ -50,7 +50,7 @@ class CleanConnectedComponents(ComputeConfigMixin):
 
         self.voxel_size = self.input_idi.voxel_size
 
-        self.output_path = output_path.rstrip("/")
+        self.output_path = output_path
         if self.output_path is None:
             self.output_path = get_output_path_from_input_path(
                 self.input_path, "_cleaned"
@@ -116,9 +116,9 @@ class CleanConnectedComponents(ComputeConfigMixin):
             # get information only from actual block(not including padding)
             id_to_volume_dict = ConnectedComponents.get_object_sizes(data)
             block.relabeling_dict = {id: 0 for id in unique_ids}
-        except:
+        except Exception as e:
             raise Exception(
-                f"Error in get_connected_component_information_blockwise {block_index}, {connected_components_blockwise_idi.voxel_size}"
+                f"Error {e} in get_connected_component_information_blockwise {block_index}, {connected_components_blockwise_idi.voxel_size}"
             )
         return id_to_volume_dict, set()
 
