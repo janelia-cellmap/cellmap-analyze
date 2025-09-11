@@ -174,17 +174,17 @@ class MutexWatershed(ComputeConfigMixin):
 
         affinities /= max_affinity_value
 
-        if affinities.max() < 1e-3:
+        if affinities.max() < 1e-4:
             segmentation = np.zeros(affinities.shape[1:], dtype=np.uint64)
             return segmentation
 
-        random_noise = np.random.randn(*affinities.shape) * 0.001
+        random_noise = np.random.randn(*affinities.shape) * 0.0001
         smoothed_affs = (
             ndimage.gaussian_filter(
                 affinities, sigma=(0, *(np.amax(neighborhood, axis=0) / 3))
             )
             - 0.5
-        ) * 0.01
+        ) * 0.001
         shift: np.ndarray = np.array(
             [
                 (
@@ -247,10 +247,16 @@ class MutexWatershed(ComputeConfigMixin):
             block_index,
             padding=padding,
         )
-        affinities = affinities_idi.to_ndarray_ts(block.read_roi)
+
         if mask:
             mask_block = mask.process_block(roi=block.read_roi)
-            affinities &= mask_block[None, :, :, :]
+            if not mask_block.any():
+                connected_components_blockwise_idi.ds[block.write_roi] = 0
+        
+        affinities = affinities_idi.to_ndarray_ts(block.read_roi)
+        
+        if mask:
+            affinities *= mask_block[None, :, :, :]
 
         segmentation = MutexWatershed.mutex_watershed(
             affinities=affinities,
