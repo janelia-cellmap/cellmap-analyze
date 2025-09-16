@@ -1,6 +1,9 @@
 # %%
 import numpy as np
 from cellmap_analyze.process.connected_components import ConnectedComponents
+from cellmap_analyze.process.morphological_operations import MorphologicalOperations
+from cellmap_analyze.process.clean_connected_components import CleanConnectedComponents
+
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
@@ -37,7 +40,8 @@ class MutexWatershed(ComputeConfigMixin):
         affinities_path,
         output_path,
         adjacent_edge_bias=-0.4,
-        lr_bias_ratio=-0.08,
+        lr_biases=None,
+        lr_bias_ratio=None,
         filter_val=0.5,
         neighborhood=[
             [1, 0, 0],
@@ -70,7 +74,9 @@ class MutexWatershed(ComputeConfigMixin):
         # affinities information
         self.neighborhood = neighborhood
         self.adjacent_edge_bias = adjacent_edge_bias
-        self.lr_bias_ratio = lr_bias_ratio
+        if lr_biases is None and lr_bias_ratio is None:
+            raise ValueError("Either lr_biases or lr_bias_ratio must be provided")
+        self.lr_bias = lr_biases if lr_biases else lr_bias_ratio
         self.filter_val = filter_val
         self.padding_voxels = padding_voxels
         self.do_opening = do_opening
@@ -114,10 +120,11 @@ class MutexWatershed(ComputeConfigMixin):
         self.minimum_volume_voxels = minimum_volume_nm_3 / np.prod(self.voxel_size)
         self.maximum_volume_voxels = maximum_volume_nm_3 / np.prod(self.voxel_size)
 
+        self.mask_config = mask_config
         self.mask = None
-        if mask_config:
+        if self.mask_config:
             self.mask = MasksFromConfig(
-                mask_config,
+                self.mask_config,
                 output_voxel_size=self.voxel_size,
                 connectivity=connectivity,
             )
@@ -162,7 +169,7 @@ class MutexWatershed(ComputeConfigMixin):
 
     @staticmethod
     def mutex_watershed(
-        affinities, neighborhood, adjacent_edge_bias, lr_bias_ratio, filter_val
+        affinities, neighborhood, adjacent_edge_bias, lr_bias, filter_val
     ):
         if affinities.dtype == np.uint8:
             # logger.info("Assuming affinities are in [0,255]")
@@ -185,16 +192,22 @@ class MutexWatershed(ComputeConfigMixin):
             )
             - 0.5
         ) * 0.001
-        shift: np.ndarray = np.array(
-            [
-                (
-                    adjacent_edge_bias
-                    if max(offset) <= 1
-                    else np.linalg.norm(offset) * lr_bias_ratio
-                )
-                for offset in neighborhood
-            ]
-        ).reshape((-1, *((1,) * (len(affinities.shape) - 1))))
+        shift = []
+        bias_idx = -1
+        previous_offset = np.linalg.norm(neighborhood[0])
+        for offset in neighborhood:
+            current_offset = np.linalg.norm(offset)
+            if current_offset <= 1:
+                shift.append(adjacent_edge_bias)
+            else:
+                if type(lr_bias) is list:
+                    if current_offset > previous_offset:
+                        bias_idx += 1
+                    shift.append(lr_bias[bias_idx])
+                else:
+                    shift.append(current_offset * lr_bias)
+            previous_offset = current_offset
+        shift = np.array(shift).reshape((-1, *((1,) * (len(affinities.shape) - 1))))
 
         # filter fragments
         segmentation = mws.agglom(
@@ -219,9 +232,7 @@ class MutexWatershed(ComputeConfigMixin):
             connectivity=6 + 12 * (connectivity >= 2) + 8 * (connectivity >= 3),
             out_dtype=np.uint64,
         )
-        if do_opening:
-            cc = fastmorph.dilate(cc)
-
+        # We do dilation after the fact to prevent overmerging
         return cc
 
     def calculate_block_connected_components(
@@ -230,7 +241,7 @@ class MutexWatershed(ComputeConfigMixin):
         connected_components_blockwise_idi: ImageDataInterface,
         neighborhood,
         adjacent_edge_bias,
-        lr_bias_ratio,
+        lr_bias,
         filter_val,
         mask: MasksFromConfig = None,
         connectivity=2,
@@ -262,7 +273,7 @@ class MutexWatershed(ComputeConfigMixin):
             affinities=affinities,
             neighborhood=neighborhood,
             adjacent_edge_bias=adjacent_edge_bias,
-            lr_bias_ratio=lr_bias_ratio,
+            lr_bias=lr_bias,
             filter_val=filter_val,
         )
         segmentation = MutexWatershed.instancewise_instance_segmentation(
@@ -293,7 +304,7 @@ class MutexWatershed(ComputeConfigMixin):
             self.connected_components_blockwise_idi,
             self.neighborhood,
             self.adjacent_edge_bias,
-            self.lr_bias_ratio,
+            self.lr_bias,
             self.filter_val,
             self.mask,
             self.connectivity,
@@ -306,11 +317,43 @@ class MutexWatershed(ComputeConfigMixin):
         cc = ConnectedComponents(
             connected_components_blockwise_path=self.connected_components_blockwise_path
             + "/s0",
-            output_path=self.output_path,
+            output_path=self.output_path + "_eroded" if self.do_opening else self.output_path,
             num_workers=self.num_workers,
-            minimum_volume_nm_3=self.minimum_volume_nm_3,
-            maximum_volume_nm_3=self.maximum_volume_nm_3,
+            minimum_volume_nm_3=0 if self.do_opening else self.minimum_volume_nm_3,
+            maximum_volume_nm_3=np.inf if self.do_opening else self.maximum_volume_nm_3,
             delete_tmp=self.delete_tmp,
             connectivity=self.connectivity,
+            mask_config=self.mask_config,
         )
         cc.merge_connected_components_across_blocks()
+
+        if self.do_opening:
+            mo = MorphologicalOperations(
+                input_path=self.output_path + "_eroded/s0",
+                output_path=self.output_path + "_eroded_dilated",
+                operation="dilation",
+                iterations=1,
+                num_workers=self.num_workers,
+                connectivity=self.connectivity,
+                mask_config=self.mask_config)
+            mo.perform_morphological_operation()
+
+            ccc = CleanConnectedComponents(
+                input_path=self.output_path + "_eroded_dilated/s0",
+                output_path=self.output_path,
+                num_workers=self.num_workers,
+                minimum_volume_nm_3=self.minimum_volume_nm_3,
+                maximum_volume_nm_3=self.maximum_volume_nm_3,
+                connectivity=self.connectivity,
+                delete_tmp=self.delete_tmp,
+                mask_config=self.mask_config,
+            )
+            ccc.clean_connected_components()
+            if self.delete_tmp:
+                dask_util.delete_tmp_dir_blockwise(self.output_path + "_eroded/s0",
+                    self.num_workers,
+                    self.compute_args)
+                dask_util.delete_tmp_dir_blockwise(self.output_path + "_eroded_dilated/s0",
+                    self.num_workers,
+                    self.compute_args)
+
