@@ -170,6 +170,12 @@ class ConnectedComponents(ComputeConfigMixin):
             connected_components_blockwise_idi,
             block_index,
         )
+        if mask:
+            mask_block = mask.process_block(roi=block.read_roi)
+            if not np.any(mask_block):
+                connected_components_blockwise_idi.ds[block.write_roi] = 0
+                return
+
         input = input_idi.to_ndarray_ts(block.read_roi)
         cc3d_connectivity = 6 + 12 * (connectivity >= 2) + 8 * (connectivity >= 3)
 
@@ -182,8 +188,7 @@ class ConnectedComponents(ComputeConfigMixin):
                 )
 
             if mask:
-                mask_block = mask.process_block(roi=block.read_roi)
-                thresholded &= mask_block
+                thresholded *= mask_block
 
             connected_components = cc3d.connected_components(
                 thresholded,
@@ -192,6 +197,9 @@ class ConnectedComponents(ComputeConfigMixin):
                 out_dtype=np.uint64,
             )
         else:
+            if mask:
+                input *= mask_block
+
             connected_components = cc3d.connected_components(
                 input,
                 connectivity=cc3d_connectivity,
@@ -527,10 +535,15 @@ class ConnectedComponents(ComputeConfigMixin):
     ):
         # create block from index
         block = create_block_from_index(input_idi, block_index)
+        if mask:
+            mask_block = mask.process_block(roi=block.read_roi)
+            if not np.any(mask_block):
+                output_idi.ds[block.write_roi] = 0
+                return
 
         # All ids must be accounted for in the relabeling dict
         data = input_idi.to_ndarray_ts(
-            block.write_roi,
+            block.read_roi,
         )
         ids = fastremap.unique(data[data > 0])
         relabeling_dict = ConnectedComponents.get_updated_relabeling_dict(
@@ -538,7 +551,6 @@ class ConnectedComponents(ComputeConfigMixin):
         )
 
         if mask:
-            mask_block = mask.process_block(roi=block.write_roi)
             data *= mask_block
 
         if len(relabeling_dict) > 0:
@@ -548,7 +560,7 @@ class ConnectedComponents(ComputeConfigMixin):
                 )
             except:
                 raise Exception(
-                    f"Error in relabel_block {block.write_roi}, {list(relabeling_dict.keys())}, {list(relabeling_dict.values())}"
+                    f"Error in relabel_block {block.read_roi}, {list(relabeling_dict.keys())}, {list(relabeling_dict.values())}"
                 )
 
         output_idi.ds[block.write_roi] = data
@@ -605,6 +617,7 @@ class ConnectedComponents(ComputeConfigMixin):
                 self.relabeling_dict_path,
                 self.num_workers,
                 self.compute_args,
+                mask=None,
             )
 
         if self.delete_tmp:
