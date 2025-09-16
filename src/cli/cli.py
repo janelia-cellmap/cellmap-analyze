@@ -91,6 +91,21 @@ def watershed_segmentation():
             ws.get_watershed_segmentation()
 
 
+def morphological_operations():
+    from cellmap_analyze.process.morphological_operations import (
+        MorphologicalOperations,
+    )
+
+    rp = RunProperties()
+    with io_util.tee_streams(rp.logpath):
+        os.chdir(rp.execution_directory)
+        with io_util.TimingMessager(
+            "MorphologicalOperations", logger, final_message="Complete success"
+        ):
+            mo = MorphologicalOperations(**rp.run_config)
+            mo.perform_morphological_operation()
+
+
 def fill_holes():
     from cellmap_analyze.process.fill_holes import FillHoles
 
