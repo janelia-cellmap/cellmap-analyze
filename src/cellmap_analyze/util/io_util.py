@@ -1,14 +1,10 @@
 import os
 import sys
 import time
-import socket
-import smtplib
-import getpass
 import logging
 import traceback
-from email.mime.text import MIMEText
 from contextlib import ContextDecorator, contextmanager
-from subprocess import Popen, PIPE, TimeoutExpired, run as subprocess_run
+from subprocess import Popen, PIPE, TimeoutExpired
 from datetime import datetime
 import argparse
 import yaml
@@ -38,7 +34,6 @@ def get_name_from_path(path):
     if data_name.startswith("/"):
         data_name = data_name[1:]
     data_name = split_on_last_scale(data_name)
-    data_name = data_name.split("/")[-1]
     return data_name
 
 
