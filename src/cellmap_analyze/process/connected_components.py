@@ -19,9 +19,11 @@ import os
 from cellmap_analyze.util.mask_util import MasksFromConfig
 from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
+from scipy.ndimage import gaussian_filter
 import cc3d
 from collections import Counter
 import shutil
+from cellmap_analyze.util.measure_util import trim_array
 from cellmap_analyze.cythonizing.touching import get_touching_ids
 
 logging.basicConfig(
@@ -39,6 +41,7 @@ class ConnectedComponents(ComputeConfigMixin):
         input_path=None,
         intensity_threshold_minimum=-1,
         intensity_threshold_maximum=np.inf,  # exclusive
+        gaussian_smoothing_radius_nm=None,
         mask_config=None,
         connected_components_blockwise_path=None,
         object_labels_path=None,
@@ -123,6 +126,7 @@ class ConnectedComponents(ComputeConfigMixin):
             self.connected_components_blockwise_idi = ImageDataInterface(
                 connected_components_blockwise_path, chunk_shape=chunk_shape
             )
+        self.gaussian_smoothing_radius_nm = gaussian_smoothing_radius_nm
         self.output_path = output_path
 
         self.relabeling_dict_path = f"{self.output_path}_relabeling_dict/"
@@ -156,6 +160,7 @@ class ConnectedComponents(ComputeConfigMixin):
         connected_components_blockwise_idi: ImageDataInterface,
         intensity_threshold_minimum=-1,
         intensity_threshold_maximum=np.inf,
+        gaussian_smoothing_radius_nm=None,
         calculating_holes=False,
         oob_value=None,
         invert=None,
@@ -166,17 +171,41 @@ class ConnectedComponents(ComputeConfigMixin):
         if calculating_holes:
             invert = True
 
+        padding_nm = 0
+        if gaussian_smoothing_radius_nm:
+            gaussian_smoothing_radius_voxels = (
+                gaussian_smoothing_radius_nm / input_idi.voxel_size[0]
+            )
+            padding_voxels = int(2 * gaussian_smoothing_radius_voxels + 1)
+            padding_nm = padding_voxels * input_idi.voxel_size[0]
+
         block = create_block_from_index(
-            connected_components_blockwise_idi,
-            block_index,
+            connected_components_blockwise_idi, block_index, padding=padding_nm
         )
         if mask:
-            mask_block = mask.process_block(roi=block.read_roi)
-            if not np.any(mask_block):
+            # mask block will always just be the normal size, regardless of smoothing and associated padding
+            mask_block = create_block_from_index(
+                connected_components_blockwise_idi, block_index
+            )
+            mask_data = mask.process_block(roi=mask_block.read_roi)
+
+            if not np.any(mask_data):
                 connected_components_blockwise_idi.ds[block.write_roi] = 0
                 return
 
         input = input_idi.to_ndarray_ts(block.read_roi)
+
+        if gaussian_smoothing_radius_nm:
+            gaussian_smoothing_radius_voxels = (
+                gaussian_smoothing_radius_nm / input_idi.voxel_size[0]
+            )
+            input = gaussian_filter(
+                input.astype(np.float32),
+                sigma=gaussian_smoothing_radius_voxels,
+                mode="nearest",
+            )
+            input = trim_array(input, padding_voxels)
+
         cc3d_connectivity = 6 + 12 * (connectivity >= 2) + 8 * (connectivity >= 3)
 
         if binarize:
@@ -188,7 +217,7 @@ class ConnectedComponents(ComputeConfigMixin):
                 )
 
             if mask:
-                thresholded *= mask_block
+                thresholded *= mask_data
 
             connected_components = cc3d.connected_components(
                 thresholded,
@@ -198,7 +227,7 @@ class ConnectedComponents(ComputeConfigMixin):
             )
         else:
             if mask:
-                input *= mask_block
+                input *= mask_data
 
             connected_components = cc3d.connected_components(
                 input,
@@ -246,6 +275,7 @@ class ConnectedComponents(ComputeConfigMixin):
             self.connected_components_blockwise_idi,
             self.intensity_threshold_minimum,
             self.intensity_threshold_maximum,
+            self.gaussian_smoothing_radius_nm,
             self.calculating_holes,
             self.oob_value,
             self.invert,
