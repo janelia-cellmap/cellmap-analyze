@@ -2,7 +2,7 @@ import pytest
 from scipy import ndimage
 from skimage import measure
 from cellmap_analyze.process.connected_components import ConnectedComponents
-
+from scipy.ndimage import gaussian_filter
 import numpy as np
 
 from cellmap_analyze.util.image_data_interface import (
@@ -207,6 +207,47 @@ def test_binarize(tmp_zarr, binarizable_image, binarize):
     ground_truth = cc3d.connected_components(
         binarizable_image, binary_image=binarize, connectivity=6
     )
+
+    assert np.array_equal(
+        test_data,
+        ground_truth,
+    )
+
+
+@pytest.mark.parametrize(
+    "gaussian_smoothing_radius_voxels",
+    [1, 2, 4],
+)
+def test_gaussian_smoothing(
+    tmp_zarr,
+    intensity_image,
+    voxel_size,
+    gaussian_smoothing_radius_voxels,
+):
+    gaussian_smoothing_radius_nm = gaussian_smoothing_radius_voxels * voxel_size
+    cc = ConnectedComponents(
+        input_path=f"{tmp_zarr}/intensity_image/s0",
+        output_path=f"{tmp_zarr}/test_connected_components_gaussian_smoothing_radius_nm_{gaussian_smoothing_radius_nm}",
+        intensity_threshold_minimum=5,
+        gaussian_smoothing_radius_nm=gaussian_smoothing_radius_nm,
+        num_workers=1,
+        connectivity=1,
+    )
+    cc.get_connected_components()
+
+    smoothed_image = (
+        gaussian_filter(
+            intensity_image.astype(np.float32),
+            sigma=gaussian_smoothing_radius_voxels,
+            mode="constant",
+            cval=0,
+        )
+        > 5
+    )
+    ground_truth = cc3d.connected_components(smoothed_image, connectivity=6)
+    test_data = ImageDataInterface(
+        f"{tmp_zarr}/test_connected_components_gaussian_smoothing_radius_nm_{gaussian_smoothing_radius_nm}/s0"
+    ).to_ndarray_ts()
 
     assert np.array_equal(
         test_data,
