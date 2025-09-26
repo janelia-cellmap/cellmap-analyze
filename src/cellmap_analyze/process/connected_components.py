@@ -41,7 +41,7 @@ class ConnectedComponents(ComputeConfigMixin):
         input_path=None,
         intensity_threshold_minimum=-1,
         intensity_threshold_maximum=np.inf,  # exclusive
-        gaussian_smoothing_radius_nm=None,
+        gaussian_smoothing_sigma_nm=None,
         mask_config=None,
         connected_components_blockwise_path=None,
         object_labels_path=None,
@@ -126,7 +126,7 @@ class ConnectedComponents(ComputeConfigMixin):
             self.connected_components_blockwise_idi = ImageDataInterface(
                 connected_components_blockwise_path, chunk_shape=chunk_shape
             )
-        self.gaussian_smoothing_radius_nm = gaussian_smoothing_radius_nm
+        self.gaussian_smoothing_sigma_nm = gaussian_smoothing_sigma_nm
         self.output_path = output_path
 
         self.relabeling_dict_path = f"{self.output_path}_relabeling_dict/"
@@ -160,7 +160,7 @@ class ConnectedComponents(ComputeConfigMixin):
         connected_components_blockwise_idi: ImageDataInterface,
         intensity_threshold_minimum=-1,
         intensity_threshold_maximum=np.inf,
-        gaussian_smoothing_radius_nm=None,
+        gaussian_smoothing_sigma_nm=None,
         calculating_holes=False,
         oob_value=None,
         invert=None,
@@ -172,11 +172,12 @@ class ConnectedComponents(ComputeConfigMixin):
             invert = True
 
         padding_nm = 0
-        if gaussian_smoothing_radius_nm:
-            gaussian_smoothing_radius_voxels = (
-                gaussian_smoothing_radius_nm / input_idi.voxel_size[0]
+        if gaussian_smoothing_sigma_nm:
+            gaussian_smoothing_sigma_voxels = (
+                gaussian_smoothing_sigma_nm / input_idi.voxel_size[0]
             )
-            padding_voxels = int(2 * gaussian_smoothing_radius_voxels + 1)
+            truncate = 4.0  # default
+            padding_voxels = int(truncate * gaussian_smoothing_sigma_voxels + 0.5)
             padding_nm = padding_voxels * input_idi.voxel_size[0]
 
         block = create_block_from_index(
@@ -195,13 +196,13 @@ class ConnectedComponents(ComputeConfigMixin):
 
         input = input_idi.to_ndarray_ts(block.read_roi)
 
-        if gaussian_smoothing_radius_nm:
-            gaussian_smoothing_radius_voxels = (
-                gaussian_smoothing_radius_nm / input_idi.voxel_size[0]
+        if gaussian_smoothing_sigma_nm:
+            gaussian_smoothing_sigma_voxels = (
+                gaussian_smoothing_sigma_nm / input_idi.voxel_size[0]
             )
             input = gaussian_filter(
                 input.astype(np.float32),
-                sigma=gaussian_smoothing_radius_voxels,
+                sigma=gaussian_smoothing_sigma_voxels,
                 mode="nearest",
             )
             input = trim_array(input, padding_voxels)
@@ -275,7 +276,7 @@ class ConnectedComponents(ComputeConfigMixin):
             self.connected_components_blockwise_idi,
             self.intensity_threshold_minimum,
             self.intensity_threshold_maximum,
-            self.gaussian_smoothing_radius_nm,
+            self.gaussian_smoothing_sigma_nm,
             self.calculating_holes,
             self.oob_value,
             self.invert,
