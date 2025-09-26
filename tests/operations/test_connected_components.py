@@ -215,21 +215,21 @@ def test_binarize(tmp_zarr, binarizable_image, binarize):
 
 
 @pytest.mark.parametrize(
-    "gaussian_smoothing_radius_voxels",
-    [1, 2, 4],
+    "gaussian_smoothing_sigma_voxels",
+    [1, 1.5, 2, 4],
 )
 def test_gaussian_smoothing(
     tmp_zarr,
     intensity_image,
     voxel_size,
-    gaussian_smoothing_radius_voxels,
+    gaussian_smoothing_sigma_voxels,
 ):
-    gaussian_smoothing_radius_nm = gaussian_smoothing_radius_voxels * voxel_size
+    gaussian_smoothing_sigma_nm = gaussian_smoothing_sigma_voxels * voxel_size
     cc = ConnectedComponents(
         input_path=f"{tmp_zarr}/intensity_image/s0",
-        output_path=f"{tmp_zarr}/test_connected_components_gaussian_smoothing_radius_nm_{gaussian_smoothing_radius_nm}",
+        output_path=f"{tmp_zarr}/test_connected_components_gaussian_smoothing_sigma_nm_{gaussian_smoothing_sigma_nm}",
         intensity_threshold_minimum=5,
-        gaussian_smoothing_radius_nm=gaussian_smoothing_radius_nm,
+        gaussian_smoothing_sigma_nm=gaussian_smoothing_sigma_nm,
         num_workers=1,
         connectivity=1,
     )
@@ -238,7 +238,7 @@ def test_gaussian_smoothing(
     smoothed_image = (
         gaussian_filter(
             intensity_image.astype(np.float32),
-            sigma=gaussian_smoothing_radius_voxels,
+            sigma=gaussian_smoothing_sigma_voxels,
             mode="constant",
             cval=0,
         )
@@ -246,7 +246,7 @@ def test_gaussian_smoothing(
     )
     ground_truth = cc3d.connected_components(smoothed_image, connectivity=6)
     test_data = ImageDataInterface(
-        f"{tmp_zarr}/test_connected_components_gaussian_smoothing_radius_nm_{gaussian_smoothing_radius_nm}/s0"
+        f"{tmp_zarr}/test_connected_components_gaussian_smoothing_sigma_nm_{gaussian_smoothing_sigma_nm}/s0"
     ).to_ndarray_ts()
 
     assert np.array_equal(
