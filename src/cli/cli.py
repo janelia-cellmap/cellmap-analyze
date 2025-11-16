@@ -76,6 +76,19 @@ def mutex_watershed():
             mws.get_connected_components()
 
 
+def skeletonize():
+    from cellmap_analyze.process.skeletonize import Skeletonize
+
+    rp = RunProperties()
+    with io_util.tee_streams(rp.logpath):
+        os.chdir(rp.execution_directory)
+        with io_util.TimingMessager(
+            "Skeletonization", logger, final_message="Complete success"
+        ):
+            skel = Skeletonize(**rp.run_config)
+            skel.skeletonize()
+
+
 def watershed_segmentation():
     from cellmap_analyze.process.watershed_segmentation import (
         WatershedSegmentation,

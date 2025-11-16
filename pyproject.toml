@@ -25,6 +25,7 @@ dependencies = [
   "dask[distributed]==2025.5.1",
   "dask-jobqueue==0.9.0",
   "fastmorph",
+  "pybind11-rdp==0.1.5",
   "scipy",
   "scikit-image",
   "tensorstore",
@@ -44,6 +45,7 @@ connected-components = "cli.cli:connected_components"
 clean-connected-components = "cli.cli:clean_connected_components"
 contact-sites = "cli.cli:contact_sites"
 mutex-watershed = "cli.cli:mutex_watershed"
+skeletonize = "cli.cli:skeletonize"
 watershed-segmentation = "cli.cli:watershed_segmentation"
 morphological-operations = "cli.cli:morphological_operations"
 fill-holes = "cli.cli:fill_holes"

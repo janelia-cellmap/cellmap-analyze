@@ -623,6 +623,43 @@ def tmp_object_information_csv(shared_tmpdir):
 
 
 @pytest.fixture(scope="session")
+def segmentation_for_skeleton():
+    """Create a segmentation with multiple distinct IDs of various shapes for skeletonization tests."""
+    # Use larger shape for more complex structures
+    seg = np.zeros((50, 50, 50), dtype=np.uint64)
+
+    # ID 1: Small cube in corner
+    seg[1:4, 1:4, 1:4] = 1
+
+    # ID 2: Elongated structure (good for skeletonization)
+    seg[5:15, 2:5, 2:5] = 2
+
+    # ID 3: Another elongated structure (perpendicular to ID 2)
+    seg[2:5, 5:15, 2:5] = 3
+
+    # ID 4: Sphere (should skeletonize to a point or small cluster)
+    center = (25, 25, 25)
+    radius = 4
+    z, y, x = np.ogrid[0:50, 0:50, 0:50]
+    sphere_mask = (z - center[0])**2 + (y - center[1])**2 + (x - center[2])**2 <= radius**2
+    seg[sphere_mask] = 4
+
+    # ID 5: Cross/plus shape (3D cross with branches in X, Y, Z directions)
+    # Center bar along Z
+    seg[35:45, 20:22, 20:22] = 5
+    # Branch along X
+    seg[39:41, 20:22, 15:25] = 5
+    # Branch along Y
+    seg[39:41, 15:25, 20:22] = 5
+
+    # ID 6: L-shaped structure
+    seg[5:10, 30:35, 30:32] = 6  # Vertical part
+    seg[8:10, 30:32, 30:40] = 6  # Horizontal part
+
+    return seg
+
+
+@pytest.fixture(scope="session")
 def test_image_dict(
     blockwise_connected_components,
     connected_components,
@@ -649,6 +686,7 @@ def test_image_dict(
     contact_sites_distance_1,
     contact_sites_distance_2,
     contact_sites_distance_3,
+    segmentation_for_skeleton,
 ):
     dict = {
         "blockwise_connected_components": blockwise_connected_components,
@@ -676,6 +714,7 @@ def test_image_dict(
         "contact_sites_distance_1": contact_sites_distance_1,
         "contact_sites_distance_2": contact_sites_distance_2,
         "contact_sites_distance_3": contact_sites_distance_3,
+        "segmentation_for_skeleton": segmentation_for_skeleton,
     }
     return dict
 
