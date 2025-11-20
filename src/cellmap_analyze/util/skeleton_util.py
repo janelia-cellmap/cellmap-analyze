@@ -245,20 +245,44 @@ class CustomSkeleton:
 
         simplified_polylines = []
         all_vertices_set = set()
-        
+
         # Use consistent rounding precision (e.g., 6 decimal places)
         PRECISION = 6
-    
+
         for i, polyline in enumerate(polylines):
-            simplified = rdp(polyline, epsilon=tolerance_nm)
-            
+            # Check if this is a loop (first vertex == last vertex)
+            is_loop = False
+
+            if len(polyline) > 2:
+                # Compare coordinates (handle both tuple and array formats)
+                first = np.asarray(polyline[0])
+                last = np.asarray(polyline[-1])
+                if np.allclose(first, last):
+                    is_loop = True
+
+            # For loops: keep the closing vertex (A, B, C, D, A)
+            # RDP will preserve both first and last vertices (even though they're at the same position)
+            # This naturally preserves the loop structure
+            polyline_for_rdp = polyline
+
+            # Apply RDP simplification
+            simplified = rdp(polyline_for_rdp, epsilon=tolerance_nm)
+
             # Round vertices to consistent precision
             simplified_rounded = []
             for vertex in simplified:
                 v_rounded = tuple(round(float(x), PRECISION) for x in vertex)
                 simplified_rounded.append(v_rounded)
                 all_vertices_set.add(v_rounded)
-            
+
+            # For loops, simplified should already have first == last from RDP
+            # Verify this is the case
+            if is_loop and len(simplified_rounded) > 1:
+                # Double-check the loop is still closed after RDP
+                if simplified_rounded[0] != simplified_rounded[-1]:
+                    # This shouldn't happen since RDP preserves endpoints, but just in case
+                    simplified_rounded.append(simplified_rounded[0])
+
             simplified_polylines.append(simplified_rounded)
     
         logger.info(f"RDP produced {len(all_vertices_set)} unique vertices")
@@ -397,18 +421,26 @@ class CustomSkeleton:
                         
                     next_node = next_nodes[0]
                     edge = tuple(sorted([current, next_node]))
-                    
+
                     if edge in visited_edges:
                         # We've hit a cycle or already processed edge
+                        # Check if this creates a loop back to start
+                        if next_node == start_node:
+                            # This is a loop - mark it by appending start again
+                            polyline.append(current)
+                            polyline.append(start_node)
+                            polylines.append(polyline)
+                            visited_edges.add(edge)
                         break
-                        
+
                     visited_edges.add(edge)
                     prev = current
                     current = next_node
-                
-                # Add final special node
-                polyline.append(current)
-                polylines.append(polyline)
+
+                # Add final special node (if we didn't break due to loop)
+                if len(polyline) == 1 or polyline[-1] != start_node:
+                    polyline.append(current)
+                    polylines.append(polyline)
         
         t2 = time.time()
         logger.info(f"Extracted {len(polylines)} polylines in {t2-t1:.4f}s")
@@ -418,7 +450,7 @@ class CustomSkeleton:
         if len(visited_edges) < len(all_edges):
             missing_edges = all_edges - visited_edges
             logger.info(f"Found {len(missing_edges)} edges in isolated cycles")
-            
+
             # Handle cycles separately
             g_remaining = g.edge_subgraph(missing_edges).copy()
             for component in nx.connected_components(g_remaining):
@@ -429,7 +461,7 @@ class CustomSkeleton:
                     cycle = [start]
                     current = start
                     prev = None
-                    
+
                     while True:
                         neighbors = [n for n in g_sub.neighbors(current) if n != prev]
                         if not neighbors:
@@ -440,7 +472,9 @@ class CustomSkeleton:
                         cycle.append(next_node)
                         prev = current
                         current = next_node
-                    
+
+                    # Mark as loop by appending first vertex to close the cycle
+                    cycle.append(start)
                     polylines.append(cycle)
         
         t3 = time.time()
