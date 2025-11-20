@@ -887,6 +887,18 @@ class CustomSkeleton:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         logger.info(f"Created directory in {time.time() - makedirs_start:.4f}s")
 
+        # Handle empty skeleton specially (neuroglancer library doesn't support empty arrays)
+        if len(self.vertices) == 0:
+            import struct
+            with open(path, "wb") as f:
+                # Write num_vertices (uint32) and num_edges (uint32), both 0
+                f.write(struct.pack('<II', 0, 0))
+            logger.info(f"Wrote empty skeleton (8 bytes)")
+            logger.info(
+                f"Total write_neuroglancer_skeleton time: {time.time() - start_time:.4f}s"
+            )
+            return
+
         encode_start = time.time()
         with open(path, "wb") as f:
             skel = NeuroglancerSkeleton(

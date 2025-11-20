@@ -138,8 +138,15 @@ class Skeletonize(ComputeConfigMixin):
                 # Check if erosion removed everything
                 if not np.any(data):
                     logger.warning(
-                        f"Erosion removed all voxels for ID {id_value}, skipping"
+                        f"Erosion removed all voxels for ID {id_value}, writing empty skeleton"
                     )
+                    # Write empty skeleton files
+                    empty_skeleton = CustomSkeleton(vertices=[], edges=[])
+                    full_path = f"{output_path}/full/{id_value}"
+                    empty_skeleton.write_neuroglancer_skeleton(full_path)
+                    simplified_path = f"{output_path}/simplified/{id_value}"
+                    empty_skeleton.write_neuroglancer_skeleton(simplified_path)
+                    logger.info(f"Wrote empty skeleton for ID {id_value}")
                     return
 
             # Skeletonize
@@ -147,7 +154,14 @@ class Skeletonize(ComputeConfigMixin):
 
             # Check if skeletonization produced anything
             if not np.any(skel):
-                logger.warning(f"Skeletonization produced no voxels for ID {id_value}")
+                logger.warning(f"Skeletonization produced no voxels for ID {id_value}, writing empty skeleton")
+                # Write empty skeleton files
+                empty_skeleton = CustomSkeleton(vertices=[], edges=[])
+                full_path = f"{output_path}/full/{id_value}"
+                empty_skeleton.write_neuroglancer_skeleton(full_path)
+                simplified_path = f"{output_path}/simplified/{id_value}"
+                empty_skeleton.write_neuroglancer_skeleton(simplified_path)
+                logger.info(f"Wrote empty skeleton for ID {id_value}")
                 return
 
             # Convert to custom skeleton format
@@ -191,8 +205,15 @@ class Skeletonize(ComputeConfigMixin):
             # Check if pruning/simplification removed all vertices
             if len(simplified.vertices) == 0:
                 logger.warning(
-                    f"Pruning/simplification removed all vertices for ID {id_value}, skipping"
+                    f"Pruning/simplification removed all vertices for ID {id_value}, writing empty skeleton"
                 )
+                # Write empty skeleton files
+                empty_skeleton = CustomSkeleton(vertices=[], edges=[])
+                full_path = f"{output_path}/full/{id_value}"
+                empty_skeleton.write_neuroglancer_skeleton(full_path)
+                simplified_path = f"{output_path}/simplified/{id_value}"
+                empty_skeleton.write_neuroglancer_skeleton(simplified_path)
+                logger.info(f"Wrote empty skeleton for ID {id_value}")
                 return
 
             # Ensure edges are properly shaped numpy arrays before writing

@@ -154,25 +154,18 @@ def test_skeletonize_single_worker(tmp_zarr, tmp_skeletonize_csv):
             seg_props = json.load(f)
             assert seg_props["@type"] == "neuroglancer_segment_properties"
             assert "ids" in seg_props["inline"]
-            assert set(seg_props["inline"]["ids"]) == {"1", "2", "3", "4", "5", "6"}
+            assert set(seg_props["inline"]["ids"]) == {"1", "2", "3", "4", "5", "6", "7"}
 
-    # Check that skeleton files were created for IDs that didn't get eroded away
-    # Note: Some IDs (like the cross shape) may be completely removed by erosion
-    ids = [1, 2, 3, 4, 5, 6]
-    files_found = 0
+    # Check that skeleton files were created for all IDs (including empty skeletons)
+    # Note: Some IDs (like ID 7 figure-8) may be completely removed by erosion and written as empty skeletons
+    ids = [1, 2, 3, 4, 5, 6, 7]
     for id_val in ids:
-        # Check if files exist (they may not if erosion removed all voxels)
-        full_exists = os.path.exists(f"{output_path}/full/{id_val}")
-        simplified_exists = os.path.exists(f"{output_path}/simplified/{id_val}")
+        # All IDs should have skeleton files (even if empty)
+        full_path = f"{output_path}/full/{id_val}"
+        simplified_path = f"{output_path}/simplified/{id_val}"
 
-        # If one exists, both should exist
-        if full_exists or simplified_exists:
-            assert full_exists, f"Full skeleton missing for ID {id_val}"
-            assert simplified_exists, f"Simplified skeleton missing for ID {id_val}"
-            files_found += 1
-
-    # At least some IDs should have produced skeletons
-    assert files_found > 0, "No skeleton files were created"
+        assert os.path.exists(full_path), f"Full skeleton missing for ID {id_val}"
+        assert os.path.exists(simplified_path), f"Simplified skeleton missing for ID {id_val}"
 
 
 def test_skeletonize_produces_reasonable_skeletons(
@@ -200,7 +193,7 @@ def test_skeletonize_produces_reasonable_skeletons(
     skeletonizer.skeletonize()
 
     # For each ID, verify the skeleton has reasonable properties
-    ids = [1, 2, 3, 4, 5, 6]
+    ids = [1, 2, 3, 4, 5, 6, 7]
     for id_val in ids:
         test_skeleton_path = f"{output_path}/full/{id_val}"
 
@@ -212,8 +205,9 @@ def test_skeletonize_produces_reasonable_skeletons(
             test_skeleton_path
         )
 
-        # Verify skeleton has at least one vertex
-        assert len(test_vertices) > 0, f"ID {id_val}: Skeleton has no vertices"
+        # Skip empty skeletons (erosion may have removed all voxels)
+        if len(test_vertices) == 0:
+            continue
 
         # Verify vertices are within reasonable bounds (should be near the bounding box)
         df = pd.read_csv(tmp_skeletonize_csv, index_col=0)
@@ -279,7 +273,7 @@ def test_skeletonize_without_erosion(tmp_zarr, tmp_skeletonize_csv):
 
     # Check that skeleton files were created
     # Without erosion, all IDs should produce skeletons
-    ids = [1, 2, 3, 4, 5, 6]
+    ids = [1, 2, 3, 4, 5, 6, 7]
     for id_val in ids:
         full_path = f"{output_path}/full/{id_val}"
         simplified_path = f"{output_path}/simplified/{id_val}"
@@ -449,23 +443,25 @@ def test_skeletonize_complex_shapes(tmp_zarr, tmp_skeletonize_csv, voxel_size):
     if os.path.exists(cross_path):
         cross_verts, cross_edges = CustomSkeleton.read_neuroglancer_skeleton(cross_path)
 
-        # Build adjacency to check for branch points
-        from collections import defaultdict
+        # Skip if empty (erosion may have removed all voxels)
+        if len(cross_verts) > 0:
+            # Build adjacency to check for branch points
+            from collections import defaultdict
 
-        adjacency = defaultdict(set)
-        for edge in cross_edges:
-            adjacency[edge[0]].add(edge[1])
-            adjacency[edge[1]].add(edge[0])
+            adjacency = defaultdict(set)
+            for edge in cross_edges:
+                adjacency[edge[0]].add(edge[1])
+                adjacency[edge[1]].add(edge[0])
 
-        # Count nodes with degree > 2 (branch points)
-        branch_points = sum(
-            1 for node_id in range(len(cross_verts)) if len(adjacency[node_id]) > 2
-        )
+            # Count nodes with degree > 2 (branch points)
+            branch_points = sum(
+                1 for node_id in range(len(cross_verts)) if len(adjacency[node_id]) > 2
+            )
 
-        # Cross should have at least one branch point where the three branches meet
-        assert (
-            branch_points >= 1
-        ), f"Cross skeleton has no branch points. Found {branch_points}, expected >= 1"
+            # Cross should have at least one branch point where the three branches meet
+            assert (
+                branch_points >= 1
+            ), f"Cross skeleton has no branch points. Found {branch_points}, expected >= 1"
 
     # ID 6: L-shape - should have at least one vertex
     # (may have no edges if erosion shrinks it to a point)
