@@ -476,3 +476,80 @@ def test_skeletonize_complex_shapes(tmp_zarr, tmp_skeletonize_csv, voxel_size):
         # L-shape should have at least one vertex
         assert len(l_verts) > 0, "L-shape skeleton is empty"
         # Edges are optional - after erosion it might be a single point
+
+
+def test_skeletonize_preserves_loops(tmp_zarr, tmp_skeletonize_csv, voxel_size):
+    """
+    Test that loops are preserved during simplification.
+
+    This test uses ID 7 (figure-8 shape) which should produce a skeleton with loops.
+    After simplification, the loops should still be present (not broken into open paths).
+    """
+    import networkx as nx
+
+    output_path = tmp_zarr + "/test_skeletonize_loops"
+
+    # Run skeletonization WITHOUT erosion to preserve the figure-8 structure
+    skeletonizer = Skeletonize(
+        segmentation_path=f"{tmp_zarr}/segmentation_for_skeleton/s0",
+        output_path=output_path,
+        csv_path=tmp_skeletonize_csv,
+        erosion=False,  # No erosion to preserve loop structure
+        min_branch_length_nm=0,
+        tolerance_nm=5,
+        num_workers=1,
+    )
+
+    skeletonizer.skeletonize()
+
+    # ID 7: Figure-8 shape - should preserve loops after simplification
+    figure8_path = f"{output_path}/simplified/7"
+
+    assert os.path.exists(
+        figure8_path
+    ), "Figure-8 skeleton file not found. The figure-8 structure (ID 7) should be present."
+
+    fig8_verts, fig8_edges = CustomSkeleton.read_neuroglancer_skeleton(figure8_path)
+
+    # Verify we got some skeleton
+    assert len(fig8_verts) > 0, "Figure-8 skeleton has no vertices"
+    assert len(fig8_edges) > 0, "Figure-8 skeleton has no edges"
+
+    # Build a graph from the skeleton to analyze topology
+    g = nx.Graph()
+    g.add_edges_from(fig8_edges)
+
+    # Check that the graph is connected
+    assert nx.is_connected(g), "Figure-8 skeleton is not connected"
+
+    # Find cycles in the graph
+    cycles = nx.cycle_basis(g)
+
+    # A figure-8 should have at least one loop (ideally two, but simplification might merge them)
+    # The key property is that there ARE loops - not just a tree structure
+    assert len(cycles) >= 1, (
+        f"Figure-8 skeleton has no cycles after simplification. "
+        f"Found {len(cycles)} cycles, expected >= 1. "
+        "This indicates loops were broken during simplification."
+    )
+
+    # Verify that loops are properly closed
+    # For each polyline in the skeleton, check if it's a loop
+    # (We need to reconstruct polylines from the graph or check the internal representation)
+    print(f"Figure-8 skeleton has {len(fig8_verts)} vertices, {len(fig8_edges)} edges")
+    print(f"Found {len(cycles)} cycle(s) in the graph")
+
+    # Additional check: in a proper figure-8, we expect at least one branch point
+    # (the point where the two loops connect)
+    degrees = dict(g.degree())
+    branch_points = sum(1 for node_id in g.nodes if degrees[node_id] > 2)
+
+    print(f"Found {branch_points} branch point(s)")
+
+    # A figure-8 should have at least one branch point where loops connect
+    # (unless simplification reduced it to a single loop, which is still valid)
+    if len(cycles) > 1:
+        assert branch_points >= 1, (
+            f"Figure-8 with {len(cycles)} loops should have at least 1 branch point, "
+            f"but found {branch_points}"
+        )

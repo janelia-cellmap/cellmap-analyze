@@ -626,7 +626,7 @@ def tmp_object_information_csv(shared_tmpdir):
 def segmentation_for_skeleton():
     """Create a segmentation with multiple distinct IDs of various shapes for skeletonization tests."""
     # Use larger shape for more complex structures
-    seg = np.zeros((50, 50, 50), dtype=np.uint64)
+    seg = np.zeros((50, 50, 50), dtype=np.uint8)
 
     # ID 1: Small cube in corner
     seg[1:4, 1:4, 1:4] = 1
@@ -641,7 +641,9 @@ def segmentation_for_skeleton():
     center = (25, 25, 25)
     radius = 4
     z, y, x = np.ogrid[0:50, 0:50, 0:50]
-    sphere_mask = (z - center[0])**2 + (y - center[1])**2 + (x - center[2])**2 <= radius**2
+    sphere_mask = (z - center[0]) ** 2 + (y - center[1]) ** 2 + (
+        x - center[2]
+    ) ** 2 <= radius**2
     seg[sphere_mask] = 4
 
     # ID 5: Cross/plus shape (3D cross with branches in X, Y, Z directions)
@@ -655,6 +657,43 @@ def segmentation_for_skeleton():
     # ID 6: L-shaped structure
     seg[5:10, 30:35, 30:32] = 6  # Vertical part
     seg[8:10, 30:32, 30:40] = 6  # Horizontal part
+
+    # ID 7: Figure-8 shape (two loops in a single z-plane)
+    z, y, x = np.ogrid[0:50, 0:50, 0:50]
+
+    # Fix the plane for the figure 8
+    z_plane = 15
+    plane_mask = z == z_plane
+
+    # Loop parameters
+    bottom_center = (45, 15)  # (y, x)
+    top_center = (45, 23)
+    radius = 3
+
+    # Bottom loop
+    bottom_ring = (
+        plane_mask
+        & (
+            (y - bottom_center[0]) ** 2 + (x - bottom_center[1]) ** 2
+            >= (radius - 0.5) ** 2
+        )
+        & (
+            (y - bottom_center[0]) ** 2 + (x - bottom_center[1]) ** 2
+            <= (radius + 0.5) ** 2
+        )
+    )
+    seg[bottom_ring] = 7
+
+    # Top loop
+    top_ring = (
+        plane_mask
+        & ((y - top_center[0]) ** 2 + (x - top_center[1]) ** 2 >= (radius - 0.5) ** 2)
+        & ((y - top_center[0]) ** 2 + (x - top_center[1]) ** 2 <= (radius + 0.5) ** 2)
+    )
+    seg[top_ring] = 7
+
+    # The connection (branch point) — also in a single plane
+    seg[z_plane, 44:47, 18:20] = 7
 
     return seg
 
@@ -739,6 +778,7 @@ def write_zarrs(tmp_zarr, test_image_dict, voxel_size, chunk_size):
                 data_name != "segmentation_cylinders"
                 and data_name != "affinities_cylinders"
                 and data_name != "segmentation_spheres"
+                and data_name != "segmentation_for_skeleton"
             )
             else np.array((20, 20, 20)) * current_voxel_size
         )
