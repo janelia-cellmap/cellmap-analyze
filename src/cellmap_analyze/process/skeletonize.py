@@ -30,7 +30,7 @@ class Skeletonize(ComputeConfigMixin):
         min_branch_length_nm=100,
         tolerance_nm=50,
         num_workers=10,
-        timeout=None,
+        timeout=5,
     ):
         """
         Skeletonize a segmentation, parallelized over IDs.
@@ -169,6 +169,12 @@ class Skeletonize(ComputeConfigMixin):
                 )
                 for v in skeleton.vertices
             ]
+
+            # Extract polylines with transformed coordinates
+            # This ensures that prune() and simplify() have access to polylines
+            # with the correct global coordinates
+            g = skeleton.skeleton_to_graph()
+            skeleton.polylines = skeleton.get_polylines_positions_from_graph(g)
 
             # Prune
             if min_branch_length_nm > 0:
