@@ -67,10 +67,9 @@ class MutexWatershed(ComputeConfigMixin):
     ):
         super().__init__(num_workers)
         self.neighborhood = neighborhood
-        self.affinities_idi = ImageDataInterface(
-            affinities_path, chunk_shape=chunk_shape
-        )
-
+        self.affinities_idi = ImageDataInterface(affinities_path)
+        if chunk_shape is None:
+            chunk_shape = self.affinities_idi.chunk_shape[1:]
         # affinities information
         self.neighborhood = neighborhood
         self.adjacent_edge_bias = adjacent_edge_bias
@@ -100,7 +99,7 @@ class MutexWatershed(ComputeConfigMixin):
             dtype=np.uint64,
             voxel_size=self.voxel_size,
             total_roi=self.roi,
-            write_size=np.array(self.affinities_idi.chunk_shape[1:]) * self.voxel_size,
+            write_size=np.array(chunk_shape) * self.voxel_size,
         )
         self.connected_components_blockwise_idi = ImageDataInterface(
             self.connected_components_blockwise_path + "/s0",
@@ -263,9 +262,9 @@ class MutexWatershed(ComputeConfigMixin):
             mask_block = mask.process_block(roi=block.read_roi)
             if not mask_block.any():
                 connected_components_blockwise_idi.ds[block.write_roi] = 0
-        
+
         affinities = affinities_idi.to_ndarray_ts(block.read_roi)
-        
+
         if mask:
             affinities *= mask_block[None, :, :, :]
 
@@ -280,9 +279,13 @@ class MutexWatershed(ComputeConfigMixin):
             segmentation, connectivity=connectivity, do_opening=do_opening
         )
 
-        global_id_offset = block_index * np.prod(
-            block.full_block_size / connected_components_blockwise_idi.voxel_size[0],
-            dtype=np.uint64,
+        global_id_offset = np.uint64(
+            block_index
+            * np.prod(
+                block.full_block_size
+                / connected_components_blockwise_idi.voxel_size[0],
+                dtype=np.uint64,
+            )
         )
         segmentation[segmentation > 0] += global_id_offset
         connected_components_blockwise_idi.ds[block.write_roi] = segmentation[
@@ -292,7 +295,9 @@ class MutexWatershed(ComputeConfigMixin):
         ]
 
     def calculate_connected_components_blockwise(self):
-        num_blocks = dask_util.get_num_blocks(self.affinities_idi, roi=self.roi)
+        num_blocks = dask_util.get_num_blocks(
+            self.connected_components_blockwise_idi, roi=self.roi
+        )
         dask_util.compute_blockwise_partitions(
             num_blocks,
             self.num_workers,
@@ -317,7 +322,9 @@ class MutexWatershed(ComputeConfigMixin):
         cc = ConnectedComponents(
             connected_components_blockwise_path=self.connected_components_blockwise_path
             + "/s0",
-            output_path=self.output_path + "_eroded" if self.do_opening else self.output_path,
+            output_path=(
+                self.output_path + "_eroded" if self.do_opening else self.output_path
+            ),
             num_workers=self.num_workers,
             minimum_volume_nm_3=0 if self.do_opening else self.minimum_volume_nm_3,
             maximum_volume_nm_3=np.inf if self.do_opening else self.maximum_volume_nm_3,
@@ -335,7 +342,8 @@ class MutexWatershed(ComputeConfigMixin):
                 iterations=1,
                 num_workers=self.num_workers,
                 connectivity=self.connectivity,
-                mask_config=self.mask_config)
+                mask_config=self.mask_config,
+            )
             mo.perform_morphological_operation()
 
             ccc = CleanConnectedComponents(
@@ -350,10 +358,11 @@ class MutexWatershed(ComputeConfigMixin):
             )
             ccc.clean_connected_components()
             if self.delete_tmp:
-                dask_util.delete_tmp_dir_blockwise(self.output_path + "_eroded/s0",
+                dask_util.delete_tmp_dir_blockwise(
+                    self.output_path + "_eroded/s0", self.num_workers, self.compute_args
+                )
+                dask_util.delete_tmp_dir_blockwise(
+                    self.output_path + "_eroded_dilated/s0",
                     self.num_workers,
-                    self.compute_args)
-                dask_util.delete_tmp_dir_blockwise(self.output_path + "_eroded_dilated/s0",
-                    self.num_workers,
-                    self.compute_args)
-
+                    self.compute_args,
+                )
