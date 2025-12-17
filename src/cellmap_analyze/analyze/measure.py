@@ -40,7 +40,7 @@ class Measure(ComputeConfigMixin):
         super().__init__(num_workers)
         self.input_path = input_path
         self.input_idi = ImageDataInterface(self.input_path, chunk_shape=chunk_shape)
-        self.output_path = output_path
+        self.output_path = str(output_path).rstrip("/")
 
         self.contact_sites = False
         self.get_measurements_blockwise_extra_kwargs = {}
@@ -76,9 +76,13 @@ class Measure(ComputeConfigMixin):
             )
 
             self.contact_sites = True
+
+        # Handle root datasets (empty name) by using "data" as default
+        input_name = get_name_from_path(self.input_path)
+        if not input_name:
+            input_name = "data"
         self.output_directory = (
-            str(self.output_path)
-            + f"/measurements_to_merge_{get_name_from_path(self.input_path)}/"
+            str(self.output_path) + f"/measurements_to_merge_{input_name}/"
         )
         self.global_offset = np.zeros((3,))
         self.num_workers = num_workers
@@ -214,6 +218,9 @@ class Measure(ComputeConfigMixin):
     def write_measurements(self):
         os.makedirs(self.output_path, exist_ok=True)
         file_name = get_name_from_path(self.input_path)
+        # Handle root datasets (empty name) by using "measurements" as filename
+        if not file_name:
+            file_name = "measurements"
         output_file = self.output_path + "/" + file_name + ".csv"
 
         # create dataframe
@@ -230,6 +237,11 @@ class Measure(ComputeConfigMixin):
         if self.contact_sites:
             organelle_1_name = get_name_from_path(self.organelle_1_path)
             organelle_2_name = get_name_from_path(self.organelle_2_path)
+            # Handle root datasets (empty names) by using defaults
+            if not organelle_1_name:
+                organelle_1_name = "organelle_1"
+            if not organelle_2_name:
+                organelle_2_name = "organelle_2"
 
             columns += [
                 f"Contacting {organelle_1_name} IDs",

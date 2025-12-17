@@ -1,6 +1,7 @@
 # %%
 from typing import Union, List
 from cellmap_analyze.util import io_util
+from cellmap_analyze.util.io_util import get_output_path_from_input_path
 from cellmap_analyze.util.image_data_interface import (
     ImageDataInterface,
 )
@@ -44,7 +45,7 @@ class AssignToCells:
 
         self.cell_idi = ImageDataInterface(cell_ds_path)
         self.cell_assignment_type = cell_assignment_type
-        self.output_path = output_path
+        self.output_path = str(output_path).rstrip("/")
         self.iteration_distance_nm = iteration_distance_nm
 
     @staticmethod
@@ -196,7 +197,10 @@ class AssignToCells:
                 csv_name = os.path.basename(csv.split(".csv")[0])
                 output_path = self.output_path
                 if csv_name.endswith("contacts"):  # pragma: no cover
-                    output_path = self.output_path + "/contact_sites/"
+                    # Use helper function to generate contact_sites path (handles root datasets correctly)
+                    output_path = get_output_path_from_input_path(
+                        self.output_path, "/contact_sites"
+                    )
                     os.makedirs(output_path, exist_ok=True)
 
                 if self.cell_assignment_type == 0:

@@ -55,8 +55,12 @@ class CleanConnectedComponents(ComputeConfigMixin):
             self.output_path = get_output_path_from_input_path(
                 self.input_path, "_cleaned"
             )
-        self.output_path = self.output_path.rstrip("/")
-        self.relabeling_dict_path = f"{self.output_path}_relabeling_dict/"
+        self.output_path = str(self.output_path).rstrip("/")
+
+        # Use helper function to generate relabeling dict path (handles root datasets correctly)
+        self.relabeling_dict_path = get_output_path_from_input_path(
+            self.output_path, "_relabeling_dict"
+        ) + "/"
 
         # evaluate minimum_volume_nm_3 voxels if it is a string
         if type(minimum_volume_nm_3) == str:
@@ -135,7 +139,9 @@ class CleanConnectedComponents(ComputeConfigMixin):
             self.mask,
             merge_info=(
                 ConnectedComponents._merge_tuples,
-                self.output_path + "_tmp_cleaned_connected_component_info_to_merge",
+                get_output_path_from_input_path(
+                    self.output_path, "_tmp_cleaned_connected_component_info_to_merge"
+                ),
             ),
         )
 
@@ -188,9 +194,12 @@ class CleanConnectedComponents(ComputeConfigMixin):
         if self.fill_holes:
             from .fill_holes import FillHoles
 
+            # Use helper function for filled path (handles root datasets correctly)
+            filled_path = get_output_path_from_input_path(self.output_path, "_filled")
+
             fh = FillHoles(
                 input_path=self.output_path + "/s0",
-                output_path=self.output_path + "_filled",
+                output_path=filled_path,
                 num_workers=self.num_workers,
                 roi=self.roi,
                 connectivity=self.connectivity,
