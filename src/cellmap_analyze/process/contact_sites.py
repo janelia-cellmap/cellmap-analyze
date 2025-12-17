@@ -66,7 +66,7 @@ class ContactSites(ComputeConfigMixin):
                 + f"/{get_name_from_path(organelle_1_path)}_{get_name_from_path(organelle_2_path)}_contacts"
             )
 
-        self.output_path = output_path.rstrip("/")
+        self.output_path = str(output_path).rstrip("/")
 
         if minimum_volume_nm_3 is None:
             minimum_volume_nm_3 = (

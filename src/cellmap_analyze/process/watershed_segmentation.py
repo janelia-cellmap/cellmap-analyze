@@ -129,7 +129,7 @@ class WatershedSegmentation(ComputeConfigMixin):
             output_path = get_output_path_from_input_path(
                 self.input_path, "_watersheded"
             )
-        self.output_path = output_path.rstrip("/")
+        self.output_path = str(output_path).rstrip("/")
 
         # Use helper function to generate output paths (handles root datasets correctly)
         distance_transform_path = get_output_path_from_input_path(

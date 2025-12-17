@@ -105,7 +105,7 @@ class ConnectedComponents(ComputeConfigMixin):
         self.voxel_size = template_idi.voxel_size
 
         self.do_full_connected_components = False
-        output_path = output_path.rstrip("/")
+        output_path = str(output_path).rstrip("/")
         output_ds_basepath = split_dataset_path(output_path)[0]
         os.makedirs(output_ds_basepath, exist_ok=True)
 

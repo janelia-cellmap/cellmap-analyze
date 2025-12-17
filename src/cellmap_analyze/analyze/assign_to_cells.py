@@ -45,7 +45,7 @@ class AssignToCells:
 
         self.cell_idi = ImageDataInterface(cell_ds_path)
         self.cell_assignment_type = cell_assignment_type
-        self.output_path = output_path.rstrip("/")
+        self.output_path = str(output_path).rstrip("/")
         self.iteration_distance_nm = iteration_distance_nm
 
     @staticmethod

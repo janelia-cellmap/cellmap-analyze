@@ -40,7 +40,7 @@ class Measure(ComputeConfigMixin):
         super().__init__(num_workers)
         self.input_path = input_path
         self.input_idi = ImageDataInterface(self.input_path, chunk_shape=chunk_shape)
-        self.output_path = output_path.rstrip("/")
+        self.output_path = str(output_path).rstrip("/")
 
         self.contact_sites = False
         self.get_measurements_blockwise_extra_kwargs = {}

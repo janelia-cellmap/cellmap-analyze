@@ -45,7 +45,7 @@ class FillHoles(ComputeConfigMixin):
 
         if output_path is None:
             output_path = get_output_path_from_input_path(input_path, "_filled")
-        self.output_path = output_path.rstrip("/")
+        self.output_path = str(output_path).rstrip("/")
 
         # Use helper function to generate auxiliary paths (handles root datasets correctly)
         self.relabeling_dict_path = get_output_path_from_input_path(

@@ -49,7 +49,7 @@ class Skeletonize(ComputeConfigMixin):
         """
         super().__init__(num_workers)
         self.segmentation_idi = ImageDataInterface(segmentation_path, timeout=timeout)
-        self.output_path = output_path.rstrip("/")
+        self.output_path = str(output_path).rstrip("/")
         self.csv_path = csv_path
         self.erosion = erosion
         self.min_branch_length_nm = min_branch_length_nm

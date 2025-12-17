@@ -90,7 +90,7 @@ def get_output_path_from_input_path(input_path, suffix="_output"):
     Generate output path from input path.
 
     Args:
-        input_path: Input dataset path
+        input_path: Input dataset path (can be string or Path object)
         suffix: Suffix to append to dataset name
 
     Returns:
@@ -102,8 +102,8 @@ def get_output_path_from_input_path(input_path, suffix="_output"):
         "/path/data.zarr" -> "/path/data_output.zarr" (no scale, creates new zarr file)
         "/path/data.zarr/nested/dataset/s0" -> "/path/data.zarr/nested/dataset_output"
     """
-    # Strip trailing slashes to ensure consistent handling
-    input_path = input_path.rstrip("/")
+    # Convert to string and strip trailing slashes to ensure consistent handling
+    input_path = str(input_path).rstrip("/")
 
     output_ds_name = get_name_from_path(input_path)
     output_ds_basepath = split_dataset_path(input_path)[0]

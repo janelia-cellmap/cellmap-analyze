@@ -115,7 +115,7 @@ class MutexWatershed(ComputeConfigMixin):
             chunk_shape=chunk_shape,
         )
 
-        self.output_path = output_path.rstrip("/")
+        self.output_path = str(output_path).rstrip("/")
 
         # evaluate minimum_volume_nm_3 voxels if it is a string
         if type(minimum_volume_nm_3) == str:

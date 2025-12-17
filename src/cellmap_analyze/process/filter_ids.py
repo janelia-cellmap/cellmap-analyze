@@ -75,7 +75,7 @@ class FilterIDs(ComputeConfigMixin):
 
         if output_path is None:
             output_path = get_output_path_from_input_path(input_path, "_filteredIDs")
-        self.output_path = output_path.rstrip("/")
+        self.output_path = str(output_path).rstrip("/")
 
         # Use helper function to generate relabeling dict path (handles root datasets correctly)
         self.relabeling_dict_path = get_output_path_from_input_path(

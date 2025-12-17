@@ -55,7 +55,7 @@ class CleanConnectedComponents(ComputeConfigMixin):
             self.output_path = get_output_path_from_input_path(
                 self.input_path, "_cleaned"
             )
-        self.output_path = self.output_path.rstrip("/")
+        self.output_path = str(self.output_path).rstrip("/")
 
         # Use helper function to generate relabeling dict path (handles root datasets correctly)
         self.relabeling_dict_path = get_output_path_from_input_path(
