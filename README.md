@@ -22,6 +22,7 @@ A suite of Dask-powered tools for processing and analyzing terabyte-scale 3D seg
 | **Label With Mask**           | `label-with-mask`                 | Label one dataset with ids from another                          |
 | **Watershed Segmentation**           | `watershed-segmentation`                 | Watershed a segmentation; currently only works by doing watershed globally, but distance transform and seed finding work blockwise|
 | **Morphological Operations**           | `morphological-operations`                 | Allowe for erosion and dilation of a segmented dataset, but since ordering of processing may matter, there is no guarantee of consistency based on order of blocks processed|
+| **Skeletonize**           | `skeletonize`                 | Generate skeletons from segmented objects with optional pruning and simplification.|
 
 ### Analysis Tools
 
