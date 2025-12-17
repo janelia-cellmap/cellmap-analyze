@@ -76,7 +76,11 @@ class FilterIDs(ComputeConfigMixin):
         if output_path is None:
             output_path = get_output_path_from_input_path(input_path, "_filteredIDs")
         self.output_path = output_path.rstrip("/")
-        self.relabeling_dict_path = self.output_path + "_relabeling_dict"
+
+        # Use helper function to generate relabeling dict path (handles root datasets correctly)
+        self.relabeling_dict_path = get_output_path_from_input_path(
+            self.output_path, "_relabeling_dict"
+        )
 
     def get_filtered_ids(self):
         ConnectedComponents.write_memmap_relabeling_dicts(

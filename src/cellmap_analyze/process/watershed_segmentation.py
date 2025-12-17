@@ -131,21 +131,31 @@ class WatershedSegmentation(ComputeConfigMixin):
             )
         self.output_path = output_path.rstrip("/")
 
+        # Use helper function to generate output paths (handles root datasets correctly)
+        distance_transform_path = get_output_path_from_input_path(
+            self.output_path, "_distance_transform"
+        )
+        seeds_blockwise_path = get_output_path_from_input_path(
+            self.output_path, "_seeds_blockwise"
+        )
+        self.watershed_seeds_path = get_output_path_from_input_path(
+            self.output_path, "_seeds"
+        )
+
         self.distance_transform_idi = create_multiscale_dataset_idi(
-            self.output_path + "_distance_transform",
+            distance_transform_path,
             dtype=np.float32,
             voxel_size=self.voxel_size,
             total_roi=self.roi,
             write_size=self.input_idi.chunk_shape * self.voxel_size,
         )
         self.watershed_seeds_blockwise_idi = create_multiscale_dataset_idi(
-            self.output_path + "_seeds_blockwise",
+            seeds_blockwise_path,
             dtype=np.uint64,
             voxel_size=self.voxel_size,
             total_roi=self.roi,
             write_size=self.input_idi.chunk_shape * self.voxel_size,
         )
-        self.watershed_seeds_path = self.output_path + "_seeds"
         self.use_deprecated_flawed = use_deprecated_flawed
         self.delete_tmp = delete_tmp
 

@@ -18,15 +18,35 @@ logger = logging.getLogger(__name__)
 
 
 def split_on_last_scale(string):
-    # This regex looks for 's' followed by one or more digits
-    match = re.search(r"(.*)(/s\d+)(.*)", string)
+    """
+    Remove scale suffix from path, only if it's at the end and properly formatted.
 
+    Args:
+        string: Path that may end with /sN or be sN where N is a number
+
+    Returns:
+        Path with scale removed, or original string if no scale found
+
+    Examples:
+        "dataset/s0" -> "dataset"
+        "dataset" -> "dataset"
+        "s0" -> "" (empty string, scale at root level)
+        "/s0" -> "" (empty string, scale with leading slash)
+        "my_s0_data/s1" -> "my_s0_data" (doesn't confuse s0 in name with scale)
+    """
+    # Match /sN at the end (with leading slash)
+    match = re.search(r"^(.*?)(/s\d+)$", string)
     if match:
-        # Split the string into three parts: before 's#', 's#', and after 's#'
-        return match.group(1)
-    else:
-        # Return the original string if no match is found
-        return string
+        return match.group(1) if match.group(1) else ""
+
+    # Also match sN at the end WITHOUT leading slash (for root dataset case)
+    # This handles the case where dataset path is just "s0"
+    match = re.search(r"^(s\d+)$", string)
+    if match:
+        return ""
+
+    # No scale found
+    return string
 
 
 def get_name_from_path(path):
@@ -66,9 +86,44 @@ def split_dataset_path(dataset_path, scale=None) -> tuple[str, str]:
 
 
 def get_output_path_from_input_path(input_path, suffix="_output"):
-    output_path = input_path
-    output_ds_name = get_name_from_path(output_path)
+    """
+    Generate output path from input path.
+
+    Args:
+        input_path: Input dataset path
+        suffix: Suffix to append to dataset name
+
+    Returns:
+        Output path in format: basepath/dataset_name{suffix}
+
+    Examples:
+        "/path/data.zarr/dataset/s0" -> "/path/data.zarr/dataset_output"
+        "/path/data.zarr/s0" -> "/path/data_output.zarr" (root dataset, creates new zarr file)
+        "/path/data.zarr" -> "/path/data_output.zarr" (no scale, creates new zarr file)
+        "/path/data.zarr/nested/dataset/s0" -> "/path/data.zarr/nested/dataset_output"
+    """
+    # Strip trailing slashes to ensure consistent handling
+    input_path = input_path.rstrip("/")
+
+    output_ds_name = get_name_from_path(input_path)
     output_ds_basepath = split_dataset_path(input_path)[0]
+
+    # Handle empty dataset name (root dataset case like data.zarr/s0 or data.zarr)
+    if not output_ds_name:
+        # For root datasets, append suffix to the zarr/n5 filename itself
+        # "/path/data.zarr" + "_blockwise" -> "/path/data_blockwise.zarr"
+
+        # Find the extension (.zarr or .n5)
+        if ".zarr" in output_ds_basepath:
+            base, ext = output_ds_basepath.rsplit(".zarr", 1)
+            return f"{base}{suffix}.zarr{ext}"
+        elif ".n5" in output_ds_basepath:
+            base, ext = output_ds_basepath.rsplit(".n5", 1)
+            return f"{base}{suffix}.n5{ext}"
+        else:
+            # Shouldn't happen, but fallback
+            return f"{output_ds_basepath}{suffix}"
+
     return f"{output_ds_basepath}/{output_ds_name}{suffix}"
 
 

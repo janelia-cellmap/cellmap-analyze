@@ -11,6 +11,7 @@ from cellmap_analyze.util.dask_util import (
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.io_util import (
     get_name_from_path,
+    get_output_path_from_input_path,
     split_dataset_path,
 )
 
@@ -87,13 +88,20 @@ class MutexWatershed(ComputeConfigMixin):
 
         self.voxel_size = self.affinities_idi.voxel_size
         self.do_full_connected_components = False
-        output_ds_name = get_name_from_path(output_path)
         output_ds_basepath = split_dataset_path(output_path)[0]
         os.makedirs(output_ds_basepath, exist_ok=True)
 
-        self.connected_components_blockwise_path = (
-            output_ds_basepath + "/" + output_ds_name + "_blockwise"
+        # Use helper function to generate blockwise path (handles root datasets correctly)
+        self.connected_components_blockwise_path = get_output_path_from_input_path(
+            output_path, "_blockwise"
         )
+
+        # For new zarr files (root datasets), also create parent directory
+        if not self.connected_components_blockwise_path.startswith(output_ds_basepath):
+            os.makedirs(
+                os.path.dirname(self.connected_components_blockwise_path), exist_ok=True
+            )
+
         create_multiscale_dataset(
             self.connected_components_blockwise_path,
             dtype=np.uint64,
@@ -107,7 +115,7 @@ class MutexWatershed(ComputeConfigMixin):
             chunk_shape=chunk_shape,
         )
 
-        self.output_path = output_path
+        self.output_path = output_path.rstrip("/")
 
         # evaluate minimum_volume_nm_3 voxels if it is a string
         if type(minimum_volume_nm_3) == str:
@@ -319,12 +327,18 @@ class MutexWatershed(ComputeConfigMixin):
 
     def get_connected_components(self):
         self.calculate_connected_components_blockwise()
+
+        # Use helper function for eroded path (handles root datasets correctly)
+        eroded_path = (
+            get_output_path_from_input_path(self.output_path, "_eroded")
+            if self.do_opening
+            else self.output_path
+        )
+
         cc = ConnectedComponents(
             connected_components_blockwise_path=self.connected_components_blockwise_path
             + "/s0",
-            output_path=(
-                self.output_path + "_eroded" if self.do_opening else self.output_path
-            ),
+            output_path=eroded_path,
             num_workers=self.num_workers,
             minimum_volume_nm_3=0 if self.do_opening else self.minimum_volume_nm_3,
             maximum_volume_nm_3=np.inf if self.do_opening else self.maximum_volume_nm_3,
@@ -335,9 +349,14 @@ class MutexWatershed(ComputeConfigMixin):
         cc.merge_connected_components_across_blocks()
 
         if self.do_opening:
+            # Use helper function for dilated path (handles root datasets correctly)
+            eroded_dilated_path = get_output_path_from_input_path(
+                self.output_path, "_eroded_dilated"
+            )
+
             mo = MorphologicalOperations(
-                input_path=self.output_path + "_eroded/s0",
-                output_path=self.output_path + "_eroded_dilated",
+                input_path=eroded_path + "/s0",
+                output_path=eroded_dilated_path,
                 operation="dilation",
                 iterations=1,
                 num_workers=self.num_workers,
@@ -347,7 +366,7 @@ class MutexWatershed(ComputeConfigMixin):
             mo.perform_morphological_operation()
 
             ccc = CleanConnectedComponents(
-                input_path=self.output_path + "_eroded_dilated/s0",
+                input_path=eroded_dilated_path + "/s0",
                 output_path=self.output_path,
                 num_workers=self.num_workers,
                 minimum_volume_nm_3=self.minimum_volume_nm_3,
@@ -359,10 +378,10 @@ class MutexWatershed(ComputeConfigMixin):
             ccc.clean_connected_components()
             if self.delete_tmp:
                 dask_util.delete_tmp_dir_blockwise(
-                    self.output_path + "_eroded/s0", self.num_workers, self.compute_args
+                    eroded_path + "/s0", self.num_workers, self.compute_args
                 )
                 dask_util.delete_tmp_dir_blockwise(
-                    self.output_path + "_eroded_dilated/s0",
+                    eroded_dilated_path + "/s0",
                     self.num_workers,
                     self.compute_args,
                 )

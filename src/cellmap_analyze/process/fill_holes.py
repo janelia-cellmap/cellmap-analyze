@@ -46,8 +46,12 @@ class FillHoles(ComputeConfigMixin):
         if output_path is None:
             output_path = get_output_path_from_input_path(input_path, "_filled")
         self.output_path = output_path.rstrip("/")
-        self.relabeling_dict_path = self.output_path + "_relabeling_dict/"
-        self.holes_path = self.output_path + "_holes"
+
+        # Use helper function to generate auxiliary paths (handles root datasets correctly)
+        self.relabeling_dict_path = get_output_path_from_input_path(
+            self.output_path, "_relabeling_dict"
+        ) + "/"
+        self.holes_path = get_output_path_from_input_path(self.output_path, "_holes")
 
     def get_hole_information_blockwise(
         block_index,
@@ -127,7 +131,9 @@ class FillHoles(ComputeConfigMixin):
             connectivity=self.connectivity,
             merge_info=(
                 FillHoles._merge_hole_to_object_dicts,
-                self.output_path + "_tmp_hole_objects_to_dict_to_merge",
+                get_output_path_from_input_path(
+                    self.output_path, "_tmp_hole_objects_to_dict_to_merge"
+                ),
             ),
         )
 
@@ -213,8 +219,13 @@ class FillHoles(ComputeConfigMixin):
             self.num_workers,
             self.compute_args,
         )
+
+        # Use helper function to get blockwise path (handles root datasets correctly)
+        holes_blockwise_path = get_output_path_from_input_path(
+            self.holes_path, "_blockwise"
+        )
         dask_util.delete_tmp_dir_blockwise(
-            self.holes_path + "_blockwise/s0",
+            holes_blockwise_path + "/s0",
             self.num_workers,
             self.compute_args,
         )

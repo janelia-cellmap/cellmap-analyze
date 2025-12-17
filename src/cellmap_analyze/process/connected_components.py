@@ -7,6 +7,7 @@ from cellmap_analyze.util.dask_util import (
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.io_util import (
     get_name_from_path,
+    get_output_path_from_input_path,
     print_with_datetime,
     split_dataset_path,
 )
@@ -105,7 +106,6 @@ class ConnectedComponents(ComputeConfigMixin):
 
         self.do_full_connected_components = False
         output_path = output_path.rstrip("/")
-        output_ds_name = get_name_from_path(output_path)
         output_ds_basepath = split_dataset_path(output_path)[0]
         os.makedirs(output_ds_basepath, exist_ok=True)
 
@@ -113,8 +113,16 @@ class ConnectedComponents(ComputeConfigMixin):
             self.input_path = input_path
             self.intensity_threshold_minimum = intensity_threshold_minimum
             self.intensity_threshold_maximum = intensity_threshold_maximum
+
+            # Use helper function to generate blockwise path (handles root datasets correctly)
+            blockwise_path = get_output_path_from_input_path(output_path, "_blockwise")
+
+            # For new zarr files (root datasets), also create parent directory
+            if not blockwise_path.startswith(output_ds_basepath):
+                os.makedirs(os.path.dirname(blockwise_path), exist_ok=True)
+
             self.connected_components_blockwise_idi = create_multiscale_dataset_idi(
-                output_ds_basepath + "/" + output_ds_name + "_blockwise",
+                blockwise_path,
                 dtype=np.uint64,
                 voxel_size=self.voxel_size,
                 total_roi=self.roi,
@@ -127,6 +135,7 @@ class ConnectedComponents(ComputeConfigMixin):
                 connected_components_blockwise_path, chunk_shape=chunk_shape
             )
         self.gaussian_smoothing_sigma_nm = gaussian_smoothing_sigma_nm
+        # Use the stripped version of output_path
         self.output_path = output_path
 
         self.relabeling_dict_path = f"{self.output_path}_relabeling_dict/"
@@ -423,7 +432,9 @@ class ConnectedComponents(ComputeConfigMixin):
             self.object_labels_idi,
             merge_info=(
                 ConnectedComponents._merge_tuples,
-                self.output_path + "_tmp_connected_component_info_to_merge/",
+                get_output_path_from_input_path(
+                    self.output_path, "_tmp_connected_component_info_to_merge"
+                ) + "/",
             ),
         )
         if self.object_labels_idi:
@@ -664,9 +675,12 @@ class ConnectedComponents(ComputeConfigMixin):
         if self.fill_holes:
             from .fill_holes import FillHoles
 
+            # Use helper function for filled path (handles root datasets correctly)
+            filled_path = get_output_path_from_input_path(self.output_path, "_filled")
+
             fh = FillHoles(
                 input_path=self.output_path + "/s0",
-                output_path=self.output_path + "_filled",
+                output_path=filled_path,
                 num_workers=self.num_workers,
                 roi=self.roi,
                 connectivity=self.connectivity,

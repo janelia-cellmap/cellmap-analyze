@@ -101,8 +101,18 @@ def create_multiscale_dataset(
         multiscales_metadata=False,
         delete=mode == "w",
     )
+    # For root datasets, dataset will be just "s0" (no leading slash)
+    # For named datasets, dataset will be "name/s0" or just "name" if scale was added
+    dataset_base = dataset.rsplit(f"/s{scale}")[0]
+    if dataset_base == f"s{scale}":
+        # Root dataset case: just "s0" with no leading slash
+        metadata_path = filename
+    else:
+        # Named dataset case: has a dataset name
+        metadata_path = filename + "/" + dataset_base
+
     write_multiscales_metadata(
-        filename + "/" + dataset.rsplit(f"/s{scale}")[0],
+        metadata_path,
         f"s{scale}",
         voxel_size,
         total_roi.get_begin(),

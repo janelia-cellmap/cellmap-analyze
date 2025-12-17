@@ -4,7 +4,7 @@ from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
-from cellmap_analyze.util.io_util import get_name_from_path
+from cellmap_analyze.util.io_util import get_name_from_path, get_output_path_from_input_path
 from cellmap_analyze.cythonizing.process_arrays import initialize_contact_site_array
 from cellmap_analyze.cythonizing.bresenham3D import bresenham_3D_lines
 import logging
@@ -66,7 +66,7 @@ class ContactSites(ComputeConfigMixin):
                 + f"/{get_name_from_path(organelle_1_path)}_{get_name_from_path(organelle_2_path)}_contacts"
             )
 
-        self.output_path = output_path
+        self.output_path = output_path.rstrip("/")
 
         if minimum_volume_nm_3 is None:
             minimum_volume_nm_3 = (
@@ -77,8 +77,12 @@ class ContactSites(ComputeConfigMixin):
         self.num_workers = num_workers
         self.voxel_volume = np.prod(self.voxel_size)
         self.voxel_face_area = self.voxel_size[1] * self.voxel_size[2]
+
+        # Use helper function to generate blockwise path (handles root datasets correctly)
+        blockwise_path = get_output_path_from_input_path(output_path, "_blockwise")
+
         self.contact_sites_blockwise_idi = create_multiscale_dataset_idi(
-            output_path + "_blockwise",
+            blockwise_path,
             dtype=np.uint64,
             voxel_size=self.voxel_size,
             total_roi=self.roi,
