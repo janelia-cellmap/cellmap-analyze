@@ -244,10 +244,19 @@ def test_gaussian_smoothing(
     )
     cc.get_connected_components()
 
+    # For anisotropic data, calculate per-axis sigma values
+    if np.isscalar(voxel_size):
+        sigma_for_filter = gaussian_smoothing_sigma_voxels
+    else:
+        # Calculate per-axis sigma in voxels from the sigma in nm
+        sigma_for_filter = tuple(
+            gaussian_smoothing_sigma_nm / vs for vs in voxel_size
+        )
+
     smoothed_image = (
         gaussian_filter(
             intensity_image.astype(np.float32),
-            sigma=gaussian_smoothing_sigma_voxels,
+            sigma=sigma_for_filter,
             mode="constant",
             cval=0,
         )
