@@ -58,7 +58,18 @@ def radius_of_gyration_3d(segmentation, label=None, voxel_size=(1.0, 1.0, 1.0)):
     return Rg
 
 
-def simple_surface_area(data, voxel_surface_area):
+def simple_surface_area(data, voxel_face_areas):
+    """
+    Calculate surface area with per-axis face areas for anisotropic voxels.
+
+    Args:
+        data: Binary mask array
+        voxel_face_areas: Tuple of (Z-face area, Y-face area, X-face area) or scalar
+    """
+    # Handle both scalar and tuple voxel_face_areas
+    if np.isscalar(voxel_face_areas):
+        voxel_face_areas = (voxel_face_areas, voxel_face_areas, voxel_face_areas)
+
     data = np.pad(data, 1)
     s = data.shape
     sa = 0
@@ -66,18 +77,34 @@ def simple_surface_area(data, voxel_surface_area):
         for j in range(1, s[1] - 1):
             for k in range(1, s[2] - 1):
                 if data[i, j, k]:
+                    # Check Z-axis neighbors (perpendicular faces have area voxel_face_areas[0])
                     for delta in [-1, 1]:
-                        for dx, dy, dz in [
-                            (delta, 0, 0),
-                            (0, delta, 0),
-                            (0, 0, delta),
-                        ]:
-                            if data[i + dx, j + dy, k + dz] == 0:
-                                sa += 1
-    return sa * voxel_surface_area
+                        if data[i + delta, j, k] == 0:
+                            sa += voxel_face_areas[0]
+                    # Check Y-axis neighbors (perpendicular faces have area voxel_face_areas[1])
+                    for delta in [-1, 1]:
+                        if data[i, j + delta, k] == 0:
+                            sa += voxel_face_areas[1]
+                    # Check X-axis neighbors (perpendicular faces have area voxel_face_areas[2])
+                    for delta in [-1, 1]:
+                        if data[i, j, k + delta] == 0:
+                            sa += voxel_face_areas[2]
+    return sa
 
 
-def simple_contacting_surface_area(contact_site, segmentation, voxel_surface_area):
+def simple_contacting_surface_area(contact_site, segmentation, voxel_face_areas):
+    """
+    Calculate contacting surface area with per-axis face areas for anisotropic voxels.
+
+    Args:
+        contact_site: Binary mask of contact site
+        segmentation: Binary mask of segmentation
+        voxel_face_areas: Tuple of (Z-face area, Y-face area, X-face area) or scalar
+    """
+    # Handle both scalar and tuple voxel_face_areas
+    if np.isscalar(voxel_face_areas):
+        voxel_face_areas = (voxel_face_areas, voxel_face_areas, voxel_face_areas)
+
     segmentation = np.pad(segmentation, 1)
     contact_site = np.pad(contact_site, 1)
     s = contact_site.shape
@@ -86,42 +113,55 @@ def simple_contacting_surface_area(contact_site, segmentation, voxel_surface_are
         for j in range(1, s[1] - 1):
             for k in range(1, s[2] - 1):
                 if contact_site[i, j, k] and segmentation[i, j, k]:
+                    # Check Z-axis neighbors (perpendicular faces have area voxel_face_areas[0])
                     for delta in [-1, 1]:
-                        for dx, dy, dz in [
-                            (delta, 0, 0),
-                            (0, delta, 0),
-                            (0, 0, delta),
-                        ]:
-                            if segmentation[i + dx, j + dy, k + dz] == 0:
-                                sa += 1
-    return sa * voxel_surface_area
+                        if segmentation[i + delta, j, k] == 0:
+                            sa += voxel_face_areas[0]
+                    # Check Y-axis neighbors (perpendicular faces have area voxel_face_areas[1])
+                    for delta in [-1, 1]:
+                        if segmentation[i, j + delta, k] == 0:
+                            sa += voxel_face_areas[1]
+                    # Check X-axis neighbors (perpendicular faces have area voxel_face_areas[2])
+                    for delta in [-1, 1]:
+                        if segmentation[i, j, k + delta] == 0:
+                            sa += voxel_face_areas[2]
+    return sa
 
 
 def simple_bounding_box(data, voxel_size):
-    x, y, z = np.where(data)
+    z, y, x = np.where(data)
 
     # add 0.5 to center on voxel
-    x = x + 0.5
-    y = y + 0.5
     z = z + 0.5
+    y = y + 0.5
+    x = x + 0.5
 
-    x *= voxel_size
-    y *= voxel_size
-    z *= voxel_size
-    return [min(x), min(y), min(z), max(x), max(y), max(z)]
+    # Handle both scalar and tuple voxel_size
+    if np.isscalar(voxel_size):
+        voxel_size = (voxel_size, voxel_size, voxel_size)
+
+    z *= voxel_size[0]
+    y *= voxel_size[1]
+    x *= voxel_size[2]
+    return [min(z), min(y), min(x), max(z), max(y), max(x)]
 
 
 def simple_com(data, voxel_size):
     idxs = np.where(data)
+    # Handle both scalar and tuple voxel_size
+    if np.isscalar(voxel_size):
+        voxel_size = np.array([voxel_size, voxel_size, voxel_size])
+    else:
+        voxel_size = np.array(voxel_size)
     com = (np.mean(idxs, axis=1) + 0.5) * voxel_size
     return com
 
 
-def simple_id_to_surface_area_dict(contact_site, segmentation, voxel_surface_area):
+def simple_id_to_surface_area_dict(contact_site, segmentation, voxel_face_areas):
     id_to_surface_area_dict = {}
     for id in np.unique(segmentation[segmentation > 0]):
         sa = simple_contacting_surface_area(
-            contact_site, segmentation == id, voxel_surface_area
+            contact_site, segmentation == id, voxel_face_areas
         )
         if sa > 0:
             id_to_surface_area_dict[id] = sa
@@ -131,13 +171,29 @@ def simple_id_to_surface_area_dict(contact_site, segmentation, voxel_surface_are
 def simple_sum_r2(data, voxel_size):
     idxs = np.where(data)
     positions = np.array(idxs).T + 0.5  # center on voxel
+    # Handle both scalar and tuple voxel_size
+    if np.isscalar(voxel_size):
+        voxel_size = np.array([voxel_size, voxel_size, voxel_size])
+    else:
+        voxel_size = np.array(voxel_size)
     positions *= voxel_size
     return np.sum(np.sum(positions**2, axis=1))
 
 
 def simple_object_information_dict(segmentation, voxel_size):
-    voxel_volume = 1.0 * voxel_size**3
-    voxel_surface_area = 1.0 * voxel_size**2
+    # Handle both scalar and tuple voxel_size
+    if np.isscalar(voxel_size):
+        voxel_size = np.array([voxel_size, voxel_size, voxel_size])
+    else:
+        voxel_size = np.array(voxel_size)
+
+    voxel_volume = np.prod(voxel_size)
+    # Calculate per-axis face areas (perpendicular to each axis)
+    voxel_face_areas = (
+        voxel_size[1] * voxel_size[2],  # Z-axis faces: Y × X
+        voxel_size[0] * voxel_size[2],  # Y-axis faces: Z × X
+        voxel_size[0] * voxel_size[1],  # X-axis faces: Z × Y
+    )
     object_information_dict = {}
     for id in np.unique(segmentation[segmentation > 0]):
         obj = segmentation == id
@@ -147,13 +203,13 @@ def simple_object_information_dict(segmentation, voxel_size):
             counts=counts,
             volume=counts * voxel_volume,
             com=simple_com(obj, voxel_size),
-            surface_area=simple_surface_area(obj, voxel_surface_area),
+            surface_area=simple_surface_area(obj, voxel_face_areas),
             sum_r2=simple_sum_r2(obj, voxel_size),
             bounding_box=simple_bounding_box(obj, voxel_size),
         )
         assert np.allclose(
             object_information_dict[id].radius_of_gyration,
-            radius_of_gyration_3d(segmentation, label=id, voxel_size=voxel_size),
+            radius_of_gyration_3d(segmentation, label=id, voxel_size=tuple(voxel_size)),
         )
 
     return object_information_dict
@@ -162,8 +218,19 @@ def simple_object_information_dict(segmentation, voxel_size):
 def simple_contact_site_information_dict(
     segmentation_1, segmentation_2, contact_site, voxel_size
 ):
-    voxel_volume = voxel_size**3
-    voxel_surface_area = voxel_size**2
+    # Handle both scalar and tuple voxel_size
+    if np.isscalar(voxel_size):
+        voxel_size = np.array([voxel_size, voxel_size, voxel_size])
+    else:
+        voxel_size = np.array(voxel_size)
+
+    voxel_volume = np.prod(voxel_size)
+    # Calculate per-axis face areas (perpendicular to each axis)
+    voxel_face_areas = (
+        voxel_size[1] * voxel_size[2],  # Z-axis faces: Y × X
+        voxel_size[0] * voxel_size[2],  # Y-axis faces: Z × X
+        voxel_size[0] * voxel_size[1],  # X-axis faces: Z × Y
+    )
     contact_site_information_dict = {}
     for id in np.unique(contact_site[contact_site > 0]):
         cs = contact_site == id
@@ -172,13 +239,13 @@ def simple_contact_site_information_dict(
             volume=np.sum(cs) * voxel_volume,
             com=simple_com(cs, voxel_size),
             sum_r2=simple_sum_r2(cs, voxel_size),
-            surface_area=simple_surface_area(cs, voxel_surface_area),
+            surface_area=simple_surface_area(cs, voxel_face_areas),
             bounding_box=simple_bounding_box(cs, voxel_size),
             id_to_surface_area_dict_1=simple_id_to_surface_area_dict(
-                cs, segmentation_1, voxel_surface_area
+                cs, segmentation_1, voxel_face_areas
             ),
             id_to_surface_area_dict_2=simple_id_to_surface_area_dict(
-                cs, segmentation_2, voxel_surface_area
+                cs, segmentation_2, voxel_face_areas
             ),
         )
     return contact_site_information_dict
@@ -221,7 +288,7 @@ def test_measure_whole_objects(
     ]:
         object_information_dict = simple_object_information_dict(segmentation, vs)
         test_object_information_dict = get_object_information(
-            segmentation, voxel_edge_length=vs
+            segmentation, voxel_size=vs
         )
         assert object_information_dict == test_object_information_dict
 
@@ -241,7 +308,7 @@ def test_measure_blockwise_objects(
     ]:
         object_information_dict = simple_object_information_dict(segmentation, vs)
         test_object_information_dict = get_object_information(
-            segmentation, voxel_edge_length=vs
+            segmentation, voxel_size=vs
         )
         assert object_information_dict == test_object_information_dict
         compare_measurements(
@@ -264,7 +331,7 @@ def test_measure_whole_contact_sites_distance_1(
         contact_sites_distance_1,
         organelle_1=segmentation_1,
         organelle_2=segmentation_2,
-        voxel_edge_length=voxel_size,
+        voxel_size=voxel_size,
     )
     assert (
         contact_site_information_dict_contact_distance_1
@@ -283,7 +350,7 @@ def test_measure_whole_contact_sites_distance_2(
         contact_sites_distance_2,
         organelle_1=segmentation_1,
         organelle_2=segmentation_2,
-        voxel_edge_length=voxel_size,
+        voxel_size=voxel_size,
     )
 
     assert (
@@ -303,7 +370,7 @@ def test_measure_whole_contact_sites_distance_3(
         contact_sites_distance_3,
         organelle_1=segmentation_1,
         organelle_2=segmentation_2,
-        voxel_edge_length=voxel_size,
+        voxel_size=voxel_size,
     )
 
     assert (
@@ -339,7 +406,9 @@ def test_writeout(shared_tmpdir, tmp_zarr, tmp_cylinders_information_csv):
     m.get_measurements()
     gt_df = pd.read_csv(tmp_cylinders_information_csv)
     test_df = pd.read_csv(f"{shared_tmpdir}/test_csvs/segmentation_cylinders.csv")
-    assert gt_df.equals(test_df)
+    # Use assert_frame_equal with check_dtype=False since CSV serialization may change dtypes
+    # (e.g., int64 -> float64) but values should be identical
+    pd.testing.assert_frame_equal(gt_df, test_df, check_dtype=False)
 
 
 @pytest.mark.parametrize(
@@ -353,7 +422,7 @@ def test_measure_blockwise(shared_tmpdir, tmp_zarr, segmentation_name, request):
     )
     m.measure()
     assert m.measurements == simple_object_information_dict(
-        request.getfixturevalue(segmentation_name), m.input_idi.voxel_size[0]
+        request.getfixturevalue(segmentation_name), m.input_idi.voxel_size
     )
 
 

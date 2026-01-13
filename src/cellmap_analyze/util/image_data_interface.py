@@ -120,7 +120,11 @@ def to_ndarray_tensorstore(
     if output_voxel_size is None:
         output_voxel_size = voxel_size
 
-    rescale_factor = voxel_size[0] / output_voxel_size[0]
+    # Calculate per-axis rescale factors for anisotropic data
+    rescale_factors = tuple(vs / ovs for vs, ovs in zip(voxel_size, output_voxel_size))
+
+    # For backward compatibility, use rescale_factor for uniform checks
+    rescale_factor = rescale_factors[0]
 
     if swap_axes:
         print("Swapping axes")
@@ -140,11 +144,13 @@ def to_ndarray_tensorstore(
     if roi is None:
         # with ts.Transaction() as txn:
         data = dataset.read().result()
-        if rescale_factor > 1:
+        # Check if any rescaling is needed (anisotropic or isotropic)
+        if any(rf > 1 for rf in rescale_factors):
+            # Apply per-axis upsampling
             data = (
-                data.repeat(rescale_factor, axis=0 + channel_offset)
-                .repeat(rescale_factor, 1 + channel_offset)
-                .repeat(rescale_factor, 2 + channel_offset)
+                data.repeat(int(rescale_factors[0]), axis=0 + channel_offset)
+                .repeat(int(rescale_factors[1]), axis=1 + channel_offset)
+                .repeat(int(rescale_factors[2]), axis=2 + channel_offset)
             )
         return data
 
@@ -235,17 +241,15 @@ def to_ndarray_tensorstore(
     if rescale_factor != 1:
         slices = (slice(None),) * channel_offset + snapped_slices
         if rescale_factor > 1:
-            # Compute the upsampling factor based on the first spatial dimension
-            factor = voxel_size[0] / output_voxel_size[0]
-            # Upsample only along the spatial axes
+            # Apply per-axis upsampling for anisotropic data
             data = (
-                data.repeat(factor, axis=channel_offset)
-                .repeat(factor, axis=channel_offset + 1)
-                .repeat(factor, axis=channel_offset + 2)
+                data.repeat(int(rescale_factors[0]), axis=channel_offset)
+                .repeat(int(rescale_factors[1]), axis=channel_offset + 1)
+                .repeat(int(rescale_factors[2]), axis=channel_offset + 2)
             )
         elif rescale_factor < 1:
-            # Create block_size that leaves the channel dimension unchanged and scales the spatial ones
-            block_size = (1,) * channel_offset + (int(1 / rescale_factor),) * 3
+            # Create block_size with per-axis downsampling for anisotropic data
+            block_size = (1,) * channel_offset + tuple(int(1 / rf) for rf in rescale_factors)
             data = block_reduce(data, block_size=block_size, func=np.median)
 
         data = data[slices]

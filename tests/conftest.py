@@ -10,24 +10,38 @@ from tests.operations.test_measure import simple_object_information_dict
 from funlib.persistence import prepare_ds
 
 
-@pytest.fixture(autouse=True, scope="session")
-def voxel_size():
-    return 8
+@pytest.fixture(
+    autouse=True,
+    scope="session",
+    params=[
+        (8, 8, 8),      # isotropic
+        (32, 16, 8),    # anisotropic - all axes different
+    ],
+    ids=["isotropic", "anisotropic"]
+)
+def voxel_size(request):
+    """Voxel size in (Z, Y, X) order."""
+    return np.array(request.param)
 
 
 @pytest.fixture(scope="session")
 def horizontal_cylinder_endpoints(voxel_size):
-    return np.array([[46, 3, 3], [46, 3, 40]]) * 8 + 0.5 * voxel_size
+    # Element-wise multiplication for anisotropic support
+    coords = np.array([[46, 3, 3], [46, 3, 40]], dtype=float)
+    # Scale by voxel_size per-axis and add half-voxel offset
+    return coords * voxel_size + 0.5 * voxel_size
 
 
 @pytest.fixture(scope="session")
 def vertical_cylinder_endpoints(voxel_size):
-    return np.array([[2, 2, 2], [2, 48, 2]]) * voxel_size + 0.5 * voxel_size
+    coords = np.array([[2, 2, 2], [2, 48, 2]], dtype=float)
+    return coords * voxel_size + 0.5 * voxel_size
 
 
 @pytest.fixture(scope="session")
 def diagonal_cylinder_endpoints(voxel_size):
-    return np.array([[45, 45, 5], [5, 5, 45]]) * voxel_size + 0.5 * voxel_size
+    coords = np.array([[45, 45, 5], [5, 5, 45]], dtype=float)
+    return coords * voxel_size + 0.5 * voxel_size
 
 
 @pytest.fixture(scope="session")
@@ -345,9 +359,9 @@ def tmp_coms_csv(shared_tmpdir, voxel_size):
     df = pd.DataFrame(
         {
             "Object ID": [1, 2, 3],
-            "COM X (nm)": (np.array([1.1, 3.1, 11.1]) + 0.5) * voxel_size,
-            "COM Y (nm)": (np.array([1.1, 3.1, 11.1]) + 0.5) * voxel_size,
-            "COM Z (nm)": (np.array([1.1, 3.1, 8.1]) + 0.5) * voxel_size,
+            "COM X (nm)": (np.array([1.1, 3.1, 11.1]) + 0.5) * voxel_size[2],  # X
+            "COM Y (nm)": (np.array([1.1, 3.1, 11.1]) + 0.5) * voxel_size[1],  # Y
+            "COM Z (nm)": (np.array([1.1, 3.1, 8.1]) + 0.5) * voxel_size[0],   # Z
         }
     )
     df.to_csv(output_path + "/assignment_coms.csv", index=False)
@@ -378,8 +392,8 @@ def tmp_cylinders_information_csv(segmentation_cylinders, shared_tmpdir, voxel_s
     for i, (id, oi) in enumerate(cylinder_information_dict.items()):
         row = [
             id,
-            oi.volume,
-            oi.surface_area,
+            float(oi.volume),  # Ensure volume is float to match actual output
+            float(oi.surface_area),  # Ensure surface_area is float to match actual output
             oi.radius_of_gyration,
             *oi.com[::-1],
             *oi.bounding_box[:3][::-1],
@@ -599,9 +613,10 @@ def shared_tmpdir(tmpdir_factory):
 
 
 @pytest.fixture(scope="session")
-def tmp_zarr(shared_tmpdir):
-    # do it this way otherwise it appends 0 to the end of the zarr
-    output_path = shared_tmpdir + "/tmp.zarr"
+def tmp_zarr(shared_tmpdir, voxel_size):
+    # Create separate zarr files for each voxel_size parametrization
+    voxel_size_str = f"{voxel_size[0]}_{voxel_size[1]}_{voxel_size[2]}"
+    output_path = shared_tmpdir + f"/tmp_{voxel_size_str}.zarr"
     os.makedirs(name=output_path, exist_ok=True)
     return str(output_path)
 
@@ -761,12 +776,15 @@ def test_image_dict(
 @pytest.fixture(autouse=True, scope="session")
 def write_zarrs(tmp_zarr, test_image_dict, voxel_size, chunk_size):
     for data_name, data in test_image_dict.items():
+        # Handle both tuple and scalar voxel_size
         current_voxel_size = (
             voxel_size if "downsampled" not in data_name else 2 * voxel_size
         )
         data_path = f"{tmp_zarr}/{data_name}"
 
-        ds_voxel_size = 3 * [current_voxel_size]
+        # Use the voxel_size tuple directly (already in (Z, Y, X) format)
+        # Convert to Python ints for JSON serialization
+        ds_voxel_size = tuple(int(v) for v in current_voxel_size)
         data_shape = data.shape
         if len(data_shape) == 4:
             data_shape = data_shape[1:]

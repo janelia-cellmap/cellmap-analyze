@@ -27,6 +27,7 @@ struct Center {
  * @param size_x  number of columns in x-dimension
  * @param labels  pointer to a flat array of length size_z*size_y*size_x
  * @param compute_sum_r2  if true, accumulate sum of (z^2 + y^2 + x^2) per label
+ * @param voxel_size  pointer to array of length 3 with voxel sizes [z, y, x]
  * @return map from label to its Center (with COM and n, and sum_r2)
  */
 
@@ -39,20 +40,34 @@ centers(
         const T* labels,
         bool compute_sum_r2 = false,
         bool center_on_voxels = true,
-        double voxel_edge_length = 1.0,
+        const double* voxel_size = nullptr,  // pointer to [z, y, x] voxel sizes
         const double* offset = nullptr   // pointer, default nullptr => {0,0,0}
     ) {
     std::map<T, Center> centers;
     size_t total = size_z * size_y * size_x;
     std::array<int, 3> pos = {{0, 0, 0}};
     double extra_addon = center_on_voxels ? 0.5 : 0.0;
+
+    // Default voxel_size to (1, 1, 1) if not provided
+    double default_voxel_size[3] = {1.0, 1.0, 1.0};
+    if (voxel_size == nullptr) {
+        voxel_size = default_voxel_size;
+    }
+
+    // Default offset to (0, 0, 0) if not provided
+    double default_offset[3] = {0.0, 0.0, 0.0};
+    if (offset == nullptr) {
+        offset = default_offset;
+    }
+
     for (size_t i = 0; i < total; ++i) {
         T l = labels[i];
         if (l > 0) {
             auto& c = centers[l];
-            double p0 = (pos[0] + extra_addon) * voxel_edge_length + offset[0];
-            double p1 = (pos[1] + extra_addon) * voxel_edge_length + offset[1];
-            double p2 = (pos[2] + extra_addon) * voxel_edge_length + offset[2];
+            // Apply per-axis voxel size
+            double p0 = (pos[0] + extra_addon) * voxel_size[0] + offset[0];
+            double p1 = (pos[1] + extra_addon) * voxel_size[1] + offset[1];
+            double p2 = (pos[2] + extra_addon) * voxel_size[2] + offset[2];
 
             c.z += p0;
             c.y += p1;

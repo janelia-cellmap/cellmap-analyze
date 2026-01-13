@@ -15,6 +15,7 @@ from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.util.zarr_util import (
     create_multiscale_dataset_idi,
 )
+from funlib.geometry import Coordinate
 import cc3d
 
 logging.basicConfig(
@@ -44,8 +45,8 @@ class ContactSites(ComputeConfigMixin):
         self.organelle_2_idi = ImageDataInterface(
             organelle_2_path, chunk_shape=chunk_shape
         )
-        # Get element-wise minimum voxel size
-        output_voxel_size = tuple(
+        # Get element-wise minimum voxel size and ensure it's a Coordinate
+        output_voxel_size = Coordinate(
             min(v1, v2) for v1, v2 in zip(self.organelle_1_idi.voxel_size, self.organelle_2_idi.voxel_size)
         )
         self.organelle_2_idi.output_voxel_size = output_voxel_size
@@ -53,8 +54,8 @@ class ContactSites(ComputeConfigMixin):
         self.voxel_size = output_voxel_size
 
         # Use minimum voxel size across all dimensions to ensure we don't miss contacts
-        min_voxel_size = min(output_voxel_size)
-        self.contact_distance_voxels = contact_distance_nm / min_voxel_size
+        min_voxel_size = float(min(output_voxel_size))
+        self.contact_distance_voxels = float(contact_distance_nm / min_voxel_size)
 
         self.padding_voxels = int(np.ceil(self.contact_distance_voxels) + 1)
         # add one to ensure accuracy during surface area calculation since we need to make sure that neighboring ones are calculated

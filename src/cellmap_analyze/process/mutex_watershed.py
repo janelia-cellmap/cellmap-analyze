@@ -258,7 +258,8 @@ class MutexWatershed(ComputeConfigMixin):
         if not padding_voxels:
             padding_voxels = np.amax(neighborhood)
 
-        padding = padding_voxels * connected_components_blockwise_idi.voxel_size[0]
+        # Use minimum voxel size for uniform padding in physical units
+        padding = padding_voxels * min(connected_components_blockwise_idi.voxel_size)
         # add half a block of padding
         block = create_block_from_index(
             connected_components_blockwise_idi,
@@ -287,11 +288,11 @@ class MutexWatershed(ComputeConfigMixin):
             segmentation, connectivity=connectivity, do_opening=do_opening
         )
 
+        # Calculate offset with per-axis division for anisotropic data
         global_id_offset = np.uint64(
             block_index
             * np.prod(
-                block.full_block_size
-                / connected_components_blockwise_idi.voxel_size[0],
+                block.full_block_size / connected_components_blockwise_idi.voxel_size,
                 dtype=np.uint64,
             )
         )

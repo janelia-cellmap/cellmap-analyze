@@ -27,12 +27,18 @@ def tmp_skeletonize_csv(shared_tmpdir, segmentation_for_skeleton, voxel_size):
 
         # Calculate bounding box in physical coordinates
         # Add 0.5 to center on voxel
-        min_z = (z_coords.min() + 0.5) * voxel_size
-        max_z = (z_coords.max() + 0.5) * voxel_size
-        min_y = (y_coords.min() + 0.5) * voxel_size
-        max_y = (y_coords.max() + 0.5) * voxel_size
-        min_x = (x_coords.min() + 0.5) * voxel_size
-        max_x = (x_coords.max() + 0.5) * voxel_size
+        # Handle both scalar and tuple voxel_size
+        if np.isscalar(voxel_size):
+            vs = (voxel_size, voxel_size, voxel_size)
+        else:
+            vs = tuple(voxel_size)
+
+        min_z = (z_coords.min() + 0.5) * vs[0]
+        max_z = (z_coords.max() + 0.5) * vs[0]
+        min_y = (y_coords.min() + 0.5) * vs[1]
+        max_y = (y_coords.max() + 0.5) * vs[1]
+        min_x = (x_coords.min() + 0.5) * vs[2]
+        max_x = (x_coords.max() + 0.5) * vs[2]
 
         data.append(
             {

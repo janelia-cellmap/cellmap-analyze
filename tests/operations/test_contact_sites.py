@@ -28,11 +28,17 @@ def test_contact_site_whole_3(segmentation_1, segmentation_2, contact_sites_dist
 
 @pytest.mark.parametrize("contact_distance", [1, 2, 3])
 def test_contact_site_blocks(tmp_zarr, voxel_size, contact_distance):
+    # For anisotropic data, use minimum voxel size to convert distance to nm
+    if np.isscalar(voxel_size):
+        contact_distance_nm = voxel_size * contact_distance
+    else:
+        contact_distance_nm = float(min(voxel_size)) * contact_distance
+
     cs = ContactSites(
         f"{tmp_zarr}/segmentation_1/s0",
         f"{tmp_zarr}/segmentation_2/s0",
         tmp_zarr + f"/test_contact_sites_distance_{contact_distance}",
-        voxel_size * contact_distance,
+        contact_distance_nm,
         minimum_volume_nm_3=0,
         num_workers=1,
     )
@@ -52,12 +58,17 @@ def test_contact_site_blocks(tmp_zarr, voxel_size, contact_distance):
 
 @pytest.mark.parametrize("contact_distance", [1, 2, 3])
 def test_different_voxel_sizes(tmp_zarr, voxel_size, contact_distance):
+    # For anisotropic data, use minimum voxel size to convert distance to nm
+    if np.isscalar(voxel_size):
+        contact_distance_nm = voxel_size * contact_distance
+    else:
+        contact_distance_nm = float(min(voxel_size)) * contact_distance
 
     cs = ContactSites(
         f"{tmp_zarr}/segmentation_1_downsampled/s0",
         f"{tmp_zarr}/segmentation_2/s0",
         tmp_zarr + f"/test_downsampled_contact_sites_distance_{contact_distance}",
-        voxel_size * contact_distance,
+        contact_distance_nm,
         minimum_volume_nm_3=0,
         num_workers=1,
     )
