@@ -434,173 +434,76 @@ def segmentation_random(image_shape):
 
 
 @pytest.fixture(scope="session")
-def contact_sites_distance_1(image_shape):
-    cs = np.zeros(image_shape, dtype=np.uint8)
+def contact_sites_distance_1(segmentation_1, segmentation_2, voxel_size):
+    """Generate ground truth contact sites for distance=1 (min_voxel_size * 1)."""
+    from cellmap_analyze.process.contact_sites import ContactSites
+
+    if np.isscalar(voxel_size):
+        contact_distance_nm = voxel_size * 1
+        voxel_size_tuple = (voxel_size, voxel_size, voxel_size)
+    else:
+        contact_distance_nm = float(min(voxel_size)) * 1
+        voxel_size_tuple = tuple(voxel_size)
+
+    cs = ContactSites.get_ndarray_contact_sites(
+        segmentation_1,
+        segmentation_2,
+        contact_distance_nm / min(voxel_size_tuple),  # contact_distance_voxels
+        voxel_size=np.array(voxel_size_tuple),
+        contact_distance_nm=contact_distance_nm,
+    )
     return cs
 
 
 @pytest.fixture(scope="session")
-def contact_sites_distance_2(image_shape):
-    cs = np.zeros(image_shape, dtype=np.uint8)
-    cs[1:4, 2:5, 4:6] = 1
-    cs[1:4, 7:10, 4:8] = 2
+def contact_sites_distance_2(segmentation_1, segmentation_2, voxel_size):
+    """Generate ground truth contact sites for distance=2 (min_voxel_size * 2)."""
+    from cellmap_analyze.process.contact_sites import ContactSites
+
+    if np.isscalar(voxel_size):
+        contact_distance_nm = voxel_size * 2
+        voxel_size_tuple = (voxel_size, voxel_size, voxel_size)
+    else:
+        contact_distance_nm = float(min(voxel_size)) * 2
+        voxel_size_tuple = tuple(voxel_size)
+
+    cs = ContactSites.get_ndarray_contact_sites(
+        segmentation_1,
+        segmentation_2,
+        contact_distance_nm / min(voxel_size_tuple),  # contact_distance_voxels
+        voxel_size=np.array(voxel_size_tuple),
+        contact_distance_nm=contact_distance_nm,
+    )
     return cs
 
 
 @pytest.fixture(scope="session")
-def contact_sites_distance_3(image_shape):
-    cs = np.zeros(image_shape, dtype=np.uint8)
-    nonzeros = [
-        (0, 2, 4),
-        (0, 2, 5),
-        (0, 3, 4),
-        (0, 3, 5),
-        (0, 4, 4),
-        (0, 4, 5),
-        (0, 7, 4),
-        (0, 7, 5),
-        (0, 7, 6),
-        (0, 7, 7),
-        (0, 8, 4),
-        (0, 8, 5),
-        (0, 8, 6),
-        (0, 8, 7),
-        (0, 9, 4),
-        (0, 9, 5),
-        (0, 9, 6),
-        (0, 9, 7),
-        (1, 2, 2),
-        (1, 2, 3),
-        (1, 2, 4),
-        (1, 2, 5),
-        (1, 2, 6),
-        (1, 2, 7),
-        (1, 3, 2),
-        (1, 3, 3),
-        (1, 3, 4),
-        (1, 3, 5),
-        (1, 3, 6),
-        (1, 3, 7),
-        (1, 4, 2),
-        (1, 4, 3),
-        (1, 4, 4),
-        (1, 4, 5),
-        (1, 4, 6),
-        (1, 4, 7),
-        (1, 5, 2),
-        (1, 5, 3),
-        (1, 5, 4),
-        (1, 5, 5),
-        (1, 5, 6),
-        (1, 5, 7),
-        (1, 5, 8),
-        (1, 6, 2),
-        (1, 6, 3),
-        (1, 6, 4),
-        (1, 6, 5),
-        (1, 6, 6),
-        (1, 6, 7),
-        (1, 6, 8),
-        (1, 6, 9),
-        (1, 7, 2),
-        (1, 7, 3),
-        (1, 7, 4),
-        (1, 7, 5),
-        (1, 7, 6),
-        (1, 7, 7),
-        (1, 7, 8),
-        (1, 7, 9),
-        (1, 8, 2),
-        (1, 8, 3),
-        (1, 8, 4),
-        (1, 8, 5),
-        (1, 8, 6),
-        (1, 8, 7),
-        (1, 8, 8),
-        (1, 8, 9),
-        (1, 9, 2),
-        (1, 9, 3),
-        (1, 9, 4),
-        (1, 9, 5),
-        (1, 9, 6),
-        (1, 9, 7),
-        (1, 9, 8),
-        (1, 9, 9),
-        (2, 2, 3),
-        (2, 2, 4),
-        (2, 2, 5),
-        (2, 2, 6),
-        (2, 3, 3),
-        (2, 3, 4),
-        (2, 3, 5),
-        (2, 3, 6),
-        (2, 4, 3),
-        (2, 4, 4),
-        (2, 4, 5),
-        (2, 4, 6),
-        (2, 5, 4),
-        (2, 5, 5),
-        (2, 6, 4),
-        (2, 6, 5),
-        (2, 6, 6),
-        (2, 6, 7),
-        (2, 7, 3),
-        (2, 7, 4),
-        (2, 7, 5),
-        (2, 7, 6),
-        (2, 7, 7),
-        (2, 7, 8),
-        (2, 8, 3),
-        (2, 8, 4),
-        (2, 8, 5),
-        (2, 8, 6),
-        (2, 8, 7),
-        (2, 8, 8),
-        (2, 9, 3),
-        (2, 9, 4),
-        (2, 9, 5),
-        (2, 9, 6),
-        (2, 9, 7),
-        (2, 9, 8),
-        (3, 2, 4),
-        (3, 2, 5),
-        (3, 3, 4),
-        (3, 3, 5),
-        (3, 4, 4),
-        (3, 4, 5),
-        (3, 7, 4),
-        (3, 7, 5),
-        (3, 7, 6),
-        (3, 7, 7),
-        (3, 8, 4),
-        (3, 8, 5),
-        (3, 8, 6),
-        (3, 8, 7),
-        (3, 9, 4),
-        (3, 9, 5),
-        (3, 9, 6),
-        (3, 9, 7),
-        (4, 2, 4),
-        (4, 2, 5),
-        (4, 3, 4),
-        (4, 3, 5),
-        (4, 4, 4),
-        (4, 4, 5),
-        (4, 7, 4),
-        (4, 7, 5),
-        (4, 7, 6),
-        (4, 7, 7),
-        (4, 8, 4),
-        (4, 8, 7),
-        (4, 9, 4),
-        (4, 9, 5),
-        (4, 9, 6),
-        (4, 9, 7),
-    ]
-    # for every coordinate in non_zeros, set temp to 1
-    for nz in nonzeros:
-        cs[nz] = 1
+def contact_sites_distance_3(segmentation_1, segmentation_2, voxel_size):
+    """Generate ground truth contact sites for distance=3 (min_voxel_size * 3)."""
+    from cellmap_analyze.process.contact_sites import ContactSites
+
+    if np.isscalar(voxel_size):
+        contact_distance_nm = voxel_size * 3
+        voxel_size_tuple = (voxel_size, voxel_size, voxel_size)
+    else:
+        contact_distance_nm = float(min(voxel_size)) * 3
+        voxel_size_tuple = tuple(voxel_size)
+
+    cs = ContactSites.get_ndarray_contact_sites(
+        segmentation_1,
+        segmentation_2,
+        contact_distance_nm / min(voxel_size_tuple),  # contact_distance_voxels
+        voxel_size=np.array(voxel_size_tuple),
+        contact_distance_nm=contact_distance_nm,
+    )
     return cs
+
+
+# Keep old fixtures for reference (commented out)
+# nonzeros = [
+#     (0, 2, 4),
+#     (0, 2, 5),
+#     (0, 3, 4),
 
 
 import pytest
