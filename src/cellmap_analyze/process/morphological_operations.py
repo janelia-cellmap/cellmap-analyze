@@ -15,6 +15,7 @@ from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
 
 import fastmorph
+
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
     level=logging.INFO,
@@ -36,7 +37,7 @@ class MorphologicalOperations(ComputeConfigMixin):
         iterations=1,
         connectivity=2,
     ):
-        # NOTE: For dilation especially, it is not clear if simply padding by iterations is sufficient. May need to pad by more depending on structure sizes 
+        # NOTE: For dilation especially, it is not clear if simply padding by iterations is sufficient. May need to pad by more depending on structure sizes
         # Notice that in tests, larger dilations wont be consistent though close. This may not be a big deal if only care about approximate morphology and exact consistency.
         super().__init__(num_workers)
 
@@ -45,7 +46,7 @@ class MorphologicalOperations(ComputeConfigMixin):
         self.roi = roi
         if self.roi is None:
             self.roi = self.input_idi.roi
-        
+
         self.mask = None
         if mask_config:
             self.mask = MasksFromConfig(
@@ -54,11 +55,11 @@ class MorphologicalOperations(ComputeConfigMixin):
                 connectivity=connectivity,
             )
 
-        self.operation=operation
-        if iterations<1:
+        self.operation = operation
+        if iterations < 1:
             raise ValueError("iterations must be at least 1")
-        
-        self.iterations=iterations
+
+        self.iterations = iterations
         self.output_idi = create_multiscale_dataset_idi(
             output_path,
             dtype=self.input_idi.dtype,
@@ -89,16 +90,16 @@ class MorphologicalOperations(ComputeConfigMixin):
             if not np.any(mask_block):
                 output_idi.ds[block.write_roi] = 0
                 return
-            
+
         data = input_idi.to_ndarray_ts(block.read_roi)
         if mask:
             data *= mask_block
 
-        if operation=="erosion":
+        if operation == "erosion":
             data = fastmorph.erode(data, iterations=iterations)
-        elif operation=="dilation":
+        elif operation == "dilation":
             data = fastmorph.dilate(data, iterations=iterations)
-        
+
         if mask:
             # need before and after to make sure nothing from outside mask makes it in and vice versa
             data *= mask_block
