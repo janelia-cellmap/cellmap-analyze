@@ -33,8 +33,13 @@ def test_clean_connected_components(
         mask_config = {
             "mask_one": {"path": f"{tmp_zarr}/mask_one/s0", "mask_type": "inclusive"}
         }
-    minimum_volume_nm_3 = minimum_volume_voxels * voxel_size**3
-    maximum_volume_nm_3 = maximum_volume_voxels * voxel_size**3
+    # Calculate volume correctly for both isotropic and anisotropic voxel sizes
+    if np.isscalar(voxel_size):
+        voxel_volume = voxel_size**3
+    else:
+        voxel_volume = float(np.prod(voxel_size))
+    minimum_volume_nm_3 = minimum_volume_voxels * voxel_volume
+    maximum_volume_nm_3 = maximum_volume_voxels * voxel_volume
     ccc = CleanConnectedComponents(
         input_path=f"{tmp_zarr}/connected_components/s0",
         output_path=f"{tmp_zarr}/test_clean_connected_components_minimum_volume_nm_3_{minimum_volume_nm_3}_maximum_volume_nm_3_{maximum_volume_nm_3}_{use_mask}",
