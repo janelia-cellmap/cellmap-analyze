@@ -20,7 +20,7 @@ from skimage.feature import peak_local_max
 import edt
 import fastremap
 
-from cellmap_analyze.util.measure_util import trim_array
+from cellmap_analyze.util.measure_util import trim_array, trim_array_anisotropic
 from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
 
@@ -121,8 +121,9 @@ class WatershedSegmentation(ComputeConfigMixin):
             self.roi = roi
 
         self.voxel_size = self.input_idi.voxel_size
+        # Use minimum voxel size to ensure we don't under-sample in any dimension
         self.pseudo_neighborhood_radius_voxels = int(
-            np.round(pseudo_neighborhood_radius_nm / self.voxel_size[0])
+            np.round(pseudo_neighborhood_radius_nm / min(self.voxel_size))
         )
 
         if output_path is None:
@@ -167,9 +168,9 @@ class WatershedSegmentation(ComputeConfigMixin):
             input_idi,
             block_index,
         )
-        padding_increment_voxel = block.full_block_size[0] // (
-            2 * input_idi.voxel_size[0]
-        )
+        # Use minimum voxel size for padding calculations
+        min_voxel_size = min(input_idi.voxel_size)
+        padding_increment_voxel = block.full_block_size[0] // (2 * min_voxel_size)
 
         max_face_value = 0
         padding_voxels = 0
@@ -177,27 +178,33 @@ class WatershedSegmentation(ComputeConfigMixin):
         # (padding_voxels - padding_increment_voxel) is the previous padding value
         while max_face_value > (padding_voxels - padding_increment_voxel):
 
-            padded_read_roi = block.read_roi.grow(
-                padding_voxels * input_idi.voxel_size[0],
-                padding_voxels * input_idi.voxel_size[0],
-            )
+            # Apply uniform padding in physical units (use minimum for safety)
+            padding_nm = padding_voxels * min_voxel_size
+            padded_read_roi = block.read_roi.grow(padding_nm, padding_nm)
+
             input = input_idi.to_ndarray_ts(padded_read_roi)
-            dt = edt.edt(input, black_border=False)
-            dt = trim_array(dt, padding_voxels)
-            # check if we have a big enough padding
-            max_face_value = np.max(
-                [
-                    dt[0].max(),
-                    dt[-1].max(),
-                    dt[:, 0].max(),
-                    dt[:, -1].max(),
-                    dt[:, :, 0].max(),
-                    dt[:, :, -1].max(),
-                ]
-            )
+            # Use anisotropic EDT with per-axis voxel sizes
+            dt = edt.edt(input, anisotropy=tuple(input_idi.voxel_size), black_border=False)
+            dt = trim_array_anisotropic(dt, padding_nm, input_idi.voxel_size)
+
+            # check if we have a big enough padding (handle empty arrays)
+            if dt.size == 0:
+                max_face_value = 0
+            else:
+                max_face_value = np.max(
+                    [
+                        dt[0].max() if dt.shape[0] > 0 else 0,
+                        dt[-1].max() if dt.shape[0] > 0 else 0,
+                        dt[:, 0].max() if dt.shape[1] > 0 else 0,
+                        dt[:, -1].max() if dt.shape[1] > 0 else 0,
+                        dt[:, :, 0].max() if dt.shape[2] > 0 else 0,
+                        dt[:, :, -1].max() if dt.shape[2] > 0 else 0,
+                    ]
+                )
             padding_voxels += padding_increment_voxel
-        dt *= input_idi.voxel_size[0]
-        input = trim_array(input, padding_voxels - padding_increment_voxel)
+        # EDT with anisotropy already returns physical distances, no need to scale
+        final_padding_nm = (padding_voxels - padding_increment_voxel) * min_voxel_size
+        input = trim_array_anisotropic(input, final_padding_nm, input_idi.voxel_size)
         distance_transform_idi.ds[block.write_roi] = dt
         return dt.max()
 
@@ -209,16 +216,20 @@ class WatershedSegmentation(ComputeConfigMixin):
         pseudo_neighborhood_radius_voxels: int,
     ):
 
+        # Use minimum voxel size for uniform padding in physical units
+        min_voxel_size = min(input_idi.voxel_size)
+        padding_nm = min_voxel_size * pseudo_neighborhood_radius_voxels
         block = create_block_from_index(
             input_idi,
             block_index,
-            padding=input_idi.voxel_size[0] * pseudo_neighborhood_radius_voxels,
+            padding=padding_nm,
         )
         distance_transform = distance_transform_idi.to_ndarray_ts(block.read_roi)
         input = input_idi.to_ndarray_ts(block.read_roi)
 
+        # Calculate offset with per-axis division for anisotropic data
         global_id_offset = block_index * np.prod(
-            block.full_block_size / input_idi.voxel_size[0],
+            block.full_block_size / input_idi.voxel_size,
             dtype=np.uint64,
         )
         coords = peak_local_max(
@@ -230,8 +241,13 @@ class WatershedSegmentation(ComputeConfigMixin):
         plateau_mask = np.zeros_like(distance_transform, dtype=np.uint64)
         plateau_mask[tuple(coords.T)] = 1
 
-        plateau_mask = trim_array(plateau_mask, pseudo_neighborhood_radius_voxels)
-        input = trim_array(input, pseudo_neighborhood_radius_voxels)
+        # Use anisotropic trimming based on physical padding
+        plateau_mask = trim_array_anisotropic(
+            plateau_mask, padding_nm, input_idi.voxel_size
+        )
+        input = trim_array_anisotropic(
+            input, padding_nm, input_idi.voxel_size
+        )
         plateau_mask[plateau_mask > 0] += input[plateau_mask > 0]
         plateau_labels = cc3d.connected_components(
             plateau_mask, connectivity=26, out_dtype=np.uint64
@@ -286,8 +302,9 @@ class WatershedSegmentation(ComputeConfigMixin):
                 # b now contains one float per partition: the local max for that partition
                 global_dt_max = np.ceil(b.max().compute(**self.compute_args))
 
+                # Use minimum voxel size to convert distance to voxels
                 self.global_dt_max_voxels = int(
-                    np.ceil(global_dt_max / self.input_idi.voxel_size[0])
+                    np.ceil(global_dt_max / min(self.input_idi.voxel_size))
                 )
 
     @staticmethod
@@ -302,10 +319,12 @@ class WatershedSegmentation(ComputeConfigMixin):
     ):
         # NOTE: Only works for uint32 or less
         padding_voxels = global_dt_max_voxels + pseudo_neighborhood_radius_voxels
+        # Use minimum voxel size for uniform padding in physical units
+        padding_nm = min(distance_transform_idi.voxel_size) * padding_voxels
         block = create_block_from_index(
             distance_transform_idi,
             block_index,
-            padding=distance_transform_idi.voxel_size[0] * padding_voxels,
+            padding=padding_nm,
         )
         input = input_idi.to_ndarray_ts(block.read_roi)
         distance_transform = distance_transform_idi.to_ndarray_ts(block.read_roi)
@@ -336,7 +355,9 @@ class WatershedSegmentation(ComputeConfigMixin):
                 mask=distance_transform_masked > 0,
                 connectivity=1,
             )
-        watershed_idi.ds[block.write_roi] = trim_array(labels, padding_voxels)
+        watershed_idi.ds[block.write_roi] = trim_array_anisotropic(
+            labels, padding_nm, distance_transform_idi.voxel_size
+        )
 
     def global_watershed(
         block_indexes,

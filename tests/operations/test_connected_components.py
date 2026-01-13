@@ -32,8 +32,13 @@ def test_connected_components(
     maximum_volume_voxels,
     voxel_size,
 ):
-    minimum_volume_nm_3 = minimum_volume_voxels * voxel_size**3
-    maximum_volume_nm_3 = maximum_volume_voxels * voxel_size**3
+    # Calculate volume correctly for both isotropic and anisotropic voxel sizes
+    if np.isscalar(voxel_size):
+        voxel_volume = voxel_size**3
+    else:
+        voxel_volume = float(np.prod(voxel_size))
+    minimum_volume_nm_3 = minimum_volume_voxels * voxel_volume
+    maximum_volume_nm_3 = maximum_volume_voxels * voxel_volume
     cc = ConnectedComponents(
         input_path=f"{tmp_zarr}/intensity_image/s0",
         output_path=f"{tmp_zarr}/test_connected_components_minimum_volume_nm_3_{minimum_volume_nm_3}_maximum_volume_nm_3_{maximum_volume_nm_3}",
@@ -224,7 +229,11 @@ def test_gaussian_smoothing(
     voxel_size,
     gaussian_smoothing_sigma_voxels,
 ):
-    gaussian_smoothing_sigma_nm = gaussian_smoothing_sigma_voxels * voxel_size
+    # For anisotropic data, use minimum voxel size to convert sigma to nm
+    if np.isscalar(voxel_size):
+        gaussian_smoothing_sigma_nm = gaussian_smoothing_sigma_voxels * voxel_size
+    else:
+        gaussian_smoothing_sigma_nm = gaussian_smoothing_sigma_voxels * min(voxel_size)
     cc = ConnectedComponents(
         input_path=f"{tmp_zarr}/intensity_image/s0",
         output_path=f"{tmp_zarr}/test_connected_components_gaussian_smoothing_sigma_nm_{gaussian_smoothing_sigma_nm}",

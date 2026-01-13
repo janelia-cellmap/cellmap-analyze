@@ -10,7 +10,7 @@ from cellmap_analyze.cythonizing.bresenham3D import bresenham_3D_lines
 import logging
 from cellmap_analyze.process.connected_components import ConnectedComponents
 from scipy.spatial import KDTree
-from cellmap_analyze.util.measure_util import trim_array
+from cellmap_analyze.util.measure_util import trim_array_anisotropic
 from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.util.zarr_util import (
     create_multiscale_dataset_idi,
@@ -44,14 +44,17 @@ class ContactSites(ComputeConfigMixin):
         self.organelle_2_idi = ImageDataInterface(
             organelle_2_path, chunk_shape=chunk_shape
         )
-        output_voxel_size = min(
-            self.organelle_1_idi.voxel_size, self.organelle_2_idi.voxel_size
+        # Get element-wise minimum voxel size
+        output_voxel_size = tuple(
+            min(v1, v2) for v1, v2 in zip(self.organelle_1_idi.voxel_size, self.organelle_2_idi.voxel_size)
         )
         self.organelle_2_idi.output_voxel_size = output_voxel_size
         self.organelle_1_idi.output_voxel_size = output_voxel_size
         self.voxel_size = output_voxel_size
 
-        self.contact_distance_voxels = contact_distance_nm / output_voxel_size[0]
+        # Use minimum voxel size across all dimensions to ensure we don't miss contacts
+        min_voxel_size = min(output_voxel_size)
+        self.contact_distance_voxels = contact_distance_nm / min_voxel_size
 
         self.padding_voxels = int(np.ceil(self.contact_distance_voxels) + 1)
         # add one to ensure accuracy during surface area calculation since we need to make sure that neighboring ones are calculated
@@ -75,8 +78,9 @@ class ContactSites(ComputeConfigMixin):
 
         self.minimum_volume_nm_3 = minimum_volume_nm_3
         self.num_workers = num_workers
-        self.voxel_volume = np.prod(self.voxel_size)
-        self.voxel_face_area = self.voxel_size[1] * self.voxel_size[2]
+        self.voxel_volume = float(np.prod(self.voxel_size))
+        # For anisotropic data, use the minimum cross-sectional area
+        self.voxel_face_area = float(self.voxel_size[1] * self.voxel_size[2])
 
         # Use helper function to generate blockwise path (handles root datasets correctly)
         blockwise_path = get_output_path_from_input_path(output_path, "_blockwise")
@@ -160,35 +164,42 @@ class ContactSites(ComputeConfigMixin):
         contact_distance_voxels,
         padding_voxels,
     ):
+        # Use minimum voxel size for uniform padding in physical units
+        padding_nm = padding_voxels * min(contact_sites_blockwise_idi.voxel_size)
         block = create_block_from_index(
             contact_sites_blockwise_idi,
             block_index,
-            padding=padding_voxels * contact_sites_blockwise_idi.voxel_size[0],
+            padding=padding_nm,
         )
         organelle_1 = organelle_1_idi.to_ndarray_ts(block.read_roi)
         if not np.any(organelle_1):
             # if organelle_1 is empty, we can skip this block
-            contact_sites_blockwise_idi.ds[block.write_roi] = trim_array(
-                np.zeros(organelle_1.shape, dtype=np.uint64), padding_voxels
+            contact_sites_blockwise_idi.ds[block.write_roi] = trim_array_anisotropic(
+                np.zeros(organelle_1.shape, dtype=np.uint64),
+                padding_nm,
+                contact_sites_blockwise_idi.voxel_size,
             )
             return
         organelle_2 = organelle_2_idi.to_ndarray_ts(block.read_roi)
         if not np.any(organelle_2):
             # if organelle_2 is empty, we can skip this block
-            contact_sites_blockwise_idi.ds[block.write_roi] = trim_array(
-                np.zeros(organelle_1.shape, dtype=np.uint64), padding_voxels
+            contact_sites_blockwise_idi.ds[block.write_roi] = trim_array_anisotropic(
+                np.zeros(organelle_1.shape, dtype=np.uint64),
+                padding_nm,
+                contact_sites_blockwise_idi.voxel_size,
             )
             return
+        # Calculate offset with per-axis division for anisotropic data
         global_id_offset = block_index * np.prod(
-            block.full_block_size / contact_sites_blockwise_idi.voxel_size[0],
+            block.full_block_size / contact_sites_blockwise_idi.voxel_size,
             dtype=np.uint64,
         )  # have to use full_block_size since before if we use write_roi, blocks on the end will be smaller and will have incorrect offsets
         contact_sites = ContactSites.get_ndarray_contact_sites(
             organelle_1, organelle_2, contact_distance_voxels
         )
         contact_sites[contact_sites > 0] += global_id_offset
-        contact_sites_blockwise_idi.ds[block.write_roi] = trim_array(
-            contact_sites, padding_voxels
+        contact_sites_blockwise_idi.ds[block.write_roi] = trim_array_anisotropic(
+            contact_sites, padding_nm, contact_sites_blockwise_idi.voxel_size
         )
 
     def calculate_contact_sites_blockwise(self):

@@ -7,7 +7,7 @@ from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
 from cellmap_analyze.util.mask_util import MasksFromConfig
-from cellmap_analyze.util.measure_util import trim_array
+from cellmap_analyze.util.measure_util import trim_array_anisotropic
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 
 import logging
@@ -77,10 +77,12 @@ class MorphologicalOperations(ComputeConfigMixin):
         mask: MasksFromConfig = None,
     ):
         padding_voxels = iterations
+        # Use minimum voxel size for uniform padding in physical units
+        padding_nm = padding_voxels * min(input_idi.voxel_size)
         block = create_block_from_index(
             input_idi,
             block_index,
-            padding=padding_voxels * input_idi.voxel_size[0],
+            padding=padding_nm,
         )
         if mask:
             mask_block = mask.process_block(roi=block.read_roi)
@@ -100,7 +102,9 @@ class MorphologicalOperations(ComputeConfigMixin):
         if mask:
             # need before and after to make sure nothing from outside mask makes it in and vice versa
             data *= mask_block
-        output_idi.ds[block.write_roi] = trim_array(data, padding_voxels)
+        output_idi.ds[block.write_roi] = trim_array_anisotropic(
+            data, padding_nm, input_idi.voxel_size
+        )
 
     def perform_morphological_operation(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
