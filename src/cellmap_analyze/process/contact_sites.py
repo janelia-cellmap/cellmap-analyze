@@ -194,30 +194,57 @@ class ContactSites(ComputeConfigMixin):
         organelle_1 = organelle_1_idi.to_ndarray_ts(block.read_roi)
 
         # Calculate actual padding from array shape vs write ROI shape
-        write_roi_shape_voxels = tuple(int(s / vs) for s, vs in zip(block.write_roi.shape, voxel_size))
-        actual_padding_voxels = tuple(
-            (organelle_1.shape[i] - write_roi_shape_voxels[i]) // 2
+        # The write ROI is in physical coordinates, convert to voxels at output_voxel_size
+        write_roi_shape_voxels = tuple(
+            int(np.round(s / vs)) for s, vs in zip(block.write_roi.shape, voxel_size)
+        )
+
+        # Due to snap_to_grid and upsampling, the actual array size might differ slightly
+        # from what we expect. Calculate the padding based on the difference.
+        # The padding should be approximately symmetric, but might be off by 1 due to rounding
+        total_padding_voxels = tuple(
+            organelle_1.shape[i] - write_roi_shape_voxels[i]
             for i in range(3)
         )
 
-        # Helper function to trim with per-axis padding
-        def trim_with_padding(arr, padding_tuple):
-            slices = [slice(p, arr.shape[i] - p) if p > 0 else slice(None)
-                      for i, p in enumerate(padding_tuple)]
-            return arr[tuple(slices)]
+        # Helper function to trim with padding (approximately centered)
+        def trim_with_padding(arr):
+            slices = []
+            for i in range(3):
+                # Split padding approximately equally, but adjust if needed
+                pad_total = total_padding_voxels[i]
+                if pad_total <= 0:
+                    # No padding or array is smaller than expected
+                    slices.append(slice(None))
+                else:
+                    # Try to center the crop
+                    pad_before = pad_total // 2
+                    pad_after = pad_total - pad_before
+                    start = pad_before
+                    end = arr.shape[i] - pad_after
+                    slices.append(slice(start, end))
+            result = arr[tuple(slices)]
+            # Verify the result has the expected shape, otherwise adjust
+            if result.shape != tuple(write_roi_shape_voxels):
+                # Fallback: crop/pad to exact size
+                final_slices = []
+                for i in range(3):
+                    end = min(write_roi_shape_voxels[i], result.shape[i])
+                    final_slices.append(slice(0, end))
+                result = result[tuple(final_slices)]
+            return result
+
         if not np.any(organelle_1):
             # if organelle_1 is empty, we can skip this block
             contact_sites_blockwise_idi.ds[block.write_roi] = trim_with_padding(
-                np.zeros(organelle_1.shape, dtype=np.uint64),
-                actual_padding_voxels,
+                np.zeros(organelle_1.shape, dtype=np.uint64)
             )
             return
         organelle_2 = organelle_2_idi.to_ndarray_ts(block.read_roi)
         if not np.any(organelle_2):
             # if organelle_2 is empty, we can skip this block
             contact_sites_blockwise_idi.ds[block.write_roi] = trim_with_padding(
-                np.zeros(organelle_1.shape, dtype=np.uint64),
-                actual_padding_voxels,
+                np.zeros(organelle_1.shape, dtype=np.uint64)
             )
             return
         # Calculate offset with per-axis division for anisotropic data
@@ -233,10 +260,7 @@ class ContactSites(ComputeConfigMixin):
             contact_distance_nm=contact_distance_nm,
         )
         contact_sites[contact_sites > 0] += global_id_offset
-        # Use actual padding calculated from ROI sizes
-        contact_sites_blockwise_idi.ds[block.write_roi] = trim_with_padding(
-            contact_sites, actual_padding_voxels
-        )
+        contact_sites_blockwise_idi.ds[block.write_roi] = trim_with_padding(contact_sites)
 
     def calculate_contact_sites_blockwise(self):
         num_blocks = dask_util.get_num_blocks(
