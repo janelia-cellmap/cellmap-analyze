@@ -14,10 +14,10 @@ from funlib.persistence import prepare_ds
     autouse=True,
     scope="session",
     params=[
-        (8, 8, 8),      # isotropic
-        (32, 16, 8),    # anisotropic - all axes different
+        (8, 8, 8),  # isotropic
+        (32, 16, 8),  # anisotropic - all axes different
     ],
-    ids=["isotropic", "anisotropic"]
+    ids=["isotropic", "anisotropic"],
 )
 def voxel_size(request):
     """Voxel size in (Z, Y, X) order."""
@@ -361,7 +361,7 @@ def tmp_coms_csv(shared_tmpdir, voxel_size):
             "Object ID": [1, 2, 3],
             "COM X (nm)": (np.array([1.1, 3.1, 11.1]) + 0.5) * voxel_size[2],  # X
             "COM Y (nm)": (np.array([1.1, 3.1, 11.1]) + 0.5) * voxel_size[1],  # Y
-            "COM Z (nm)": (np.array([1.1, 3.1, 8.1]) + 0.5) * voxel_size[0],   # Z
+            "COM Z (nm)": (np.array([1.1, 3.1, 8.1]) + 0.5) * voxel_size[0],  # Z
         }
     )
     df.to_csv(output_path + "/assignment_coms.csv", index=False)
@@ -393,7 +393,9 @@ def tmp_cylinders_information_csv(segmentation_cylinders, shared_tmpdir, voxel_s
         row = [
             id,
             float(oi.volume),  # Ensure volume is float to match actual output
-            float(oi.surface_area),  # Ensure surface_area is float to match actual output
+            float(
+                oi.surface_area
+            ),  # Ensure surface_area is float to match actual output
             oi.radius_of_gyration,
             *oi.com[::-1],
             *oi.bounding_box[:3][::-1],
@@ -434,100 +436,82 @@ def segmentation_random(image_shape):
 
 
 @pytest.fixture(scope="session")
-def contact_sites_distance_1(image_shape, segmentation_1, segmentation_2, voxel_size):
-    """Ground truth contact sites for distance=1."""
-    if np.isscalar(voxel_size):
-        # Use original hardcoded ground truth for isotropic data
-        cs = np.zeros(image_shape, dtype=np.uint8)
-        return cs
-    else:
-        # Generate dynamically for anisotropic data
-        from cellmap_analyze.process.contact_sites import ContactSites
-        contact_distance_nm = float(min(voxel_size)) * 1
-        voxel_size_tuple = tuple(voxel_size)
-        cs = ContactSites.get_ndarray_contact_sites(
-            segmentation_1,
-            segmentation_2,
-            contact_distance_nm / min(voxel_size_tuple),
-            voxel_size=np.array(voxel_size_tuple),
-            contact_distance_nm=contact_distance_nm,
-        )
-        return cs
+def contact_sites_distance_1(image_shape):
+    """Ground truth contact sites for distance=1 (isotropic only)."""
+    cs = np.zeros(image_shape, dtype=np.uint8)
+    return cs
 
 
 @pytest.fixture(scope="session")
-def contact_sites_distance_2(image_shape, segmentation_1, segmentation_2, voxel_size):
-    """Ground truth contact sites for distance=2."""
-    if np.isscalar(voxel_size):
-        # Use original hardcoded ground truth for isotropic data
-        cs = np.zeros(image_shape, dtype=np.uint8)
-        cs[1:4, 2:5, 4:6] = 1
-        cs[1:4, 7:10, 4:8] = 2
-        return cs
-    else:
-        # Generate dynamically for anisotropic data
-        from cellmap_analyze.process.contact_sites import ContactSites
-        contact_distance_nm = float(min(voxel_size)) * 2
-        voxel_size_tuple = tuple(voxel_size)
-        cs = ContactSites.get_ndarray_contact_sites(
-            segmentation_1,
-            segmentation_2,
-            contact_distance_nm / min(voxel_size_tuple),
-            voxel_size=np.array(voxel_size_tuple),
-            contact_distance_nm=contact_distance_nm,
-        )
-        return cs
+def contact_sites_distance_2(image_shape):
+    """Ground truth contact sites for distance=2 (isotropic only)."""
+    cs = np.zeros(image_shape, dtype=np.uint8)
+    cs[1:4, 2:5, 4:6] = 1
+    cs[1:4, 7:10, 4:8] = 2
+    return cs
 
 
 @pytest.fixture(scope="session")
-def contact_sites_distance_3(image_shape, segmentation_1, segmentation_2, voxel_size):
-    """Ground truth contact sites for distance=3."""
-    if np.isscalar(voxel_size):
-        # Use original hardcoded ground truth for isotropic data
-        cs = np.zeros(image_shape, dtype=np.uint8)
-        nonzeros = [
-            (0, 2, 4), (0, 2, 5), (0, 3, 4), (0, 3, 5), (0, 4, 4), (0, 4, 5),
-            (0, 7, 4), (0, 7, 5), (0, 7, 6), (0, 7, 7), (0, 8, 4), (0, 8, 5),
-            (0, 8, 6), (0, 8, 7), (0, 9, 4), (0, 9, 5), (0, 9, 6), (0, 9, 7),
-            (1, 2, 2), (1, 2, 3), (1, 2, 4), (1, 2, 5), (1, 2, 6), (1, 2, 7),
-            (1, 2, 8), (1, 2, 9), (1, 3, 2), (1, 3, 3), (1, 3, 4), (1, 3, 5),
-            (1, 3, 6), (1, 3, 7), (1, 3, 8), (1, 3, 9), (1, 4, 2), (1, 4, 3),
-            (1, 4, 4), (1, 4, 5), (1, 4, 6), (1, 4, 7), (1, 4, 8), (1, 4, 9),
-            (1, 5, 2), (1, 5, 3), (1, 5, 4), (1, 5, 5), (1, 5, 6), (1, 5, 7),
-            (1, 5, 8), (1, 6, 2), (1, 6, 3), (1, 6, 4), (1, 6, 5), (1, 6, 6),
-            (1, 6, 7), (1, 6, 8), (1, 6, 9), (1, 7, 2), (1, 7, 3), (1, 7, 4),
-            (1, 7, 5), (1, 7, 6), (1, 7, 7), (1, 7, 8), (1, 7, 9), (1, 8, 2),
-            (1, 8, 3), (1, 8, 4), (1, 8, 5), (1, 8, 6), (1, 8, 7), (1, 8, 8),
-            (1, 8, 9), (1, 9, 2), (1, 9, 3), (1, 9, 4), (1, 9, 5), (1, 9, 6),
-            (1, 9, 7), (1, 9, 8), (1, 9, 9), (2, 2, 4), (2, 2, 5), (2, 3, 4),
-            (2, 3, 5), (2, 4, 4), (2, 4, 5), (2, 7, 4), (2, 7, 5), (2, 7, 6),
-            (2, 7, 7), (2, 8, 4), (2, 8, 5), (2, 8, 6), (2, 8, 7), (2, 9, 4),
-            (2, 9, 5), (2, 9, 6), (2, 9, 7), (3, 2, 4), (3, 2, 5), (3, 3, 4),
-            (3, 3, 5), (3, 4, 4), (3, 4, 5), (3, 7, 4), (3, 7, 5), (3, 7, 6),
-            (3, 7, 7), (3, 8, 4), (3, 8, 5), (3, 8, 6), (3, 8, 7), (3, 9, 4),
-            (3, 9, 5), (3, 9, 6), (3, 9, 7), (4, 7, 4), (4, 7, 5), (4, 7, 6),
-            (4, 7, 7), (4, 8, 4), (4, 8, 5), (4, 8, 6), (4, 8, 7), (4, 9, 4),
-            (4, 9, 5), (4, 9, 6), (4, 9, 7),
-        ]
-        for nz in nonzeros:
-            cs[nz] = 1
-        return cs
-    else:
-        # Generate dynamically for anisotropic data
-        from cellmap_analyze.process.contact_sites import ContactSites
-        contact_distance_nm = float(min(voxel_size)) * 3
-        voxel_size_tuple = tuple(voxel_size)
-        cs = ContactSites.get_ndarray_contact_sites(
-            segmentation_1,
-            segmentation_2,
-            contact_distance_nm / min(voxel_size_tuple),
-            voxel_size=np.array(voxel_size_tuple),
-            contact_distance_nm=contact_distance_nm,
-        )
-        return cs
+def contact_sites_distance_3(image_shape):
+    """Ground truth contact sites for distance=3 (isotropic only)."""
+    cs = np.zeros(image_shape, dtype=np.uint8)
+    nonzeros = [
+        (0, 2, 4), (0, 2, 5), (0, 3, 4), (0, 3, 5), (0, 4, 4), (0, 4, 5),
+        (0, 7, 4), (0, 7, 5), (0, 7, 6), (0, 7, 7), (0, 8, 4), (0, 8, 5),
+        (0, 8, 6), (0, 8, 7), (0, 9, 4), (0, 9, 5), (0, 9, 6), (0, 9, 7),
+        (1, 2, 2), (1, 2, 3), (1, 2, 4), (1, 2, 5), (1, 2, 6), (1, 2, 7),
+        (1, 2, 8), (1, 2, 9), (1, 3, 2), (1, 3, 3), (1, 3, 4), (1, 3, 5),
+        (1, 3, 6), (1, 3, 7), (1, 3, 8), (1, 3, 9), (1, 4, 2), (1, 4, 3),
+        (1, 4, 4), (1, 4, 5), (1, 4, 6), (1, 4, 7), (1, 4, 8), (1, 4, 9),
+        (1, 5, 2), (1, 5, 3), (1, 5, 4), (1, 5, 5), (1, 5, 6), (1, 5, 7),
+        (1, 5, 8), (1, 6, 2), (1, 6, 3), (1, 6, 4), (1, 6, 5), (1, 6, 6),
+        (1, 6, 7), (1, 6, 8), (1, 6, 9), (1, 7, 2), (1, 7, 3), (1, 7, 4),
+        (1, 7, 5), (1, 7, 6), (1, 7, 7), (1, 7, 8), (1, 7, 9), (1, 8, 2),
+        (1, 8, 3), (1, 8, 4), (1, 8, 5), (1, 8, 6), (1, 8, 7), (1, 8, 8),
+        (1, 8, 9), (1, 9, 2), (1, 9, 3), (1, 9, 4), (1, 9, 5), (1, 9, 6),
+        (1, 9, 7), (1, 9, 8), (1, 9, 9), (2, 2, 4), (2, 2, 5), (2, 3, 4),
+        (2, 3, 5), (2, 4, 4), (2, 4, 5), (2, 7, 4), (2, 7, 5), (2, 7, 6),
+        (2, 7, 7), (2, 8, 4), (2, 8, 5), (2, 8, 6), (2, 8, 7), (2, 9, 4),
+        (2, 9, 5), (2, 9, 6), (2, 9, 7), (3, 2, 4), (3, 2, 5), (3, 3, 4),
+        (3, 3, 5), (3, 4, 4), (3, 4, 5), (3, 7, 4), (3, 7, 5), (3, 7, 6),
+        (3, 7, 7), (3, 8, 4), (3, 8, 5), (3, 8, 6), (3, 8, 7), (3, 9, 4),
+        (3, 9, 5), (3, 9, 6), (3, 9, 7), (4, 7, 4), (4, 7, 5), (4, 7, 6),
+        (4, 7, 7), (4, 8, 4), (4, 8, 5), (4, 8, 6), (4, 8, 7), (4, 9, 4),
+        (4, 9, 5), (4, 9, 6), (4, 9, 7),
+    ]
+    for nz in nonzeros:
+        cs[nz] = 1
+    return cs
 
 
-# Keep old fixtures for reference (commented out)
+# Anisotropic ground truth fixtures - hardcoded for voxel_size [32, 16, 8]
+@pytest.fixture(scope="session")
+def contact_sites_distance_1_anisotropic(image_shape):
+    """Ground truth contact sites for distance=1 with anisotropic voxel_size [32, 16, 8]."""
+    # With contact_distance_nm = 1 * 8 = 8nm, no contacts exist because
+    # segmentation_1 at Z=1 (32nm) and segmentation_2 at Z=3 (96nm) are 64nm apart
+    cs = np.zeros(image_shape, dtype=np.uint8)
+    return cs
+
+
+@pytest.fixture(scope="session")
+def contact_sites_distance_2_anisotropic(image_shape):
+    """Ground truth contact sites for distance=2 with anisotropic voxel_size [32, 16, 8]."""
+    # With contact_distance_nm = 2 * 8 = 16nm, no contacts exist because
+    # segmentation_1 at Z=1 (32nm) and segmentation_2 at Z=3 (96nm) are 64nm apart
+    cs = np.zeros(image_shape, dtype=np.uint8)
+    return cs
+
+
+@pytest.fixture(scope="session")
+def contact_sites_distance_3_anisotropic(image_shape):
+    """Ground truth contact sites for distance=3 with anisotropic voxel_size [32, 16, 8]."""
+    # With contact_distance_nm = 3 * 8 = 24nm, no contacts exist because
+    # segmentation_1 at Z=1 (32nm) and segmentation_2 at Z=3 (96nm) are 64nm apart
+    cs = np.zeros(image_shape, dtype=np.uint8)
+    return cs
+
+
 # nonzeros = [
 #     (0, 2, 4),
 #     (0, 2, 5),
@@ -671,7 +655,11 @@ def test_image_dict(
     contact_sites_distance_1,
     contact_sites_distance_2,
     contact_sites_distance_3,
+    contact_sites_distance_1_anisotropic,
+    contact_sites_distance_2_anisotropic,
+    contact_sites_distance_3_anisotropic,
     segmentation_for_skeleton,
+    voxel_size,
 ):
     dict = {
         "blockwise_connected_components": blockwise_connected_components,
@@ -696,11 +684,24 @@ def test_image_dict(
         "segmentation_2": segmentation_2,
         "segmentation_random": segmentation_random,
         "segmentation_cells": segmentation_cells,
-        "contact_sites_distance_1": contact_sites_distance_1,
-        "contact_sites_distance_2": contact_sites_distance_2,
-        "contact_sites_distance_3": contact_sites_distance_3,
         "segmentation_for_skeleton": segmentation_for_skeleton,
     }
+
+    # Add appropriate contact_sites fixtures based on voxel_size
+    # Check if isotropic: all voxel sizes are equal
+    is_isotropic = len(set(voxel_size)) == 1 if hasattr(voxel_size, '__iter__') else True
+
+    if is_isotropic:
+        # Isotropic
+        dict["contact_sites_distance_1"] = contact_sites_distance_1
+        dict["contact_sites_distance_2"] = contact_sites_distance_2
+        dict["contact_sites_distance_3"] = contact_sites_distance_3
+    else:
+        # Anisotropic
+        dict["contact_sites_distance_1"] = contact_sites_distance_1_anisotropic
+        dict["contact_sites_distance_2"] = contact_sites_distance_2_anisotropic
+        dict["contact_sites_distance_3"] = contact_sites_distance_3_anisotropic
+
     return dict
 
 
