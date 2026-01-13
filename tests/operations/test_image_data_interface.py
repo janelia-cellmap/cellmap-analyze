@@ -4,7 +4,7 @@ from cellmap_analyze.util.image_data_interface import (
     ImageDataInterface,
 )
 
-from funlib.geometry import Roi
+from funlib.geometry import Roi, Coordinate
 
 
 def test_image_data_interface_whole(
