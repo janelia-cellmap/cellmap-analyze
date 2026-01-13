@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cat:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(conda run:*)",
+      "Bash(python3:*)",
+      "Bash(grep:*)",
+      "Bash(ls:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git tag:*)",
+      "Bash(git push:*)",
+      "Bash(wc:*)",
+      "Bash(git stash:*)",
+      "Bash(python -m pip install:*)",
+      "Bash(source:*)",
+      "Bash(pip install:*)",
+      "Bash(conda env list:*)",
+      "Bash(pytest:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

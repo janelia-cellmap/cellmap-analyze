@@ -220,7 +220,11 @@ def test_skeletonize_produces_reasonable_skeletons(
         row = df.loc[id_val]
 
         # Allow generous tolerance (several voxels) since erosion can shrink objects
-        tolerance = 10 * voxel_size
+        # For anisotropic data, use the maximum voxel size for the most generous tolerance
+        if np.isscalar(voxel_size):
+            tolerance = 10 * voxel_size
+        else:
+            tolerance = 10 * max(voxel_size)
 
         for v in test_vertices:
             x, y, z = v
@@ -382,7 +386,11 @@ def test_skeletonize_with_roi_padding(tmp_zarr, tmp_skeletonize_csv, voxel_size)
 
         # Check that all vertices are within reasonable bounds
         # (allowing for some tolerance due to voxel centering and skeleton positioning)
-        tolerance = 2 * voxel_size  # Allow 2 voxels of tolerance
+        # For anisotropic data, use the maximum voxel size for the most generous tolerance
+        if np.isscalar(voxel_size):
+            tolerance = 2 * voxel_size  # Allow 2 voxels of tolerance
+        else:
+            tolerance = 2 * max(voxel_size)
 
         for v in test_vertices:
             # Vertices are in XYZ order
