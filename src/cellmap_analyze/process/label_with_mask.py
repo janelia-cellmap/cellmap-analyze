@@ -6,7 +6,7 @@ from cellmap_analyze.util.block_util import erosion
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
-from cellmap_analyze.util.measure_util import trim_array_anisotropic
+from cellmap_analyze.util.measure_util import trim_array
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 
 import logging
@@ -86,9 +86,8 @@ class LabelWithMask(ComputeConfigMixin):
             (input >= intensity_threshold_minimum)
             & (input < intensity_threshold_maximum)
         ) * mask
-        output_idi.ds[block.write_roi] = trim_array_anisotropic(
-            output, padding_nm, input_idi.voxel_size
-        )
+        # Erosion operates uniformly in voxel space, so use uniform trimming
+        output_idi.ds[block.write_roi] = trim_array(output, padding_voxels)
 
     def get_label_with_mask(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
