@@ -71,12 +71,16 @@ class Mask:
             # Use minimum voxel size for uniform padding in physical units
             min_voxel_size = min(self.output_voxel_size)
             padding = total_iterations * min_voxel_size
-            block = self.idi.to_ndarray_ts(
-                roi.grow(
-                    padding,
-                    padding,
-                )
+            grown_roi = roi.grow(padding, padding)
+            block = self.idi.to_ndarray_ts(grown_roi)
+
+            # Calculate actual padding from array shape vs original ROI shape
+            roi_shape_voxels = tuple(int(s / vs) for s, vs in zip(roi.shape, self.output_voxel_size))
+            actual_padding_voxels = tuple(
+                (block.shape[i] - roi_shape_voxels[i]) // 2
+                for i in range(3)
             )
+
             if mask_value is not None:
                 block = block == mask_value
             for operation, iterations in zip(operation, iterations):
@@ -85,12 +89,9 @@ class Mask:
                 else:
                     block = dilation(block, iterations, structuring_element)
 
-            # Trim with anisotropic awareness - calculate per-axis padding in voxels
-            padding_voxels = tuple(
-                int(np.round(padding / vs)) for vs in self.output_voxel_size
-            )
+            # Trim using actual padding calculated from array shapes
             slices = []
-            for p in padding_voxels:
+            for p in actual_padding_voxels:
                 if p > 0:
                     slices.append(slice(p, -p))
                 else:
