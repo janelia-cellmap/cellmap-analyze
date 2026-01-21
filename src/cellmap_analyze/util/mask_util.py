@@ -67,7 +67,9 @@ class Mask:
                 block = block == mask_value
         else:
             total_iterations = sum(iterations)
-            padding = total_iterations * self.output_voxel_size[0]
+            # For anisotropic voxels, use minimum dimension for padding calculation
+            min_voxel_dim = min(self.output_voxel_size) if hasattr(self.output_voxel_size, '__iter__') else self.output_voxel_size
+            padding = total_iterations * min_voxel_dim
             block = self.idi.to_ndarray_ts(
                 roi.grow(
                     padding,

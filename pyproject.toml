@@ -30,6 +30,8 @@ dependencies = [
   "scikit-image",
   "tensorstore",
   "tqdm",
+  "xarray",
+  "xarray-tensorstore",
   "zarr==2.18.5",
   "numcodecs==0.13.0",
   "mwatershed==0.5.2",

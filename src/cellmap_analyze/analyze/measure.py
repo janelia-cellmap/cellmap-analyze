@@ -14,7 +14,7 @@ import pandas as pd
 import logging
 
 from cellmap_analyze.util.measure_util import get_object_information
-from funlib.geometry import Roi
+from funlib.geometry import Roi, Coordinate
 import os
 
 from cellmap_analyze.util.mixins import ComputeConfigMixin
@@ -62,8 +62,12 @@ class Measure(ComputeConfigMixin):
             self.organelle_2_idi = ImageDataInterface(
                 self.organelle_2_path, chunk_shape=chunk_shape
             )
-            output_voxel_size = min(
-                self.organelle_1_idi.voxel_size, self.organelle_2_idi.voxel_size
+            # For anisotropic voxels, take the minimum per-axis
+            output_voxel_size = Coordinate(
+                min(v1, v2) for v1, v2 in zip(
+                    self.organelle_1_idi.voxel_size,
+                    self.organelle_2_idi.voxel_size
+                )
             )
             self.organelle_1_idi.output_voxel_size = output_voxel_size
             self.organelle_2_idi.output_voxel_size = output_voxel_size
@@ -96,6 +100,14 @@ class Measure(ComputeConfigMixin):
     def pad_with_face_neighbor_blocks(
         idi, block, voxel_size, return_none_if_main_block_empty=False
     ):
+        """Pad block with neighboring voxels for surface area calculation.
+
+        Args:
+            idi: ImageDataInterface
+            block: DaskBlock with read_roi
+            voxel_size: Voxel size - can be scalar (isotropic) or tuple (anisotropic)
+            return_none_if_main_block_empty: Return None if main block has no data
+        """
         main_block = idi.to_ndarray_ts(block.read_roi)
         if return_none_if_main_block_empty and not np.any(main_block):
             return None
@@ -105,14 +117,20 @@ class Measure(ComputeConfigMixin):
         roi_ends = np.array(block.read_roi.end)
         interior = [slice(1, -1)] * 3
 
+        # Handle both scalar and tuple voxel_size
+        if isinstance(voxel_size, (int, float)):
+            voxel_sizes = [voxel_size] * 3
+        else:
+            voxel_sizes = list(voxel_size)
+
         for d in range(3):
             roi_shape = np.array(block.read_roi.shape)
-            roi_shape[d] = voxel_size
+            roi_shape[d] = voxel_sizes[d]
 
             neg_off = roi_starts.copy()
             pos_off = roi_starts.copy()
 
-            neg_off[d] -= voxel_size
+            neg_off[d] -= voxel_sizes[d]
             pos_off[d] = roi_ends[d]
 
             negative_roi = Roi(neg_off, roi_shape)
@@ -120,11 +138,11 @@ class Measure(ComputeConfigMixin):
 
             # build slice objects dynamically
             neg_idx = interior.copy()
-            neg_idx[d] = slice(0, 1)  # face at the “minus” side
+            neg_idx[d] = slice(0, 1)  # face at the "minus" side
             data[tuple(neg_idx)] = idi.to_ndarray_ts(negative_roi)
 
             pos_idx = interior.copy()
-            pos_idx[d] = slice(-1, None)  # face at the “plus” side
+            pos_idx[d] = slice(-1, None)  # face at the "plus" side
             if positive_roi.begin[d] >= idi.roi.end[d]:
                 # need this check since positive side can extend beyond roi
                 data[tuple(pos_idx)] = (
@@ -149,11 +167,13 @@ class Measure(ComputeConfigMixin):
             block_index,
             roi=roi,
         )
-        # main block
+        # main block - use output_voxel_size for the resampled data
+        # For anisotropic data that gets resampled to isotropic, output_voxel_size should be isotropic
+        output_voxel_size = input_idi.output_voxel_size
         data = Measure.pad_with_face_neighbor_blocks(
             input_idi,
             block,
-            voxel_size=input_idi.voxel_size[0],
+            voxel_size=output_voxel_size,
             return_none_if_main_block_empty=True,
         )
         if data is None:
@@ -164,17 +184,20 @@ class Measure(ComputeConfigMixin):
             organelle_1_idi = kwargs.get("organelle_1_idi")
             organelle_2_idi = kwargs.get("organelle_2_idi")
             extra_kwargs["organelle_1"] = Measure.pad_with_face_neighbor_blocks(
-                organelle_1_idi, block, voxel_size=input_idi.voxel_size[0]
+                organelle_1_idi, block, voxel_size=output_voxel_size
             )
             extra_kwargs["organelle_2"] = Measure.pad_with_face_neighbor_blocks(
-                organelle_2_idi, block, voxel_size=input_idi.voxel_size[0]
+                organelle_2_idi, block, voxel_size=output_voxel_size
             )
 
         # get information only from actual block(not including padding)
+        # Use output_voxel_size[0] for measurements since data is resampled to isotropic
+        # (for now we assume output is isotropic even if input is anisotropic)
         block_offset = np.array(block.write_roi.begin) + global_offset
+        voxel_edge_length = output_voxel_size[0] if hasattr(output_voxel_size, '__getitem__') else output_voxel_size
         object_informations = get_object_information(
             data,
-            input_idi.voxel_size[0],
+            voxel_edge_length,
             trim=1,
             offset=block_offset,
             **extra_kwargs,

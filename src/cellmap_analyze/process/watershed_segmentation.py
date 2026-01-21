@@ -121,8 +121,10 @@ class WatershedSegmentation(ComputeConfigMixin):
             self.roi = roi
 
         self.voxel_size = self.input_idi.voxel_size
+        # For anisotropic voxels, use minimum dimension for radius calculation
+        min_voxel_dim = min(self.voxel_size)
         self.pseudo_neighborhood_radius_voxels = int(
-            np.round(pseudo_neighborhood_radius_nm / self.voxel_size[0])
+            np.round(pseudo_neighborhood_radius_nm / min_voxel_dim)
         )
 
         if output_path is None:
@@ -167,9 +169,10 @@ class WatershedSegmentation(ComputeConfigMixin):
             input_idi,
             block_index,
         )
-        padding_increment_voxel = block.full_block_size[0] // (
-            2 * input_idi.voxel_size[0]
-        )
+        # Calculate padding increment in voxels using element-wise division
+        # Use minimum dimension for conservative estimate
+        min_voxel_dim = min(input_idi.voxel_size)
+        padding_increment_voxel = int(block.full_block_size[0] // (2 * min_voxel_dim))
 
         max_face_value = 0
         padding_voxels = 0
@@ -177,9 +180,11 @@ class WatershedSegmentation(ComputeConfigMixin):
         # (padding_voxels - padding_increment_voxel) is the previous padding value
         while max_face_value > (padding_voxels - padding_increment_voxel):
 
+            # Grow ROI by padding amount (use min voxel dimension for isotropic padding in physical units)
+            padding_physical = padding_voxels * min_voxel_dim
             padded_read_roi = block.read_roi.grow(
-                padding_voxels * input_idi.voxel_size[0],
-                padding_voxels * input_idi.voxel_size[0],
+                padding_physical,
+                padding_physical,
             )
             input = input_idi.to_ndarray_ts(padded_read_roi)
             dt = edt.edt(input, black_border=False)
@@ -196,7 +201,7 @@ class WatershedSegmentation(ComputeConfigMixin):
                 ]
             )
             padding_voxels += padding_increment_voxel
-        dt *= input_idi.voxel_size[0]
+        dt *= min_voxel_dim
         input = trim_array(input, padding_voxels - padding_increment_voxel)
         distance_transform_idi.ds[block.write_roi] = dt
         return dt.max()
@@ -209,18 +214,20 @@ class WatershedSegmentation(ComputeConfigMixin):
         pseudo_neighborhood_radius_voxels: int,
     ):
 
+        min_voxel_dim = min(input_idi.voxel_size)
         block = create_block_from_index(
             input_idi,
             block_index,
-            padding=input_idi.voxel_size[0] * pseudo_neighborhood_radius_voxels,
+            padding=min_voxel_dim * pseudo_neighborhood_radius_voxels,
         )
         distance_transform = distance_transform_idi.to_ndarray_ts(block.read_roi)
         input = input_idi.to_ndarray_ts(block.read_roi)
 
-        global_id_offset = block_index * np.prod(
-            block.full_block_size / input_idi.voxel_size[0],
-            dtype=np.uint64,
+        # Calculate block size in voxels using element-wise division for anisotropic support
+        block_size_voxels = tuple(
+            b / v for b, v in zip(block.full_block_size, input_idi.voxel_size)
         )
+        global_id_offset = block_index * np.prod(block_size_voxels, dtype=np.uint64)
         coords = peak_local_max(
             distance_transform,
             footprint=np.ones((2 * pseudo_neighborhood_radius_voxels + 1,) * 3),
@@ -286,8 +293,10 @@ class WatershedSegmentation(ComputeConfigMixin):
                 # b now contains one float per partition: the local max for that partition
                 global_dt_max = np.ceil(b.max().compute(**self.compute_args))
 
+                # Use minimum voxel dimension for voxel count calculation
+                min_voxel_dim = min(self.input_idi.voxel_size)
                 self.global_dt_max_voxels = int(
-                    np.ceil(global_dt_max / self.input_idi.voxel_size[0])
+                    np.ceil(global_dt_max / min_voxel_dim)
                 )
 
     @staticmethod
@@ -302,10 +311,11 @@ class WatershedSegmentation(ComputeConfigMixin):
     ):
         # NOTE: Only works for uint32 or less
         padding_voxels = global_dt_max_voxels + pseudo_neighborhood_radius_voxels
+        min_voxel_dim = min(distance_transform_idi.voxel_size)
         block = create_block_from_index(
             distance_transform_idi,
             block_index,
-            padding=distance_transform_idi.voxel_size[0] * padding_voxels,
+            padding=min_voxel_dim * padding_voxels,
         )
         input = input_idi.to_ndarray_ts(block.read_roi)
         distance_transform = distance_transform_idi.to_ndarray_ts(block.read_roi)
@@ -367,6 +377,7 @@ class WatershedSegmentation(ComputeConfigMixin):
                 watershed_idi,
                 block_index,
             )
+            # Convert ROI to voxel coordinates using element-wise division
             write_roi_voxels = block.write_roi / watershed_idi.voxel_size
             watershed_idi.ds[block.write_roi] = watershed[write_roi_voxels.to_slices()]
 

@@ -4,6 +4,7 @@ from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from funlib.geometry import Coordinate
 from cellmap_analyze.util.io_util import get_name_from_path, get_output_path_from_input_path
 from cellmap_analyze.cythonizing.process_arrays import initialize_contact_site_array
 from cellmap_analyze.cythonizing.bresenham3D import bresenham_3D_lines
@@ -44,14 +45,20 @@ class ContactSites(ComputeConfigMixin):
         self.organelle_2_idi = ImageDataInterface(
             organelle_2_path, chunk_shape=chunk_shape
         )
-        output_voxel_size = min(
-            self.organelle_1_idi.voxel_size, self.organelle_2_idi.voxel_size
+        # For anisotropic voxels, take the minimum per-axis
+        output_voxel_size = Coordinate(
+            min(v1, v2) for v1, v2 in zip(
+                self.organelle_1_idi.voxel_size,
+                self.organelle_2_idi.voxel_size
+            )
         )
         self.organelle_2_idi.output_voxel_size = output_voxel_size
         self.organelle_1_idi.output_voxel_size = output_voxel_size
         self.voxel_size = output_voxel_size
 
-        self.contact_distance_voxels = contact_distance_nm / output_voxel_size[0]
+        # For contact distance, use the smallest voxel dimension to be conservative
+        min_voxel_dim = min(output_voxel_size)
+        self.contact_distance_voxels = contact_distance_nm / min_voxel_dim
 
         self.padding_voxels = int(np.ceil(self.contact_distance_voxels) + 1)
         # add one to ensure accuracy during surface area calculation since we need to make sure that neighboring ones are calculated
@@ -76,7 +83,15 @@ class ContactSites(ComputeConfigMixin):
         self.minimum_volume_nm_3 = minimum_volume_nm_3
         self.num_workers = num_workers
         self.voxel_volume = np.prod(self.voxel_size)
+        # For anisotropic voxels, face areas differ per axis
+        # Use YZ face area as default (consistent with Z-axis normal)
         self.voxel_face_area = self.voxel_size[1] * self.voxel_size[2]
+        # Store all face areas for potential future use
+        self.voxel_face_areas = (
+            self.voxel_size[1] * self.voxel_size[2],  # ZY plane (X normal)
+            self.voxel_size[0] * self.voxel_size[2],  # ZX plane (Y normal)
+            self.voxel_size[0] * self.voxel_size[1],  # XY plane (Z normal)
+        )
 
         # Use helper function to generate blockwise path (handles root datasets correctly)
         blockwise_path = get_output_path_from_input_path(output_path, "_blockwise")
@@ -160,10 +175,12 @@ class ContactSites(ComputeConfigMixin):
         contact_distance_voxels,
         padding_voxels,
     ):
+        # Use minimum voxel dimension for padding calculation
+        min_voxel_dim = min(contact_sites_blockwise_idi.voxel_size)
         block = create_block_from_index(
             contact_sites_blockwise_idi,
             block_index,
-            padding=padding_voxels * contact_sites_blockwise_idi.voxel_size[0],
+            padding=padding_voxels * min_voxel_dim,
         )
         organelle_1 = organelle_1_idi.to_ndarray_ts(block.read_roi)
         if not np.any(organelle_1):
@@ -179,10 +196,13 @@ class ContactSites(ComputeConfigMixin):
                 np.zeros(organelle_1.shape, dtype=np.uint64), padding_voxels
             )
             return
-        global_id_offset = block_index * np.prod(
-            block.full_block_size / contact_sites_blockwise_idi.voxel_size[0],
-            dtype=np.uint64,
-        )  # have to use full_block_size since before if we use write_roi, blocks on the end will be smaller and will have incorrect offsets
+        # Calculate block size in voxels for ID offset
+        # Use element-wise division for anisotropic voxel sizes
+        block_size_voxels = tuple(
+            b / v for b, v in zip(block.full_block_size, contact_sites_blockwise_idi.voxel_size)
+        )
+        global_id_offset = block_index * np.prod(block_size_voxels, dtype=np.uint64)
+        # have to use full_block_size since before if we use write_roi, blocks on the end will be smaller and will have incorrect offsets
         contact_sites = ContactSites.get_ndarray_contact_sites(
             organelle_1, organelle_2, contact_distance_voxels
         )
