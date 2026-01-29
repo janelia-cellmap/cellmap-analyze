@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 import zarr
-import json
+import tensorstore as ts
 
 logging.basicConfig(format="%(levelname)s:%(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -201,6 +201,27 @@ class Roi:
         return f"Roi(begin={tuple(self._begin)}, shape={tuple(self._shape)})"
 
 
+def open_ds_tensorstore(dataset_path: str, mode="r", concurrency_limit=None):
+    """Open a zarr or n5 dataset with TensorStore."""
+    filetype = (
+        "zarr" if dataset_path.rfind(".zarr") > dataset_path.rfind(".n5") else "n5"
+    )
+    spec = {
+        "driver": filetype,
+        "kvstore": {"driver": "file", "path": dataset_path},
+    }
+    if concurrency_limit:
+        spec["context"] = {
+            "data_copy_concurrency": {"limit": concurrency_limit},
+            "file_io_concurrency": {"limit": concurrency_limit},
+        }
+
+    if mode == "r":
+        return ts.open(spec, read=True, write=False).result()
+    else:
+        return ts.open(spec, read=False, write=True).result()
+
+
 def split_dataset_path(dataset_path: str):
     """Split a dataset path into filename and dataset components."""
     dataset_path = str(dataset_path)
@@ -244,18 +265,14 @@ class XarrayImageDataInterface:
         mode: str = "r",
         output_voxel_size=None,
         custom_fill_value=None,
-        concurrency_limit: int = 1,
+        concurrency_limit: int = None,
         chunk_shape=None,
-        max_retries: int = 10,
-        timeout: int = 5,
     ):
         dataset_path = str(Path(dataset_path).resolve())
         self.path = dataset_path
         self.mode = mode
         self.custom_fill_value = custom_fill_value
         self.concurrency_limit = concurrency_limit
-        self.max_retries = max_retries
-        self.timeout = timeout
 
         # Determine file type
         self.filetype = (
@@ -288,11 +305,12 @@ class XarrayImageDataInterface:
         filename, dataset = split_dataset_path(dataset_path)
 
         if self.filetype == "zarr":
-            store = zarr.open(filename, mode="r")
+            root_store = zarr.open(filename, mode="r")
         else:
-            store = zarr.open(filename, mode="r")
+            root_store = zarr.open(filename, mode="r")
 
         # Navigate to the dataset
+        store = root_store
         if dataset:
             for part in dataset.split("/"):
                 if part:
@@ -314,29 +332,45 @@ class XarrayImageDataInterface:
         # Try to get voxel_size and offset from attributes
         attrs = dict(store.attrs)
 
-        # Check for voxel_size in attributes
+        # First check direct attributes
+        voxel_size = None
+        offset = None
+
         if "voxel_size" in attrs:
-            self.voxel_size = Coordinate(attrs["voxel_size"])
+            voxel_size = Coordinate(attrs["voxel_size"])
         elif "resolution" in attrs:
-            self.voxel_size = Coordinate(attrs["resolution"])
+            voxel_size = Coordinate(attrs["resolution"])
         elif "pixelResolution" in attrs:
             # N5 style
             pixel_res = attrs["pixelResolution"]
             if isinstance(pixel_res, dict):
-                self.voxel_size = Coordinate(pixel_res.get("dimensions", [1, 1, 1]))
+                voxel_size = Coordinate(pixel_res.get("dimensions", [1, 1, 1]))
             else:
-                self.voxel_size = Coordinate(pixel_res)
-        else:
-            # Default to 1,1,1
-            self.voxel_size = Coordinate([1] * len(spatial_shape))
+                voxel_size = Coordinate(pixel_res)
 
-        # Check for offset in attributes
         if "offset" in attrs:
-            self.offset = Coordinate(attrs["offset"])
+            offset = Coordinate(attrs["offset"])
         elif "translation" in attrs:
-            self.offset = Coordinate(attrs["translation"])
-        else:
-            self.offset = Coordinate([0] * len(spatial_shape))
+            offset = Coordinate(attrs["translation"])
+
+        # If not found, check parent for OME-Zarr multiscales metadata
+        if voxel_size is None or offset is None:
+            voxel_size_from_multiscales, offset_from_multiscales = (
+                self._extract_from_multiscales(root_store, dataset)
+            )
+            if voxel_size is None and voxel_size_from_multiscales is not None:
+                voxel_size = voxel_size_from_multiscales
+            if offset is None and offset_from_multiscales is not None:
+                offset = offset_from_multiscales
+
+        # Set defaults if still not found
+        if voxel_size is None:
+            voxel_size = Coordinate([1] * len(spatial_shape))
+        if offset is None:
+            offset = Coordinate([0] * len(spatial_shape))
+
+        self.voxel_size = voxel_size
+        self.offset = offset
 
         # Calculate ROI
         roi_shape = Coordinate(
@@ -344,57 +378,67 @@ class XarrayImageDataInterface:
         )
         self.roi = Roi(self.offset, roi_shape)
 
+    def _extract_from_multiscales(self, root_store, dataset: str):
+        """Extract voxel_size and offset from OME-Zarr multiscales metadata."""
+        if not dataset:
+            return None, None
+
+        # Get the array name (last part of path) and parent path
+        parts = [p for p in dataset.split("/") if p]
+        if not parts:
+            return None, None
+
+        array_name = parts[-1]  # e.g., "s0"
+        parent_parts = parts[:-1]  # e.g., ["recon-1", "em", "fibsem-uint8"]
+
+        # Navigate to parent group
+        parent = root_store
+        for part in parent_parts:
+            try:
+                parent = parent[part]
+            except KeyError:
+                return None, None
+
+        # Check for multiscales attribute
+        parent_attrs = dict(parent.attrs)
+        if "multiscales" not in parent_attrs:
+            return None, None
+
+        multiscales = parent_attrs["multiscales"]
+        if not isinstance(multiscales, list) or len(multiscales) == 0:
+            return None, None
+
+        # Find our dataset in the multiscales
+        for ms in multiscales:
+            datasets = ms.get("datasets", [])
+            for ds in datasets:
+                if ds.get("path") == array_name:
+                    # Found our dataset - extract coordinateTransformations
+                    transforms = ds.get("coordinateTransformations", [])
+                    voxel_size = None
+                    offset = None
+
+                    for transform in transforms:
+                        if transform.get("type") == "scale":
+                            voxel_size = Coordinate(transform.get("scale", [1, 1, 1]))
+                        elif transform.get("type") == "translation":
+                            offset = Coordinate(transform.get("translation", [0, 0, 0]))
+
+                    return voxel_size, offset
+
+        return None, None
+
     def _get_data_array(self) -> xr.DataArray:
-        """Get or create the xarray DataArray."""
+        """Get or create the xarray DataArray backed by tensorstore."""
         if self._data_array is not None:
             return self._data_array
 
-        filename, dataset = split_dataset_path(self.path)
+        from xarray_tensorstore import _TensorStoreAdapter
 
-        # Try to use xarray-tensorstore for zarr
-        if self.filetype == "zarr":
-            try:
-                import xarray_tensorstore
+        ts_arr = self._get_tensorstore()
 
-                ds = xarray_tensorstore.open_zarr(filename)
-                # Navigate to the specific array
-                if dataset:
-                    parts = [p for p in dataset.split("/") if p]
-                    if parts:
-                        # The last part should be the array name
-                        array_name = parts[-1]
-                        if array_name in ds:
-                            self._data_array = ds[array_name]
-                        else:
-                            # Might be a plain array, open directly
-                            self._data_array = self._open_with_zarr()
-                    else:
-                        self._data_array = self._open_with_zarr()
-                else:
-                    self._data_array = self._open_with_zarr()
-            except Exception as e:
-                logger.warning(
-                    f"Failed to open with xarray-tensorstore: {e}, falling back to zarr"
-                )
-                self._data_array = self._open_with_zarr()
-        else:
-            # N5: fall back to direct zarr/xarray
-            self._data_array = self._open_with_zarr()
-
-        return self._data_array
-
-    def _open_with_zarr(self) -> xr.DataArray:
-        """Open dataset using zarr directly and wrap in xarray."""
-        filename, dataset = split_dataset_path(self.path)
-
-        store = zarr.open(filename, mode="r")
-        if dataset:
-            for part in dataset.split("/"):
-                if part:
-                    store = store[part]
-
-        # Create coordinate arrays based on voxel_size and offset
-        array_shape = store.shape
+        # Build coordinate arrays from voxel_size and offset
+        array_shape = ts_arr.shape
         if self._channel_offset:
             spatial_shape = array_shape[1:]
         else:
@@ -411,13 +455,25 @@ class XarrayImageDataInterface:
                 np.arange(size) * self.voxel_size[i] + self.offset[i]
             )
 
-        # Wrap zarr array in xarray DataArray
-        da = xr.DataArray(
-            store,
+        adapter = _TensorStoreAdapter(ts_arr)
+        self._data_array = xr.DataArray(
+            xr.Variable(dim_names if self._channel_offset else dim_names[-3:], adapter),
             dims=dim_names if self._channel_offset else dim_names[-3:],
             coords=coords,
         )
-        return da
+        return self._data_array
+
+    def _get_tensorstore(self):
+        """Get the tensorstore array for direct access (cached)."""
+        if not hasattr(self, '_ts_arr') or self._ts_arr is None:
+            self._ts_arr = open_ds_tensorstore(
+                self.path, mode=self.mode, concurrency_limit=self.concurrency_limit
+            )
+        return self._ts_arr
+
+    def _read_xarray(self, data: xr.DataArray) -> np.ndarray:
+        """Read an xarray DataArray via xarray-tensorstore."""
+        return data.values
 
     def to_ndarray_ts(self, roi: Roi = None) -> np.ndarray:
         """Read region as numpy array with per-axis resampling.
@@ -430,16 +486,13 @@ class XarrayImageDataInterface:
             NumPy array at output_voxel_size resolution
         """
         da = self._get_data_array()
+        needs_resampling = self.voxel_size != self.output_voxel_size
 
         if roi is None:
-            # Read entire dataset
             data = da
             needs_padding = False
         else:
-            # Convert ROI from physical coordinates to voxel indices
             spatial_dims = ["z", "y", "x"]
-
-            # Check if ROI extends beyond data bounds for padding
             data_roi = self.roi
             intersection = roi.intersect(data_roi)
 
@@ -454,9 +507,7 @@ class XarrayImageDataInterface:
             ]
             needs_padding = any(p > 0 for p in pad_before + pad_after)
 
-            # Select the intersection region using integer indices
             if intersection.shape != Coordinate([0, 0, 0]):
-                # Convert physical coordinates to voxel indices
                 isel_dict = {}
                 for i, dim in enumerate(spatial_dims):
                     start_idx = int((intersection.begin[i] - self.offset[i]) / self.voxel_size[i])
@@ -465,7 +516,6 @@ class XarrayImageDataInterface:
                 data = da.isel(**isel_dict)
             else:
                 # ROI is completely outside data bounds
-                # Return array of fill values
                 output_shape = tuple(
                     int(roi.shape[i] / self.output_voxel_size[i]) for i in range(3)
                 )
@@ -474,14 +524,10 @@ class XarrayImageDataInterface:
                 fill_value = self.custom_fill_value if self.custom_fill_value else 0
                 return np.full(output_shape, fill_value, dtype=self.dtype)
 
-        # Check if resampling is needed
-        needs_resampling = self.voxel_size != self.output_voxel_size
-
         if needs_resampling:
             data = self._resample(data, roi)
 
-        # Convert to numpy
-        result = data.values
+        result = self._read_xarray(data)
 
         # Apply padding if needed
         if roi is not None and needs_padding:
