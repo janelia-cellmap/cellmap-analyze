@@ -218,7 +218,6 @@ While core components are now well-documented, additional documentation could be
   - LabelWithMask
   - MorphologicalOperations
   - MutexWatershed
-  - WatershedSegmentation
   - Skeletonize
 
 - Remaining analysis tools (2 more classes):

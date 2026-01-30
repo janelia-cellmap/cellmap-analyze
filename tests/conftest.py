@@ -844,19 +844,7 @@ def write_zarrs(tmp_zarr, test_image_dict, voxel_size, chunk_size):
         if len(data_shape) == 4:
             data_shape = data_shape[1:]
 
-        # For downsampled data, ensure it covers the same physical ROI as the original
-        # by using the original data's physical size
-        if "downsampled" in data_name:
-            # Get the original data name (remove "_downsampled" suffix)
-            original_name = data_name.replace("_downsampled", "")
-            if original_name in test_image_dict:
-                original_shape = test_image_dict[original_name].shape
-                # Use the original physical ROI
-                total_roi = Roi((0, 0, 0), np.array(original_shape) * voxel_size)
-            else:
-                total_roi = Roi((0, 0, 0), np.array(data_shape) * current_voxel_size)
-        else:
-            total_roi = Roi((0, 0, 0), np.array(data_shape) * current_voxel_size)
+        total_roi = Roi((0, 0, 0), np.array(data_shape) * current_voxel_size)
         write_size = (
             chunk_size * current_voxel_size
             if (

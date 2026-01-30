@@ -89,21 +89,6 @@ def skeletonize():
             skel.skeletonize()
 
 
-def watershed_segmentation():
-    from cellmap_analyze.process.watershed_segmentation import (
-        WatershedSegmentation,
-    )
-
-    rp = RunProperties()
-    with io_util.tee_streams(rp.logpath):
-        os.chdir(rp.execution_directory)
-        with io_util.TimingMessager(
-            "WatershedSegmentation", logger, final_message="Complete success"
-        ):
-            ws = WatershedSegmentation(**rp.run_config)
-            ws.get_watershed_segmentation()
-
-
 def morphological_operations():
     from cellmap_analyze.process.morphological_operations import (
         MorphologicalOperations,

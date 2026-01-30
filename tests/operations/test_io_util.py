@@ -248,16 +248,3 @@ class TestEndToEndScenarios:
         )
         assert contacts_blockwise == "/data/exp.zarr/contacts_blockwise"
 
-    def test_watershed_segmentation_workflow(self):
-        """Test path handling for watershed segmentation workflow."""
-        input_path = "/data/binary.zarr/mask/s0"
-
-        distance_transform = get_output_path_from_input_path(
-            input_path, "_distance_transform"
-        )
-        seeds_blockwise = get_output_path_from_input_path(input_path, "_seeds_blockwise")
-        seeds = get_output_path_from_input_path(input_path, "_seeds")
-
-        assert distance_transform == "/data/binary.zarr/mask_distance_transform"
-        assert seeds_blockwise == "/data/binary.zarr/mask_seeds_blockwise"
-        assert seeds == "/data/binary.zarr/mask_seeds"
