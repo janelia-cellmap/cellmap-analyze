@@ -4,7 +4,7 @@ from cellmap_analyze.util import io_util
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.xarray_image_data_interface import XarrayImageDataInterface
 from cellmap_analyze.util.io_util import (
     get_name_from_path,
     get_output_path_from_input_path,
@@ -66,17 +66,17 @@ class ConnectedComponents(ComputeConfigMixin):
             raise Exception("Must provide either input_path or tmp_blockwise_path")
 
         if input_path:
-            template_idi = self.input_idi = ImageDataInterface(
+            template_idi = self.input_idi = XarrayImageDataInterface(
                 input_path, chunk_shape=chunk_shape
             )
         else:
-            template_idi = self.connected_components_blockwise_idi = ImageDataInterface(
+            template_idi = self.connected_components_blockwise_idi = XarrayImageDataInterface(
                 connected_components_blockwise_path, chunk_shape=chunk_shape
             )
 
         self.object_labels_idi = None
         if object_labels_path:
-            self.object_labels_idi = ImageDataInterface(
+            self.object_labels_idi = XarrayImageDataInterface(
                 object_labels_path, chunk_shape=chunk_shape
             )
 
@@ -131,7 +131,7 @@ class ConnectedComponents(ComputeConfigMixin):
             )
             self.do_full_connected_components = True
         else:
-            self.connected_components_blockwise_idi = ImageDataInterface(
+            self.connected_components_blockwise_idi = XarrayImageDataInterface(
                 connected_components_blockwise_path, chunk_shape=chunk_shape
             )
         self.gaussian_smoothing_sigma_nm = gaussian_smoothing_sigma_nm
@@ -165,8 +165,8 @@ class ConnectedComponents(ComputeConfigMixin):
     @staticmethod
     def calculate_block_connected_components(
         block_index,
-        input_idi: ImageDataInterface,
-        connected_components_blockwise_idi: ImageDataInterface,
+        input_idi: XarrayImageDataInterface,
+        connected_components_blockwise_idi: XarrayImageDataInterface,
         intensity_threshold_minimum=-1,
         intensity_threshold_maximum=np.inf,
         gaussian_smoothing_sigma_nm=None,
@@ -325,7 +325,7 @@ class ConnectedComponents(ComputeConfigMixin):
     @staticmethod
     def get_connected_component_information_blockwise(
         block_index,
-        connected_components_blockwise_idi: ImageDataInterface,
+        connected_components_blockwise_idi: XarrayImageDataInterface,
         connectivity,
         object_labels_idi=None,
     ):
@@ -570,8 +570,8 @@ class ConnectedComponents(ComputeConfigMixin):
     @staticmethod
     def relabel_block_from_path(
         block_index,
-        input_idi: ImageDataInterface,
-        output_idi: ImageDataInterface,
+        input_idi: XarrayImageDataInterface,
+        output_idi: XarrayImageDataInterface,
         relabeling_dict_path: str,
         mask: MasksFromConfig = None,
     ):

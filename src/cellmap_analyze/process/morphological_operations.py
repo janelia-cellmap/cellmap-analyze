@@ -8,7 +8,7 @@ from cellmap_analyze.util.dask_util import (
 )
 from cellmap_analyze.util.mask_util import MasksFromConfig
 from cellmap_analyze.util.measure_util import trim_array
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.xarray_image_data_interface import XarrayImageDataInterface
 
 import logging
 from cellmap_analyze.util.mixins import ComputeConfigMixin
@@ -40,7 +40,7 @@ class MorphologicalOperations(ComputeConfigMixin):
         # Notice that in tests, larger dilations wont be consistent though close. This may not be a big deal if only care about approximate morphology and exact consistency.
         super().__init__(num_workers)
 
-        self.input_idi = ImageDataInterface(input_path, chunk_shape=chunk_shape)
+        self.input_idi = XarrayImageDataInterface(input_path, chunk_shape=chunk_shape)
 
         self.roi = roi
         if self.roi is None:
@@ -70,8 +70,8 @@ class MorphologicalOperations(ComputeConfigMixin):
     @staticmethod
     def perform_morphological_operation_blockwise(
         block_index,
-        input_idi: ImageDataInterface,
-        output_idi: ImageDataInterface,
+        input_idi: XarrayImageDataInterface,
+        output_idi: XarrayImageDataInterface,
         operation: str,
         iterations: int,
         mask: MasksFromConfig = None,

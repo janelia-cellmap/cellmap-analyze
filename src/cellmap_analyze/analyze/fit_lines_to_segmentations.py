@@ -6,7 +6,7 @@ from cellmap_analyze.util.dask_util import (
     start_dask,
 )
 from cellmap_analyze.util import io_util
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.xarray_image_data_interface import XarrayImageDataInterface
 import logging
 import pandas as pd
 import dask.dataframe as dd
@@ -34,7 +34,7 @@ class FitLinesToSegmentations(ComputeConfigMixin):
     ):
         super().__init__(num_workers)
         self.df = pd.read_csv(input_csv)  # , nrows=1000)
-        self.segmentation_idi = ImageDataInterface(input_path)
+        self.segmentation_idi = XarrayImageDataInterface(input_path)
         self.voxel_size = self.segmentation_idi.voxel_size
         self.num_workers = num_workers
         self.output_csv = output_csv

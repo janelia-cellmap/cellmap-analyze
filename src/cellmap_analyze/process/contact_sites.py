@@ -3,7 +3,7 @@ from cellmap_analyze.util import dask_util
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.xarray_image_data_interface import XarrayImageDataInterface
 from funlib.geometry import Coordinate
 from cellmap_analyze.util.io_util import get_name_from_path, get_output_path_from_input_path
 from cellmap_analyze.cythonizing.process_arrays import initialize_contact_site_array
@@ -39,10 +39,10 @@ class ContactSites(ComputeConfigMixin):
         chunk_shape=None,
     ):
         super().__init__(num_workers)
-        self.organelle_1_idi = ImageDataInterface(
+        self.organelle_1_idi = XarrayImageDataInterface(
             organelle_1_path, chunk_shape=chunk_shape
         )
-        self.organelle_2_idi = ImageDataInterface(
+        self.organelle_2_idi = XarrayImageDataInterface(
             organelle_2_path, chunk_shape=chunk_shape
         )
         # For anisotropic voxels, take the minimum per-axis
@@ -169,9 +169,9 @@ class ContactSites(ComputeConfigMixin):
     @staticmethod
     def calculate_block_contact_sites(
         block_index,
-        organelle_1_idi: ImageDataInterface,
-        organelle_2_idi: ImageDataInterface,
-        contact_sites_blockwise_idi: ImageDataInterface,
+        organelle_1_idi: XarrayImageDataInterface,
+        organelle_2_idi: XarrayImageDataInterface,
+        contact_sites_blockwise_idi: XarrayImageDataInterface,
         contact_distance_voxels,
         padding_voxels,
     ):

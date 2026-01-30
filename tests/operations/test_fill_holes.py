@@ -2,8 +2,8 @@ from cellmap_analyze.process.fill_holes import FillHoles
 import pytest
 import numpy as np
 
-from cellmap_analyze.util.image_data_interface import (
-    ImageDataInterface,
+from cellmap_analyze.util.xarray_image_data_interface import (
+    XarrayImageDataInterface,
 )
 
 
@@ -20,10 +20,10 @@ def test_fill_holes(tmp_zarr, image_with_hole):
     )
     fh.fill_holes()
 
-    ground_truth = ImageDataInterface(
+    ground_truth = XarrayImageDataInterface(
         f"{tmp_zarr}/{image_with_hole}_filled/s0"
     ).to_ndarray_ts()
-    test_data = ImageDataInterface(
+    test_data = XarrayImageDataInterface(
         f"{tmp_zarr}/{image_with_hole}_filled_test/s0"
     ).to_ndarray_ts()
     assert np.array_equal(

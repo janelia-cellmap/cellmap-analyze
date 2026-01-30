@@ -3,7 +3,7 @@ import neuroglancer
 import os
 import struct
 import json
-from .image_data_interface import ImageDataInterface
+from .xarray_image_data_interface import XarrayImageDataInterface
 
 
 def view_in_neuroglancer(**kwargs):  # pragma: no cover
@@ -14,7 +14,7 @@ def view_in_neuroglancer(**kwargs):  # pragma: no cover
         for array_name, array in kwargs.items():
 
             if type(array) != np.ndarray:
-                array = ImageDataInterface(array).to_ndarray_ts()
+                array = XarrayImageDataInterface(array).to_ndarray_ts()
 
             if (
                 array.dtype in (float, np.float32)

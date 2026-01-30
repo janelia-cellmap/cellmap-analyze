@@ -5,8 +5,8 @@ from cellmap_analyze.process.clean_connected_components import CleanConnectedCom
 
 import numpy as np
 
-from cellmap_analyze.util.image_data_interface import (
-    ImageDataInterface,
+from cellmap_analyze.util.xarray_image_data_interface import (
+    XarrayImageDataInterface,
 )
 
 
@@ -59,7 +59,7 @@ def test_clean_connected_components(
     ]
     relabeling_dict.update({k: i + 1 for i, k in enumerate(uniques)})
     ground_truth = np.vectorize(relabeling_dict.get)(ground_truth)
-    test_data = ImageDataInterface(
+    test_data = XarrayImageDataInterface(
         f"{tmp_zarr}/test_clean_connected_components_minimum_volume_nm_3_{minimum_volume_nm_3}_maximum_volume_nm_3_{maximum_volume_nm_3}_{use_mask}/s0"
     ).to_ndarray_ts()
     assert np.array_equal(

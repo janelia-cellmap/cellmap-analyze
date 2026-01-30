@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
 from cellmap_analyze.process.filter_ids import FilterIDs
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.xarray_image_data_interface import XarrayImageDataInterface
 import pandas as pd
 
 
@@ -35,7 +35,7 @@ def test_filter_ids(ids_to_keep, binarize, tmp_zarr, image_with_holes_filled, re
     if binarize:
         ground_truth = (ground_truth > 0).astype(np.uint8)
 
-    test_data = ImageDataInterface(
+    test_data = XarrayImageDataInterface(
         f"{tmp_zarr}/image_with_holes_filled_filteredIDs/s0"
     ).to_ndarray_ts()
 

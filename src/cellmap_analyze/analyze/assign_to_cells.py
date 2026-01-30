@@ -2,8 +2,8 @@
 from typing import Union, List
 from cellmap_analyze.util import io_util
 from cellmap_analyze.util.io_util import get_output_path_from_input_path
-from cellmap_analyze.util.image_data_interface import (
-    ImageDataInterface,
+from cellmap_analyze.util.xarray_image_data_interface import (
+    XarrayImageDataInterface,
 )
 import logging
 import pandas as pd
@@ -43,7 +43,7 @@ class AssignToCells:
                 df = df.iloc[:, :-2]
             self.organelle_info_dict[organelle_csv] = df
 
-        self.cell_idi = ImageDataInterface(cell_ds_path)
+        self.cell_idi = XarrayImageDataInterface(cell_ds_path)
         self.cell_assignment_type = cell_assignment_type
         self.output_path = str(output_path).rstrip("/")
         self.iteration_distance_nm = iteration_distance_nm
@@ -53,10 +53,12 @@ class AssignToCells:
         cell_data = cell_idi.to_ndarray_ts()
         coms = df[["COM Z (nm)", "COM Y (nm)", "COM X (nm)"]].to_numpy()
         # Already have top left corners aligned since in measure_util get_region_properties we already center on voxel so that top left corners are aligned
-        inds = np.astype(coms // cell_idi.voxel_size, int)
-        in_bounds = np.all((inds >= cell_idi.domain.inclusive_min), axis=1) & np.all(
-            (inds < cell_idi.domain.exclusive_max), axis=1
+        roi_begin = np.array(cell_idi.roi.offset)
+        roi_end = roi_begin + np.array(cell_idi.roi.shape)
+        in_bounds = np.all(coms >= roi_begin, axis=1) & np.all(
+            coms < roi_end, axis=1
         )
+        inds = np.astype((coms - roi_begin) // np.array(cell_idi.voxel_size), int)
 
         df.loc[in_bounds, "Cell ID"] = cell_data[
             inds[in_bounds, 0], inds[in_bounds, 1], inds[in_bounds, 2]
@@ -66,7 +68,9 @@ class AssignToCells:
     @staticmethod
     def assign_to_n_nearest_cells(cell_idi, df, n, iteration_distance_nm):
         coms = df[["COM Z (nm)", "COM Y (nm)", "COM X (nm)"]].to_numpy()
-        inds = np.astype(coms // cell_idi.voxel_size, int)
+        roi_begin = np.array(cell_idi.roi.offset)
+        roi_end = roi_begin + np.array(cell_idi.roi.shape)
+        inds = np.astype((coms - roi_begin) // np.array(cell_idi.voxel_size), int)
         cell_data = cell_idi.to_ndarray_ts()
         if len(fastremap.unique(cell_data[cell_data > 0])) < n:
             raise ValueError(
@@ -122,8 +126,8 @@ class AssignToCells:
                 # Check if coms are within a cell
                 updated_inds = inds[update_mask]
                 in_bounds = np.all(
-                    (updated_inds >= cell_idi.domain.inclusive_min), axis=1
-                ) & np.all((updated_inds < cell_idi.domain.exclusive_max), axis=1)
+                    (coms[update_mask] >= roi_begin), axis=1
+                ) & np.all((coms[update_mask] < roi_end), axis=1)
                 valid_inds = updated_inds[in_bounds]
 
                 # Initialize an array of False of the same length as updated_inds.

@@ -5,7 +5,7 @@ from cellmap_analyze.util import io_util
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.xarray_image_data_interface import XarrayImageDataInterface
 from cellmap_analyze.util.information_holders import ObjectInformation
 from cellmap_analyze.util.io_util import (
     get_name_from_path,
@@ -39,7 +39,9 @@ class Measure(ComputeConfigMixin):
     ):
         super().__init__(num_workers)
         self.input_path = input_path
-        self.input_idi = ImageDataInterface(self.input_path, chunk_shape=chunk_shape)
+        self.input_idi = XarrayImageDataInterface(
+            self.input_path, chunk_shape=chunk_shape
+        )
         self.output_path = str(output_path).rstrip("/")
 
         self.contact_sites = False
@@ -56,17 +58,17 @@ class Measure(ComputeConfigMixin):
                 )
             self.organelle_1_path = kwargs["organelle_1_path"]
             self.organelle_2_path = kwargs["organelle_2_path"]
-            self.organelle_1_idi = ImageDataInterface(
+            self.organelle_1_idi = XarrayImageDataInterface(
                 self.organelle_1_path, chunk_shape=chunk_shape
             )
-            self.organelle_2_idi = ImageDataInterface(
+            self.organelle_2_idi = XarrayImageDataInterface(
                 self.organelle_2_path, chunk_shape=chunk_shape
             )
             # For anisotropic voxels, take the minimum per-axis
             output_voxel_size = Coordinate(
-                min(v1, v2) for v1, v2 in zip(
-                    self.organelle_1_idi.voxel_size,
-                    self.organelle_2_idi.voxel_size
+                min(v1, v2)
+                for v1, v2 in zip(
+                    self.organelle_1_idi.voxel_size, self.organelle_2_idi.voxel_size
                 )
             )
             self.organelle_1_idi.output_voxel_size = output_voxel_size
@@ -103,7 +105,7 @@ class Measure(ComputeConfigMixin):
         """Pad block with neighboring voxels for surface area calculation.
 
         Args:
-            idi: ImageDataInterface
+            idi: XarrayImageDataInterface
             block: DaskBlock with read_roi
             voxel_size: Voxel size - can be scalar (isotropic) or tuple (anisotropic)
             return_none_if_main_block_empty: Return None if main block has no data
@@ -139,7 +141,17 @@ class Measure(ComputeConfigMixin):
             # build slice objects dynamically
             neg_idx = interior.copy()
             neg_idx[d] = slice(0, 1)  # face at the "minus" side
-            data[tuple(neg_idx)] = idi.to_ndarray_ts(negative_roi)
+            neg_result = idi.to_ndarray_ts(negative_roi)
+            expected_shape = tuple(
+                1 if i == d else main_block.shape[i] for i in range(3)
+            )
+            if neg_result.shape != expected_shape:
+                print(
+                    f"DEBUG: d={d}, block.read_roi={block.read_roi}, negative_roi={negative_roi}, "
+                    f"neg_result.shape={neg_result.shape}, expected={expected_shape}, "
+                    f"idi.voxel_size={idi.voxel_size}, idi.output_voxel_size={idi.output_voxel_size}"
+                )
+            data[tuple(neg_idx)] = neg_result
 
             pos_idx = interior.copy()
             pos_idx[d] = slice(-1, None)  # face at the "plus" side
@@ -156,7 +168,7 @@ class Measure(ComputeConfigMixin):
     @staticmethod
     def get_measurements_blockwise(
         block_index,
-        input_idi: ImageDataInterface,
+        input_idi: XarrayImageDataInterface,
         roi,
         global_offset,
         contact_sites,
@@ -194,7 +206,11 @@ class Measure(ComputeConfigMixin):
         # Use output_voxel_size[0] for measurements since data is resampled to isotropic
         # (for now we assume output is isotropic even if input is anisotropic)
         block_offset = np.array(block.write_roi.begin) + global_offset
-        voxel_edge_length = output_voxel_size[0] if hasattr(output_voxel_size, '__getitem__') else output_voxel_size
+        voxel_edge_length = (
+            output_voxel_size[0]
+            if hasattr(output_voxel_size, "__getitem__")
+            else output_voxel_size
+        )
         object_informations = get_object_information(
             data,
             voxel_edge_length,

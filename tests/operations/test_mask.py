@@ -6,10 +6,6 @@ from cellmap_analyze.util.mask_util import MasksFromConfig
 
 import numpy as np
 
-from cellmap_analyze.util.image_data_interface import (
-    ImageDataInterface,
-)
-
 
 def test_masks(tmp_zarr, mask_one, mask_two, voxel_size):
     iterations = 2

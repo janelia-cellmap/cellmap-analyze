@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.ndimage import binary_dilation, binary_erosion
 
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+
 from cellmap_analyze.util.dask_util import DaskBlock
 import fastremap
 

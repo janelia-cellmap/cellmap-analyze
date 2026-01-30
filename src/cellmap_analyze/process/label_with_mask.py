@@ -7,7 +7,7 @@ from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
 from cellmap_analyze.util.measure_util import trim_array
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.xarray_image_data_interface import XarrayImageDataInterface
 
 import logging
 from cellmap_analyze.util.mixins import ComputeConfigMixin
@@ -36,8 +36,8 @@ class LabelWithMask(ComputeConfigMixin):
     ):
         super().__init__(num_workers)
 
-        self.input_idi = ImageDataInterface(input_path, chunk_shape=chunk_shape)
-        self.mask_idi = ImageDataInterface(
+        self.input_idi = XarrayImageDataInterface(input_path, chunk_shape=chunk_shape)
+        self.mask_idi = XarrayImageDataInterface(
             mask_path,
             chunk_shape=chunk_shape,
             output_voxel_size=self.input_idi.voxel_size,
@@ -62,9 +62,9 @@ class LabelWithMask(ComputeConfigMixin):
     @staticmethod
     def label_with_mask_blockwise(
         block_index,
-        input_idi: ImageDataInterface,
-        mask_idi: ImageDataInterface,
-        output_idi: ImageDataInterface,
+        input_idi: XarrayImageDataInterface,
+        mask_idi: XarrayImageDataInterface,
+        output_idi: XarrayImageDataInterface,
         intensity_threshold_minimum,
         intensity_threshold_maximum,
         surface_voxels_only=False,

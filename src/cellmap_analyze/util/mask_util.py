@@ -1,6 +1,6 @@
 # %%
 from scipy import ndimage
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.xarray_image_data_interface import XarrayImageDataInterface
 from cellmap_analyze.util.block_util import erosion, dilation
 from functools import partial
 
@@ -27,14 +27,14 @@ class Mask:
 
         structuring_element = ndimage.generate_binary_structure(3, connectivity)
         if "erosion" in operation:
-            self.idi = ImageDataInterface(
+            self.idi = XarrayImageDataInterface(
                 path,
                 output_voxel_size=output_voxel_size,
                 custom_fill_value="edge",
                 chunk_shape=chunk_shape,
             )
         else:
-            self.idi = ImageDataInterface(
+            self.idi = XarrayImageDataInterface(
                 path, output_voxel_size=output_voxel_size, chunk_shape=chunk_shape
             )
         self.output_voxel_size = output_voxel_size

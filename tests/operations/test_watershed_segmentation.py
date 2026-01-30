@@ -8,8 +8,8 @@ import edt
 import numpy as np
 from skimage.feature import peak_local_max
 from skimage.segmentation import watershed
-from cellmap_analyze.util.image_data_interface import (
-    ImageDataInterface,
+from cellmap_analyze.util.xarray_image_data_interface import (
+    XarrayImageDataInterface,
 )
 import fastremap
 import cc3d
@@ -72,7 +72,7 @@ def test_watershed_segmentation(
     # dynamically grab the correct fixture
     input_path = f"{tmp_zarr}/{image_name}/s0"
     output_path = f"{tmp_zarr}/test_watershed_segmentation_{image_name}"
-    voxel_size = ImageDataInterface(input_path).ds.voxel_size[0]
+    voxel_size = XarrayImageDataInterface(input_path).ds.voxel_size[0]
 
     ws = WatershedSegmentation(
         input_path=input_path,
@@ -83,7 +83,7 @@ def test_watershed_segmentation(
     )
     ws.get_watershed_segmentation()
 
-    test_data = ImageDataInterface(f"{output_path}/s0").to_ndarray_ts()
+    test_data = XarrayImageDataInterface(f"{output_path}/s0").to_ndarray_ts()
 
     ground_truth_original_segmentation = request.getfixturevalue(fixture_name)
     fastremap.renumber(

@@ -5,7 +5,7 @@ from cellmap_analyze.util.io_util import split_dataset_path
 from funlib.persistence import prepare_ds
 import os
 import shutil
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.xarray_image_data_interface import XarrayImageDataInterface
 
 
 # From Yuri
@@ -139,7 +139,7 @@ def create_multiscale_dataset_idi(
     if mode == "w":
         mode = "r+"
 
-    idi = ImageDataInterface(
+    idi = XarrayImageDataInterface(
         output_path + f"/s{scale}",
         mode=mode,
         custom_fill_value=custom_fill_value,

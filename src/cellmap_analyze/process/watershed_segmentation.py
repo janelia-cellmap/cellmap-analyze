@@ -9,7 +9,7 @@ from cellmap_analyze.util.dask_util import (
     create_block_from_index,
     guesstimate_npartitions,
 )
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.xarray_image_data_interface import XarrayImageDataInterface
 from cellmap_analyze.util.io_util import get_output_path_from_input_path
 import logging
 import dask.bag as db
@@ -114,7 +114,7 @@ class WatershedSegmentation(ComputeConfigMixin):
     ):
         super().__init__(num_workers)
         self.input_path = input_path
-        self.input_idi = ImageDataInterface(self.input_path, chunk_shape=chunk_shape)
+        self.input_idi = XarrayImageDataInterface(self.input_path, chunk_shape=chunk_shape)
         if roi is None:
             self.roi = self.input_idi.roi
         else:
@@ -208,9 +208,9 @@ class WatershedSegmentation(ComputeConfigMixin):
 
     def calculate_blockwise_watershed_seeds_blockwise(
         block_index,
-        input_idi: ImageDataInterface,
-        distance_transform_idi: ImageDataInterface,
-        watershed_seeds_blockwise_idi: ImageDataInterface,
+        input_idi: XarrayImageDataInterface,
+        distance_transform_idi: XarrayImageDataInterface,
+        watershed_seeds_blockwise_idi: XarrayImageDataInterface,
         pseudo_neighborhood_radius_voxels: int,
     ):
 
@@ -302,10 +302,10 @@ class WatershedSegmentation(ComputeConfigMixin):
     @staticmethod
     def watershed_blockwise(
         block_index,
-        input_idi: ImageDataInterface,
-        distance_transform_idi: ImageDataInterface,
-        watershed_seeds_idi: ImageDataInterface,
-        watershed_idi: ImageDataInterface,
+        input_idi: XarrayImageDataInterface,
+        distance_transform_idi: XarrayImageDataInterface,
+        watershed_seeds_idi: XarrayImageDataInterface,
+        watershed_idi: XarrayImageDataInterface,
         global_dt_max_voxels: int,
         pseudo_neighborhood_radius_voxels: int,
     ):
@@ -350,10 +350,10 @@ class WatershedSegmentation(ComputeConfigMixin):
 
     def global_watershed(
         block_indexes,
-        input_idi: ImageDataInterface,
-        distance_transform_idi: ImageDataInterface,
-        watershed_seeds_idi: ImageDataInterface,
-        watershed_idi: ImageDataInterface,
+        input_idi: XarrayImageDataInterface,
+        distance_transform_idi: XarrayImageDataInterface,
+        watershed_seeds_idi: XarrayImageDataInterface,
+        watershed_idi: XarrayImageDataInterface,
     ):
         input = input_idi.to_ndarray_ts()
         distance_transform = distance_transform_idi.to_ndarray_ts()
@@ -425,7 +425,7 @@ class WatershedSegmentation(ComputeConfigMixin):
         )
         cc.merge_connected_components_across_blocks()
 
-        self.watershed_seeds_idi = ImageDataInterface(
+        self.watershed_seeds_idi = XarrayImageDataInterface(
             self.watershed_seeds_path + "/s0",
             mode="r+",
         )

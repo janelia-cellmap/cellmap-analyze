@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from cellmap_analyze.util import dask_util
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.xarray_image_data_interface import XarrayImageDataInterface
 from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.util.skeleton_util import (
     CustomSkeleton,
@@ -30,7 +30,6 @@ class Skeletonize(ComputeConfigMixin):
         min_branch_length_nm=100,
         tolerance_nm=50,
         num_workers=10,
-        timeout=5,
     ):
         """
         Skeletonize a segmentation, parallelized over IDs.
@@ -45,10 +44,9 @@ class Skeletonize(ComputeConfigMixin):
             min_branch_length_nm: Minimum branch length for pruning (in nm)
             tolerance_nm: Tolerance for simplification (in nm)
             num_workers: Number of parallel workers
-            timeout: Timeout for ImageDataInterface reads
         """
         super().__init__(num_workers)
-        self.segmentation_idi = ImageDataInterface(segmentation_path, timeout=timeout)
+        self.segmentation_idi = XarrayImageDataInterface(segmentation_path)
         self.output_path = str(output_path).rstrip("/")
         self.csv_path = csv_path
         self.erosion = erosion
@@ -73,7 +71,7 @@ class Skeletonize(ComputeConfigMixin):
     @staticmethod
     def calculate_id_skeleton(
         id_value,
-        segmentation_idi: ImageDataInterface,
+        segmentation_idi: XarrayImageDataInterface,
         bbox_df: pd.DataFrame,
         output_path: str,
         erosion: bool,
@@ -85,7 +83,7 @@ class Skeletonize(ComputeConfigMixin):
 
         Args:
             id_value: The ID to process
-            segmentation_idi: ImageDataInterface for the segmentation
+            segmentation_idi: XarrayImageDataInterface for the segmentation
             bbox_df: DataFrame with bounding box information
             output_path: Base output path
             erosion: Whether to apply erosion

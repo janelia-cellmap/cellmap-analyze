@@ -5,200 +5,10 @@ import numpy as np
 import xarray as xr
 import zarr
 import tensorstore as ts
+from funlib.geometry import Coordinate, Roi
 
 logging.basicConfig(format="%(levelname)s:%(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-class Coordinate(tuple):
-    """Lightweight replacement for funlib.geometry.Coordinate.
-
-    Supports element-wise arithmetic operations with other Coordinates
-    and scalar values.
-    """
-
-    def __new__(cls, values):
-        if isinstance(values, Coordinate):
-            return values
-        return super().__new__(cls, tuple(values))
-
-    def __add__(self, other):
-        if isinstance(other, (tuple, list, Coordinate)):
-            return Coordinate(a + b for a, b in zip(self, other))
-        return Coordinate(a + other for a in self)
-
-    def __radd__(self, other):
-        return self.__add__(other)
-
-    def __sub__(self, other):
-        if isinstance(other, (tuple, list, Coordinate)):
-            return Coordinate(a - b for a, b in zip(self, other))
-        return Coordinate(a - other for a in self)
-
-    def __rsub__(self, other):
-        if isinstance(other, (tuple, list, Coordinate)):
-            return Coordinate(b - a for a, b in zip(self, other))
-        return Coordinate(other - a for a in self)
-
-    def __mul__(self, other):
-        if isinstance(other, (tuple, list, Coordinate)):
-            return Coordinate(a * b for a, b in zip(self, other))
-        return Coordinate(a * other for a in self)
-
-    def __rmul__(self, other):
-        return self.__mul__(other)
-
-    def __truediv__(self, other):
-        if isinstance(other, (tuple, list, Coordinate)):
-            return Coordinate(a / b for a, b in zip(self, other))
-        return Coordinate(a / other for a in self)
-
-    def __rtruediv__(self, other):
-        if isinstance(other, (tuple, list, Coordinate)):
-            return Coordinate(b / a for a, b in zip(self, other))
-        return Coordinate(other / a for a in self)
-
-    def __floordiv__(self, other):
-        if isinstance(other, (tuple, list, Coordinate)):
-            return Coordinate(a // b for a, b in zip(self, other))
-        return Coordinate(a // other for a in self)
-
-    def __rfloordiv__(self, other):
-        if isinstance(other, (tuple, list, Coordinate)):
-            return Coordinate(b // a for a, b in zip(self, other))
-        return Coordinate(other // a for a in self)
-
-    def __neg__(self):
-        return Coordinate(-a for a in self)
-
-    def __abs__(self):
-        return Coordinate(abs(a) for a in self)
-
-    def __eq__(self, other):
-        if isinstance(other, (tuple, list, Coordinate)):
-            if len(self) != len(other):
-                return False
-            return all(a == b for a, b in zip(self, other))
-        return False
-
-    def __hash__(self):
-        return super().__hash__()
-
-    def __repr__(self):
-        return f"Coordinate({tuple(self)})"
-
-
-class Roi:
-    """Lightweight replacement for funlib.geometry.Roi.
-
-    Handles regions of interest with begin/shape supporting anisotropic operations.
-    """
-
-    def __init__(self, begin, shape):
-        self._begin = Coordinate(begin)
-        self._shape = Coordinate(shape)
-
-    @property
-    def begin(self):
-        return self._begin
-
-    @property
-    def shape(self):
-        return self._shape
-
-    @property
-    def end(self):
-        return self._begin + self._shape
-
-    @property
-    def offset(self):
-        return self._begin
-
-    @property
-    def dims(self):
-        return len(self._begin)
-
-    def get_begin(self):
-        return self._begin
-
-    def get_end(self):
-        return self.end
-
-    def snap_to_grid(self, grid):
-        """Snap ROI boundaries to grid - critical for voxel alignment."""
-        grid = Coordinate(grid)
-        # Snap begin down to grid
-        snapped_begin = Coordinate(
-            (b // g) * g for b, g in zip(self._begin, grid)
-        )
-        # Snap end up to grid
-        end = self.end
-        snapped_end = Coordinate(
-            ((e + g - 1) // g) * g if e % g != 0 else e for e, g in zip(end, grid)
-        )
-        snapped_shape = snapped_end - snapped_begin
-        return Roi(snapped_begin, snapped_shape)
-
-    def grow(self, amount_neg=0, amount_pos=0):
-        """Expand ROI by given amounts."""
-        if isinstance(amount_neg, (int, float)):
-            amount_neg = Coordinate([amount_neg] * self.dims)
-        else:
-            amount_neg = Coordinate(amount_neg)
-
-        if isinstance(amount_pos, (int, float)):
-            amount_pos = Coordinate([amount_pos] * self.dims)
-        else:
-            amount_pos = Coordinate(amount_pos)
-
-        new_begin = self._begin - amount_neg
-        new_shape = self._shape + amount_neg + amount_pos
-        return Roi(new_begin, new_shape)
-
-    def intersect(self, other):
-        """Return intersection of this ROI with another."""
-        new_begin = Coordinate(
-            max(a, b) for a, b in zip(self._begin, other.begin)
-        )
-        new_end = Coordinate(
-            min(a, b) for a, b in zip(self.end, other.end)
-        )
-        new_shape = Coordinate(
-            max(0, e - b) for b, e in zip(new_begin, new_end)
-        )
-        return Roi(new_begin, new_shape)
-
-    def to_slices(self):
-        """Convert ROI to tuple of slices."""
-        return tuple(
-            slice(int(b), int(e)) for b, e in zip(self._begin, self.end)
-        )
-
-    def __truediv__(self, other):
-        if isinstance(other, (tuple, list, Coordinate)):
-            other = Coordinate(other)
-            return Roi(self._begin / other, self._shape / other)
-        return Roi(self._begin / other, self._shape / other)
-
-    def __mul__(self, other):
-        if isinstance(other, (tuple, list, Coordinate)):
-            other = Coordinate(other)
-            return Roi(self._begin * other, self._shape * other)
-        return Roi(self._begin * other, self._shape * other)
-
-    def __sub__(self, other):
-        if isinstance(other, (tuple, list, Coordinate)):
-            other = Coordinate(other)
-            return Roi(self._begin - other, self._shape)
-        return Roi(self._begin - other, self._shape)
-
-    def __eq__(self, other):
-        if not isinstance(other, Roi):
-            return False
-        return self._begin == other.begin and self._shape == other.shape
-
-    def __repr__(self):
-        return f"Roi(begin={tuple(self._begin)}, shape={tuple(self._shape)})"
 
 
 def open_ds_tensorstore(dataset_path: str, mode="r", concurrency_limit=None):
@@ -219,7 +29,7 @@ def open_ds_tensorstore(dataset_path: str, mode="r", concurrency_limit=None):
     if mode == "r":
         return ts.open(spec, read=True, write=False).result()
     else:
-        return ts.open(spec, read=False, write=True).result()
+        return ts.open(spec, read=True, write=True).result()
 
 
 def split_dataset_path(dataset_path: str):
@@ -489,48 +299,74 @@ class XarrayImageDataInterface:
         needs_resampling = self.voxel_size != self.output_voxel_size
 
         if roi is None:
-            data = da
-            needs_padding = False
-        else:
-            spatial_dims = ["z", "y", "x"]
-            data_roi = self.roi
-            intersection = roi.intersect(data_roi)
+            result = self._read_xarray(da)
+            if needs_resampling:
+                result = self._resample_ndarray(result)
+            if result.dtype != self.dtype:
+                result = result.astype(self.dtype)
+            return result
 
-            # Calculate padding needed (in output voxels)
-            pad_before = [
-                max(0, int((data_roi.begin[i] - roi.begin[i]) / self.output_voxel_size[i]))
-                for i in range(3)
-            ]
-            pad_after = [
-                max(0, int((roi.end[i] - data_roi.end[i]) / self.output_voxel_size[i]))
-                for i in range(3)
-            ]
-            needs_padding = any(p > 0 for p in pad_before + pad_after)
+        spatial_dims = ["z", "y", "x"]
+        data_roi = self.roi
 
-            if intersection.shape != Coordinate([0, 0, 0]):
-                isel_dict = {}
-                for i, dim in enumerate(spatial_dims):
-                    start_idx = int((intersection.begin[i] - self.offset[i]) / self.voxel_size[i])
-                    end_idx = int((intersection.end[i] - self.offset[i]) / self.voxel_size[i])
-                    isel_dict[dim] = slice(start_idx, end_idx)
-                data = da.isel(**isel_dict)
-            else:
-                # ROI is completely outside data bounds
-                output_shape = tuple(
-                    int(roi.shape[i] / self.output_voxel_size[i]) for i in range(3)
-                )
-                if self._channel_offset:
-                    output_shape = (da.shape[0],) + output_shape
-                fill_value = self.custom_fill_value if self.custom_fill_value else 0
-                return np.full(output_shape, fill_value, dtype=self.dtype)
-
+        # When resampling, save original ROI and compute crop slices
+        # for extracting exact requested region after upsampling
+        snapped_slices = None
         if needs_resampling:
-            data = self._resample(data, roi)
+            original_roi = roi
+            roi = original_roi.snap_to_grid(self.voxel_size)
+            snapped_offset = tuple(
+                int((original_roi.begin[i] - roi.begin[i]) / self.output_voxel_size[i])
+                for i in range(3)
+            )
+            snapped_end = tuple(
+                int((original_roi.end[i] - roi.begin[i]) / self.output_voxel_size[i])
+                for i in range(3)
+            )
+            snapped_slices = tuple(
+                slice(snapped_offset[i], snapped_end[i]) for i in range(3)
+            )
+
+        # Snap ROI to source voxel grid for clean alignment
+        roi = roi.snap_to_grid(self.voxel_size)
+
+        intersection = roi.intersect(data_roi)
+
+        # Calculate padding in source voxels (applied before resampling)
+        pad_before = [
+            max(0, int((data_roi.begin[i] - roi.begin[i]) / self.voxel_size[i]))
+            for i in range(3)
+        ]
+        pad_after = [
+            max(0, int((roi.end[i] - data_roi.end[i]) / self.voxel_size[i]))
+            for i in range(3)
+        ]
+        needs_padding = any(p > 0 for p in pad_before + pad_after)
+
+        if intersection.shape != Coordinate([0, 0, 0]):
+            isel_dict = {}
+            for i, dim in enumerate(spatial_dims):
+                start_idx = int((intersection.begin[i] - self.offset[i]) / self.voxel_size[i])
+                end_idx = int((intersection.end[i] - self.offset[i]) / self.voxel_size[i])
+                isel_dict[dim] = slice(start_idx, end_idx)
+            data = da.isel(**isel_dict)
+        else:
+            # ROI is completely outside data bounds
+            output_shape = tuple(
+                int(roi.shape[i] / self.output_voxel_size[i]) for i in range(3)
+            )
+            if self._channel_offset:
+                output_shape = (da.shape[0],) + output_shape
+            fill_value = self.custom_fill_value if self.custom_fill_value else 0
+            return np.full(output_shape, fill_value, dtype=self.dtype)
 
         result = self._read_xarray(data)
 
-        # Apply padding if needed
-        if roi is not None and needs_padding:
+        if result.dtype != self.dtype:
+            result = result.astype(self.dtype)
+
+        # Apply padding before resampling
+        if needs_padding:
             fill_value = self.custom_fill_value if self.custom_fill_value else 0
             if self._channel_offset:
                 pad_width = [(0, 0)] + list(zip(pad_before, pad_after))
@@ -542,23 +378,23 @@ class XarrayImageDataInterface:
             else:
                 result = np.pad(result, pad_width, mode="constant", constant_values=fill_value)
 
+        # Resample and crop to original ROI size
+        if needs_resampling:
+            result = self._resample_ndarray(result)
+            if snapped_slices is not None:
+                result = result[snapped_slices]
+
         return result
 
-    def _resample(self, data: xr.DataArray, roi: Roi = None) -> xr.DataArray:
-        """Resample data to output_voxel_size using xarray methods.
+    def _resample_ndarray(self, data: np.ndarray) -> np.ndarray:
+        """Resample ndarray to output_voxel_size using numpy operations.
 
-        Uses interp() for upsampling and coarsen() for downsampling.
-        Supports arbitrary per-axis resampling factors (e.g., Z by 2.5x, Y by 1.3x, X unchanged).
+        Uses np.repeat for upsampling and block_reduce for downsampling.
         """
-        spatial_dims = ["z", "y", "x"]
-
-        # Calculate per-axis rescale factors (source_voxel / output_voxel)
-        # factor > 1 means upsampling, factor < 1 means downsampling
         rescale_factors = tuple(
             self.voxel_size[i] / self.output_voxel_size[i] for i in range(3)
         )
 
-        # Check if upsampling or downsampling per axis
         is_upsampling = any(f > 1 for f in rescale_factors)
         is_downsampling = any(f < 1 for f in rescale_factors)
 
@@ -569,37 +405,17 @@ class XarrayImageDataInterface:
             )
 
         if is_upsampling:
-            # Use interp() for upsampling - supports arbitrary factors per axis
-            new_coords = {}
-            for i, dim in enumerate(spatial_dims):
+            for i in range(3):
                 factor = rescale_factors[i]
-                if factor > 1 and dim in data.coords:
-                    old_coords = data.coords[dim].values
-                    if len(old_coords) > 0:
-                        # Generate new coordinates at output voxel spacing
-                        # Start from first coordinate, step by output_voxel_size
-                        start = old_coords[0]
-                        # End coordinate is the last original coord
-                        # Number of new points = original_extent / output_voxel_size
-                        num_new_points = int(len(old_coords) * factor)
-                        new_coords[dim] = np.arange(num_new_points) * self.output_voxel_size[i] + start
-
-            if new_coords:
-                data = data.interp(**new_coords, method="nearest")
+                if factor > 1:
+                    data = data.repeat(int(factor), axis=i + self._channel_offset)
 
         elif is_downsampling:
-            # Use coarsen() for downsampling - requires integer factors
-            coarsen_kwargs = {}
-            for i, dim in enumerate(spatial_dims):
-                factor = rescale_factors[i]
-                if factor < 1:
-                    # coarsen factor is the inverse: how many source voxels per output voxel
-                    coarsen_factor = int(round(1 / factor))
-                    if coarsen_factor > 1:
-                        coarsen_kwargs[dim] = coarsen_factor
-
-            if coarsen_kwargs:
-                data = data.coarsen(**coarsen_kwargs, boundary="trim").median()
+            from skimage.measure import block_reduce
+            block_size = (1,) * self._channel_offset + tuple(
+                int(round(1 / f)) if f < 1 else 1 for f in rescale_factors
+            )
+            data = block_reduce(data, block_size=block_size, func=np.median)
 
         return data
 

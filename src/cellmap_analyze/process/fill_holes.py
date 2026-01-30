@@ -5,7 +5,7 @@ from cellmap_analyze.util import dask_util
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.xarray_image_data_interface import XarrayImageDataInterface
 
 import logging
 import fastremap
@@ -36,7 +36,7 @@ class FillHoles(ComputeConfigMixin):
         chunk_shape=None,
     ):
         super().__init__(num_workers)
-        self.input_idi = ImageDataInterface(input_path, chunk_shape=chunk_shape)
+        self.input_idi = XarrayImageDataInterface(input_path, chunk_shape=chunk_shape)
         self.roi = roi
         if self.roi is None:
             self.roi = self.input_idi.roi
@@ -55,8 +55,8 @@ class FillHoles(ComputeConfigMixin):
 
     def get_hole_information_blockwise(
         block_index,
-        input_idi: ImageDataInterface,
-        holes_idi: ImageDataInterface,
+        input_idi: XarrayImageDataInterface,
+        holes_idi: XarrayImageDataInterface,
         connectivity,
     ):
         # pad by two pixels since to determine boundary need an extra pixel
@@ -208,7 +208,7 @@ class FillHoles(ComputeConfigMixin):
             roi=self.roi,
         )
         cc.get_connected_components()
-        self.holes_idi = ImageDataInterface(
+        self.holes_idi = XarrayImageDataInterface(
             self.holes_path + "/s0", mode="r+", chunk_shape=self.input_idi.chunk_shape
         )
         # get the assignments of holes to objects or background

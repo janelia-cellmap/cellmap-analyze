@@ -1,7 +1,7 @@
 from typing import List, Union
 import numpy as np
 from cellmap_analyze.process.connected_components import ConnectedComponents
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.xarray_image_data_interface import XarrayImageDataInterface
 from cellmap_analyze.util.io_util import get_output_path_from_input_path
 import logging
 import os
@@ -66,7 +66,7 @@ class FilterIDs(ComputeConfigMixin):
             )
 
         self.input_path = input_path
-        self.input_idi = ImageDataInterface(self.input_path, chunk_shape=chunk_shape)
+        self.input_idi = XarrayImageDataInterface(self.input_path, chunk_shape=chunk_shape)
         if roi is None:
             self.roi = self.input_idi.roi
         else:

@@ -2,8 +2,8 @@ import pytest
 from cellmap_analyze.process.mutex_watershed import MutexWatershed
 import fastmorph
 import fastremap
-from cellmap_analyze.util.image_data_interface import (
-    ImageDataInterface,
+from cellmap_analyze.util.xarray_image_data_interface import (
+    XarrayImageDataInterface,
 )
 from tests.test_utils import arrays_equal_up_to_id_ordering
 
@@ -23,7 +23,7 @@ def test_mutex_watershed(tmp_zarr, segmentation_cylinders, do_opening):
         do_opening=do_opening,
     )
     mw.get_connected_components()
-    test_data = ImageDataInterface(
+    test_data = XarrayImageDataInterface(
         f"{tmp_zarr}/test_mws_{do_opening}/s0"
     ).to_ndarray_ts()
     ground_truth = segmentation_cylinders.copy()

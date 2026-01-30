@@ -8,7 +8,7 @@ import tempfile
 import shutil
 import pickle
 
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.xarray_image_data_interface import XarrayImageDataInterface
 from cellmap_analyze.util.io_util import (
     TimingMessager,
     print_with_datetime,
@@ -138,7 +138,7 @@ def create_block(
 
 
 def create_block_from_index(
-    idi: ImageDataInterface,
+    idi: XarrayImageDataInterface,
     index,
     padding=0,
     roi: Roi = None,
@@ -182,7 +182,7 @@ def get_num_blocks(idi, roi=None, block_size=None):
 
 
 def create_blocks(
-    idi: ImageDataInterface,
+    idi: XarrayImageDataInterface,
     roi: Roi = None,
     block_size=None,
     padding=0,
@@ -395,7 +395,7 @@ def delete_chunks(block_index, get_delete_path_fn, idi_or_location, depth):
 
 
 def delete_tmp_dir_blockwise(
-    idi_or_location: ImageDataInterface | str,
+    idi_or_location: XarrayImageDataInterface | str,
     num_workers,
     compute_args,
     is_zarr=True,
@@ -403,7 +403,7 @@ def delete_tmp_dir_blockwise(
 ):
     if is_zarr:
         if type(idi_or_location) is str:
-            idi = ImageDataInterface(idi_or_location)
+            idi = XarrayImageDataInterface(idi_or_location)
         else:
             idi = idi_or_location
         get_delete_path_fn = get_zarr_chunk_path_from_block_index

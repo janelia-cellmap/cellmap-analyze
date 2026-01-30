@@ -8,7 +8,7 @@ from cellmap_analyze.util import dask_util
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.xarray_image_data_interface import XarrayImageDataInterface
 from cellmap_analyze.util.io_util import (
     get_name_from_path,
     get_output_path_from_input_path,
@@ -68,7 +68,7 @@ class MutexWatershed(ComputeConfigMixin):
     ):
         super().__init__(num_workers)
         self.neighborhood = neighborhood
-        self.affinities_idi = ImageDataInterface(affinities_path)
+        self.affinities_idi = XarrayImageDataInterface(affinities_path)
         if chunk_shape is None:
             chunk_shape = self.affinities_idi.chunk_shape[1:]
         # affinities information
@@ -109,7 +109,7 @@ class MutexWatershed(ComputeConfigMixin):
             total_roi=self.roi,
             write_size=np.array(chunk_shape) * self.voxel_size,
         )
-        self.connected_components_blockwise_idi = ImageDataInterface(
+        self.connected_components_blockwise_idi = XarrayImageDataInterface(
             self.connected_components_blockwise_path + "/s0",
             mode="r+",
             chunk_shape=chunk_shape,
@@ -244,8 +244,8 @@ class MutexWatershed(ComputeConfigMixin):
 
     def calculate_block_connected_components(
         block_index,
-        affinities_idi: ImageDataInterface,
-        connected_components_blockwise_idi: ImageDataInterface,
+        affinities_idi: XarrayImageDataInterface,
+        connected_components_blockwise_idi: XarrayImageDataInterface,
         neighborhood,
         adjacent_edge_bias,
         lr_bias,

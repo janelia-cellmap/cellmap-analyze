@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
-from cellmap_analyze.util.image_data_interface import (
-    ImageDataInterface,
+from cellmap_analyze.util.xarray_image_data_interface import (
+    XarrayImageDataInterface,
 )
 
 from funlib.geometry import Roi
@@ -11,7 +11,7 @@ def test_image_data_interface_whole(
     tmp_zarr,
     image_with_holes_filled,
 ):
-    test_data = ImageDataInterface(
+    test_data = XarrayImageDataInterface(
         f"{tmp_zarr}/image_with_holes_filled/s0"
     ).to_ndarray_ts()
     assert np.array_equal(
@@ -21,7 +21,7 @@ def test_image_data_interface_whole(
 
 
 def test_image_data_interface_roi(tmp_zarr, voxel_size, image_with_holes_filled):
-    idi = ImageDataInterface(f"{tmp_zarr}/image_with_holes_filled/s0")
+    idi = XarrayImageDataInterface(f"{tmp_zarr}/image_with_holes_filled/s0")
 
     roi = Roi((1, 1, 1), (5, 5, 5))
     test_data = idi.to_ndarray_ts(roi * voxel_size)
@@ -36,7 +36,7 @@ def test_image_data_interface_roi(tmp_zarr, voxel_size, image_with_holes_filled)
 def test_image_data_interface_constant_fill_values(
     tmp_zarr, voxel_size, image_with_holes_filled, fill_value
 ):
-    idi = ImageDataInterface(
+    idi = XarrayImageDataInterface(
         f"{tmp_zarr}/image_with_holes_filled/s0", custom_fill_value=fill_value
     )
 
@@ -56,7 +56,7 @@ def test_image_data_interface_constant_fill_values(
 
 
 def test_image_data_interface_reflect(tmp_zarr, voxel_size, image_with_holes_filled):
-    idi = ImageDataInterface(
+    idi = XarrayImageDataInterface(
         f"{tmp_zarr}/image_with_holes_filled/s0", custom_fill_value="edge"
     )
 

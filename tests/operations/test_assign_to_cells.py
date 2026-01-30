@@ -6,8 +6,8 @@ from importlib import reload
 reload(cellmap_analyze.analyze.assign_to_cells)
 
 from cellmap_analyze.analyze.assign_to_cells import AssignToCells
-from cellmap_analyze.util.image_data_interface import (
-    ImageDataInterface,
+from cellmap_analyze.util.xarray_image_data_interface import (
+    XarrayImageDataInterface,
 )
 import numpy as np
 from scipy.spatial.distance import cdist
@@ -28,7 +28,7 @@ def get_id_if_in_cell(coord, cell_data):
 
 def gt_assignments(organelle_csv, cell_ds_path, n):
     # Instantiate your image data interface and get the 3D array.
-    cell_idi = ImageDataInterface(cell_ds_path)
+    cell_idi = XarrayImageDataInterface(cell_ds_path)
     cell_data = (
         cell_idi.to_ndarray_ts()
     )  # 3D numpy array containing cell IDs (nonzero entries)

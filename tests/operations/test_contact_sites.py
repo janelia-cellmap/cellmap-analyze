@@ -2,7 +2,7 @@ import pytest
 from cellmap_analyze.process.contact_sites import ContactSites
 import numpy as np
 
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.xarray_image_data_interface import XarrayImageDataInterface
 
 
 def test_contact_site_whole_1(segmentation_1, segmentation_2, contact_sites_distance_1):
@@ -38,10 +38,10 @@ def test_contact_site_blocks(tmp_zarr, voxel_size, contact_distance):
     )
     cs.get_contact_sites()
 
-    ground_truth = ImageDataInterface(
+    ground_truth = XarrayImageDataInterface(
         f"{tmp_zarr}/contact_sites_distance_{contact_distance}/s0"
     ).to_ndarray_ts()
-    test_data = ImageDataInterface(
+    test_data = XarrayImageDataInterface(
         f"{tmp_zarr}/test_contact_sites_distance_{contact_distance}/s0"
     ).to_ndarray_ts()
     assert np.array_equal(
@@ -63,10 +63,10 @@ def test_different_voxel_sizes(tmp_zarr, voxel_size, contact_distance):
     )
     cs.get_contact_sites()
 
-    ground_truth = ImageDataInterface(
+    ground_truth = XarrayImageDataInterface(
         f"{tmp_zarr}/contact_sites_distance_{contact_distance}/s0"
     ).to_ndarray_ts()
-    test_data = ImageDataInterface(
+    test_data = XarrayImageDataInterface(
         f"{tmp_zarr}/test_downsampled_contact_sites_distance_{contact_distance}/s0"
     ).to_ndarray_ts()
 

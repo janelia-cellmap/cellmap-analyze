@@ -3,8 +3,8 @@ from cellmap_analyze.process.label_with_mask import LabelWithMask
 import fastmorph
 import numpy as np
 
-from cellmap_analyze.util.image_data_interface import (
-    ImageDataInterface,
+from cellmap_analyze.util.xarray_image_data_interface import (
+    XarrayImageDataInterface,
 )
 
 
@@ -60,7 +60,7 @@ def test_label_with_mask(
         intensity_threshold_maximum,
         surface_voxels_only,
     )
-    test_data = ImageDataInterface(f"{tmp_zarr}/{output_name}/s0").to_ndarray_ts()
+    test_data = XarrayImageDataInterface(f"{tmp_zarr}/{output_name}/s0").to_ndarray_ts()
     assert np.array_equal(
         test_data,
         ground_truth,

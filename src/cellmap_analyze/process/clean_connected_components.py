@@ -5,7 +5,7 @@ from cellmap_analyze.util import io_util
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.xarray_image_data_interface import XarrayImageDataInterface
 from cellmap_analyze.util.io_util import get_output_path_from_input_path
 import logging
 import itertools
@@ -42,7 +42,7 @@ class CleanConnectedComponents(ComputeConfigMixin):
         super().__init__(num_workers)
 
         self.input_path = input_path
-        self.input_idi = ImageDataInterface(self.input_path, chunk_shape=chunk_shape)
+        self.input_idi = XarrayImageDataInterface(self.input_path, chunk_shape=chunk_shape)
         if roi is None:
             self.roi = self.input_idi.roi
         else:
@@ -100,7 +100,7 @@ class CleanConnectedComponents(ComputeConfigMixin):
     @staticmethod
     def get_connected_component_information_blockwise(
         block_index,
-        connected_components_blockwise_idi: ImageDataInterface,
+        connected_components_blockwise_idi: XarrayImageDataInterface,
         mask: MasksFromConfig = None,
     ):
         try:

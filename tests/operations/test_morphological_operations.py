@@ -2,8 +2,8 @@ import pytest
 from cellmap_analyze.process.morphological_operations import MorphologicalOperations
 import fastmorph
 import numpy as np
-from cellmap_analyze.util.image_data_interface import (
-        ImageDataInterface,
+from cellmap_analyze.util.xarray_image_data_interface import (
+        XarrayImageDataInterface,
     )
 
 
@@ -18,7 +18,7 @@ def test_morphological_operations(tmp_zarr, segmentation_cylinders, operation):
         iterations=num_iterations
     )
     mo.perform_morphological_operation()
-    test_data = ImageDataInterface(
+    test_data = XarrayImageDataInterface(
         f"{tmp_zarr}/test_morphological_{operation}/s0"
     ).to_ndarray_ts()
     ground_truth = segmentation_cylinders.copy()
@@ -32,8 +32,8 @@ def test_morphological_operations(tmp_zarr, segmentation_cylinders, operation):
 # %%
 # import fastmorph
 # from cellmap_analyze.util.image_data_interface import (
-#         ImageDataInterface,
+#         XarrayImageDataInterface,
 #     )
 # from cellmap_analyze.util.neuroglancer_util import view_in_neuroglancer
-# view_in_neuroglancer(original=ImageDataInterface("/tmp/pytest-of-ackermand/pytest-29/tmp0/tmp.zarr/image_with_holes/s0").to_ndarray_ts(),gt=fastmorph.dilate(ImageDataInterface("/tmp/pytest-of-ackermand/pytest-29/tmp0/tmp.zarr/image_with_holes/s0").to_ndarray_ts(),iterations=5),test=ImageDataInterface("/tmp/pytest-of-ackermand/pytest-29/tmp0/tmp.zarr/test_morphological_dilation/s0").to_ndarray_ts())
+# view_in_neuroglancer(original=XarrayImageDataInterface("/tmp/pytest-of-ackermand/pytest-29/tmp0/tmp.zarr/image_with_holes/s0").to_ndarray_ts(),gt=fastmorph.dilate(XarrayImageDataInterface("/tmp/pytest-of-ackermand/pytest-29/tmp0/tmp.zarr/image_with_holes/s0").to_ndarray_ts(),iterations=5),test=XarrayImageDataInterface("/tmp/pytest-of-ackermand/pytest-29/tmp0/tmp.zarr/test_morphological_dilation/s0").to_ndarray_ts())
 # %%
