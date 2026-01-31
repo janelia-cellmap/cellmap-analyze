@@ -446,25 +446,33 @@ def segmentation_random(image_shape):
 
 
 @pytest.fixture(scope="session")
-def contact_sites_distance_1(image_shape):
-    """Ground truth contact sites for distance=1 (isotropic only)."""
+def contact_sites_distance_1(image_shape, voxel_size):
+    """Ground truth contact sites for distance=1.
+    Empty for both isotropic and anisotropic cases."""
     cs = np.zeros(image_shape, dtype=np.uint8)
     return cs
 
 
 @pytest.fixture(scope="session")
-def contact_sites_distance_2(image_shape):
-    """Ground truth contact sites for distance=2 (isotropic only)."""
+def contact_sites_distance_2(image_shape, voxel_size):
+    """Ground truth contact sites for distance=2."""
     cs = np.zeros(image_shape, dtype=np.uint8)
-    cs[1:4, 2:5, 4:6] = 1
-    cs[1:4, 7:10, 4:8] = 2
+    is_isotropic = len(set(voxel_size)) == 1 if hasattr(voxel_size, "__iter__") else True
+    if is_isotropic:
+        cs[1:4, 2:5, 4:6] = 1
+        cs[1:4, 7:10, 4:8] = 2
+    # Anisotropic: no contacts (distance_nm = 2*8 = 16nm, gap is 64nm)
     return cs
 
 
 @pytest.fixture(scope="session")
-def contact_sites_distance_3(image_shape):
-    """Ground truth contact sites for distance=3 (isotropic only)."""
+def contact_sites_distance_3(image_shape, voxel_size):
+    """Ground truth contact sites for distance=3."""
     cs = np.zeros(image_shape, dtype=np.uint8)
+    is_isotropic = len(set(voxel_size)) == 1 if hasattr(voxel_size, "__iter__") else True
+    if not is_isotropic:
+        # Anisotropic: no contacts (distance_nm = 3*8 = 24nm, gap is 64nm)
+        return cs
     nonzeros = [
         (0, 2, 4),
         (0, 2, 5),
@@ -617,32 +625,6 @@ def contact_sites_distance_3(image_shape):
     return cs
 
 
-# Anisotropic ground truth fixtures - hardcoded for voxel_size [32, 16, 8]
-@pytest.fixture(scope="session")
-def contact_sites_distance_1_anisotropic(image_shape):
-    """Ground truth contact sites for distance=1 with anisotropic voxel_size [32, 16, 8]."""
-    # With contact_distance_nm = 1 * 8 = 8nm, no contacts exist because
-    # segmentation_1 at Z=1 (32nm) and segmentation_2 at Z=3 (96nm) are 64nm apart
-    cs = np.zeros(image_shape, dtype=np.uint8)
-    return cs
-
-
-@pytest.fixture(scope="session")
-def contact_sites_distance_2_anisotropic(image_shape):
-    """Ground truth contact sites for distance=2 with anisotropic voxel_size [32, 16, 8]."""
-    # With contact_distance_nm = 2 * 8 = 16nm, no contacts exist because
-    # segmentation_1 at Z=1 (32nm) and segmentation_2 at Z=3 (96nm) are 64nm apart
-    cs = np.zeros(image_shape, dtype=np.uint8)
-    return cs
-
-
-@pytest.fixture(scope="session")
-def contact_sites_distance_3_anisotropic(image_shape):
-    """Ground truth contact sites for distance=3 with anisotropic voxel_size [32, 16, 8]."""
-    # With contact_distance_nm = 3 * 8 = 24nm, no contacts exist because
-    # segmentation_1 at Z=1 (32nm) and segmentation_2 at Z=3 (96nm) are 64nm apart
-    cs = np.zeros(image_shape, dtype=np.uint8)
-    return cs
 
 
 # nonzeros = [
@@ -788,11 +770,7 @@ def test_image_dict(
     contact_sites_distance_1,
     contact_sites_distance_2,
     contact_sites_distance_3,
-    contact_sites_distance_1_anisotropic,
-    contact_sites_distance_2_anisotropic,
-    contact_sites_distance_3_anisotropic,
     segmentation_for_skeleton,
-    voxel_size,
 ):
     dict = {
         "blockwise_connected_components": blockwise_connected_components,
@@ -818,22 +796,10 @@ def test_image_dict(
         "segmentation_random": segmentation_random,
         "segmentation_cells": segmentation_cells,
         "segmentation_for_skeleton": segmentation_for_skeleton,
+        "contact_sites_distance_1": contact_sites_distance_1,
+        "contact_sites_distance_2": contact_sites_distance_2,
+        "contact_sites_distance_3": contact_sites_distance_3,
     }
-
-    # Add appropriate contact_sites fixtures based on voxel_size
-    # Check if isotropic: all voxel sizes are equal
-    is_isotropic = len(set(voxel_size)) == 1 if hasattr(voxel_size, '__iter__') else True
-
-    if is_isotropic:
-        # Isotropic
-        dict["contact_sites_distance_1"] = contact_sites_distance_1
-        dict["contact_sites_distance_2"] = contact_sites_distance_2
-        dict["contact_sites_distance_3"] = contact_sites_distance_3
-    else:
-        # Anisotropic
-        dict["contact_sites_distance_1"] = contact_sites_distance_1_anisotropic
-        dict["contact_sites_distance_2"] = contact_sites_distance_2_anisotropic
-        dict["contact_sites_distance_3"] = contact_sites_distance_3_anisotropic
 
     return dict
 

@@ -14,18 +14,24 @@ def test_contact_site_whole_1(segmentation_1, segmentation_2, contact_sites_dist
     assert np.array_equal(cs, contact_sites_distance_1)
 
 
-def test_contact_site_whole_2(segmentation_1, segmentation_2, contact_sites_distance_2):
-    # Test using legacy behavior (no voxel_size/contact_distance_nm parameters)
-    # For isotropic data only - anisotropic tests will fail with this approach
+def test_contact_site_whole_2(
+    segmentation_1, segmentation_2, contact_sites_distance_2, voxel_size
+):
+    # Legacy behavior (no voxel_size/contact_distance_nm) - isotropic only
+    if not np.all(voxel_size == voxel_size[0]):
+        pytest.skip("Legacy contact site API is isotropic only")
     cs = ContactSites.get_ndarray_contact_sites(
         segmentation_1, segmentation_2, 2, zero_pad=True
     )
     assert np.array_equal(cs, contact_sites_distance_2)
 
 
-def test_contact_site_whole_3(segmentation_1, segmentation_2, contact_sites_distance_3):
-    # Test using legacy behavior (no voxel_size/contact_distance_nm parameters)
-    # For isotropic data only - anisotropic tests will fail with this approach
+def test_contact_site_whole_3(
+    segmentation_1, segmentation_2, contact_sites_distance_3, voxel_size
+):
+    # Legacy behavior (no voxel_size/contact_distance_nm) - isotropic only
+    if not np.all(voxel_size == voxel_size[0]):
+        pytest.skip("Legacy contact site API is isotropic only")
     cs = ContactSites.get_ndarray_contact_sites(
         segmentation_1, segmentation_2, 3, zero_pad=True
     )
