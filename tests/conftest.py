@@ -217,50 +217,60 @@ def segmentation_cylinders(
     diagonal_cylinder_endpoints,
     voxel_size,
 ):
-    def fill_in_cylinder(seg, endpoints, radius, id):
+    def fill_in_cylinder(seg, endpoints_voxel, radius_nm, id, voxel_size):
         # subtract 0.5 so that an annotation centered at a voxel matches to eg 0,0,0
-        end_2 = endpoints[0] - 0.5
-        end_1 = endpoints[1] - 0.5
+        end_2_voxel = endpoints_voxel[0] - 0.5
+        end_1_voxel = endpoints_voxel[1] - 0.5
+
+        # convert to physical space for distance computations
+        end_2 = end_2_voxel * voxel_size
+        end_1 = end_1_voxel * voxel_size
+
         # https://stackoverflow.com/questions/56463412/distance-from-a-point-to-a-line-segment-in-3d-python
-        # normalized tangent vector
+        # normalized tangent vector in physical space
         d = np.divide(end_2 - end_1, np.linalg.norm(end_2 - end_1))
 
-        # possible points
-        mins = np.floor(np.minimum(end_1, end_2)).astype(int) - (
-            np.ceil(radius).astype(int) + 1
+        # possible points in voxel space
+        radius_voxels = np.ceil(radius_nm / voxel_size).astype(int)
+        mins = np.floor(np.minimum(end_1_voxel, end_2_voxel)).astype(int) - (
+            radius_voxels + 1
         )  # 1s for padding
-        maxs = np.ceil(np.maximum(end_1, end_2)).astype(int) + (
-            np.ceil(radius).astype(int) + 1
+        maxs = np.ceil(np.maximum(end_1_voxel, end_2_voxel)).astype(int) + (
+            radius_voxels + 1
         )
 
         z, y, x = [list(range(mins[i], maxs[i] + 1, 1)) for i in range(3)]
-        p = np.array(np.meshgrid(z, y, x)).T.reshape((-1, 3))
+        p_voxel = np.array(np.meshgrid(z, y, x)).T.reshape((-1, 3))
 
-        # signed parallel distance components
+        # convert candidate points to physical space
+        p = p_voxel * voxel_size
+
+        # signed parallel distance components in physical space
         s = np.dot(end_1 - p, d)
         t = np.dot(p - end_2, d)
 
         # clamped parallel distance
         h = np.maximum.reduce([s, t, np.zeros_like(s)])
 
-        # perpendicular distance component
+        # perpendicular distance component in physical space
         c = np.linalg.norm(np.cross(p - end_1, d), axis=1)
 
-        is_in_cylinder = (h == 0) & (c <= radius)
-        voxels_in_cylinder = p[is_in_cylinder]
+        is_in_cylinder = (h == 0) & (c <= radius_nm)
+        voxels_in_cylinder = p_voxel[is_in_cylinder]
         seg[
             voxels_in_cylinder[:, 0], voxels_in_cylinder[:, 1], voxels_in_cylinder[:, 2]
         ] = id
 
     # need to use larger to get better chance of fitting
     seg = np.zeros((50, 50, 50), dtype=np.uint8)
+    min_voxel = np.min(voxel_size)
     # horizontal cylinder
-    fill_in_cylinder(seg, horizontal_cylinder_endpoints / voxel_size, 1, 1)
+    fill_in_cylinder(seg, horizontal_cylinder_endpoints / voxel_size, 1 * min_voxel, 1, voxel_size)
     seg[0, 0, 0] = 1  # add spurious voxel
     # vertical cylinder
-    fill_in_cylinder(seg, vertical_cylinder_endpoints / voxel_size, 1.5, 2)
+    fill_in_cylinder(seg, vertical_cylinder_endpoints / voxel_size, 1.5 * min_voxel, 2, voxel_size)
     # diagonal
-    fill_in_cylinder(seg, diagonal_cylinder_endpoints / voxel_size, 2, 3)
+    fill_in_cylinder(seg, diagonal_cylinder_endpoints / voxel_size, 2 * min_voxel, 3, voxel_size)
 
     return seg
 
