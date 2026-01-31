@@ -252,29 +252,29 @@ def simple_contact_site_information_dict(
 
 
 @pytest.fixture()
-def contact_site_information_dict_contact_distance_1(
-    segmentation_1, segmentation_2, contact_sites_distance_1, voxel_size
+def contact_site_information_dict_contact_distance_8nm(
+    segmentation_1, segmentation_2, contact_sites_distance_8nm, voxel_size
 ):
     return simple_contact_site_information_dict(
-        segmentation_1, segmentation_2, contact_sites_distance_1, voxel_size
+        segmentation_1, segmentation_2, contact_sites_distance_8nm, voxel_size
     )
 
 
 @pytest.fixture()
-def contact_site_information_dict_contact_distance_2(
-    segmentation_1, segmentation_2, contact_sites_distance_2, voxel_size
+def contact_site_information_dict_contact_distance_16nm(
+    segmentation_1, segmentation_2, contact_sites_distance_16nm, voxel_size
 ):
     return simple_contact_site_information_dict(
-        segmentation_1, segmentation_2, contact_sites_distance_2, voxel_size
+        segmentation_1, segmentation_2, contact_sites_distance_16nm, voxel_size
     )
 
 
 @pytest.fixture()
-def contact_site_information_dict_contact_distance_3(
-    segmentation_1, segmentation_2, contact_sites_distance_3, voxel_size
+def contact_site_information_dict_contact_distance_24nm(
+    segmentation_1, segmentation_2, contact_sites_distance_24nm, voxel_size
 ):
     return simple_contact_site_information_dict(
-        segmentation_1, segmentation_2, contact_sites_distance_3, voxel_size
+        segmentation_1, segmentation_2, contact_sites_distance_24nm, voxel_size
     )
 
 
@@ -320,61 +320,61 @@ def test_measure_blockwise_objects(
         )
 
 
-def test_measure_whole_contact_sites_distance_1(
+def test_measure_whole_contact_sites_distance_8nm(
     segmentation_1,
     segmentation_2,
     voxel_size,
-    contact_sites_distance_1,
-    contact_site_information_dict_contact_distance_1,
+    contact_sites_distance_8nm,
+    contact_site_information_dict_contact_distance_8nm,
 ):
     test_contact_site_information_dict = get_object_information(
-        contact_sites_distance_1,
+        contact_sites_distance_8nm,
         organelle_1=segmentation_1,
         organelle_2=segmentation_2,
         voxel_size=voxel_size,
     )
     assert (
-        contact_site_information_dict_contact_distance_1
+        contact_site_information_dict_contact_distance_8nm
         == test_contact_site_information_dict
     )
 
 
-def test_measure_whole_contact_sites_distance_2(
+def test_measure_whole_contact_sites_distance_16nm(
     segmentation_1,
     segmentation_2,
     voxel_size,
-    contact_sites_distance_2,
-    contact_site_information_dict_contact_distance_2,
+    contact_sites_distance_16nm,
+    contact_site_information_dict_contact_distance_16nm,
 ):
     test_contact_site_information_dict = get_object_information(
-        contact_sites_distance_2,
+        contact_sites_distance_16nm,
         organelle_1=segmentation_1,
         organelle_2=segmentation_2,
         voxel_size=voxel_size,
     )
 
     assert (
-        contact_site_information_dict_contact_distance_2
+        contact_site_information_dict_contact_distance_16nm
         == test_contact_site_information_dict
     )
 
 
-def test_measure_whole_contact_sites_distance_3(
+def test_measure_whole_contact_sites_distance_24nm(
     segmentation_1,
     segmentation_2,
     voxel_size,
-    contact_sites_distance_3,
-    contact_site_information_dict_contact_distance_3,
+    contact_sites_distance_24nm,
+    contact_site_information_dict_contact_distance_24nm,
 ):
     test_contact_site_information_dict = get_object_information(
-        contact_sites_distance_3,
+        contact_sites_distance_24nm,
         organelle_1=segmentation_1,
         organelle_2=segmentation_2,
         voxel_size=voxel_size,
     )
 
     assert (
-        contact_site_information_dict_contact_distance_3
+        contact_site_information_dict_contact_distance_24nm
         == test_contact_site_information_dict
     )
 
@@ -426,73 +426,73 @@ def test_measure_blockwise(shared_tmpdir, tmp_zarr, segmentation_name, request):
     )
 
 
-def test_measure_blockwise_contact_sites_distance_1(
-    shared_tmpdir, tmp_zarr, contact_site_information_dict_contact_distance_1
+def test_measure_blockwise_contact_sites_distance_8nm(
+    shared_tmpdir, tmp_zarr, contact_site_information_dict_contact_distance_8nm
 ):
     compare_measurements(
         shared_tmpdir,
-        f"{tmp_zarr}/contact_sites_distance_1/s0",
+        f"{tmp_zarr}/contact_sites_distance_8nm/s0",
         f"{tmp_zarr}/segmentation_1/s0",
         f"{tmp_zarr}/segmentation_2/s0",
-        contact_site_information_dict_contact_distance_1,
+        contact_site_information_dict_contact_distance_8nm,
     )
 
 
-def test_measure_blockwise_contact_sites_distance_2(
-    shared_tmpdir, tmp_zarr, contact_site_information_dict_contact_distance_2
+def test_measure_blockwise_contact_sites_distance_16nm(
+    shared_tmpdir, tmp_zarr, contact_site_information_dict_contact_distance_16nm
 ):
     compare_measurements(
         shared_tmpdir,
-        f"{tmp_zarr}/contact_sites_distance_2/s0",
+        f"{tmp_zarr}/contact_sites_distance_16nm/s0",
         f"{tmp_zarr}/segmentation_1/s0",
         f"{tmp_zarr}/segmentation_2/s0",
-        contact_site_information_dict_contact_distance_2,
+        contact_site_information_dict_contact_distance_16nm,
     )
 
 
-def test_measure_blockwise_contact_sites_distance_3(
-    shared_tmpdir, tmp_zarr, contact_site_information_dict_contact_distance_3
+def test_measure_blockwise_contact_sites_distance_24nm(
+    shared_tmpdir, tmp_zarr, contact_site_information_dict_contact_distance_24nm
 ):
     compare_measurements(
         shared_tmpdir,
-        f"{tmp_zarr}/contact_sites_distance_3/s0",
+        f"{tmp_zarr}/contact_sites_distance_24nm/s0",
         f"{tmp_zarr}/segmentation_1/s0",
         f"{tmp_zarr}/segmentation_2/s0",
-        contact_site_information_dict_contact_distance_3,
+        contact_site_information_dict_contact_distance_24nm,
     )
 
 
-def test_measure_blockwise_downsampled_contact_sites_distance_1(
-    shared_tmpdir, tmp_zarr, contact_site_information_dict_contact_distance_1
+def test_measure_blockwise_downsampled_contact_sites_distance_8nm(
+    shared_tmpdir, tmp_zarr, contact_site_information_dict_contact_distance_8nm
 ):
     compare_measurements(
         shared_tmpdir,
-        f"{tmp_zarr}/contact_sites_distance_1/s0",
+        f"{tmp_zarr}/contact_sites_distance_8nm/s0",
         f"{tmp_zarr}/segmentation_1_downsampled/s0",
         f"{tmp_zarr}/segmentation_2/s0",
-        contact_site_information_dict_contact_distance_1,
+        contact_site_information_dict_contact_distance_8nm,
     )
 
 
-def test_measure_blockwise_downsampled_contact_sites_distance_2(
-    shared_tmpdir, tmp_zarr, contact_site_information_dict_contact_distance_2
+def test_measure_blockwise_downsampled_contact_sites_distance_16nm(
+    shared_tmpdir, tmp_zarr, contact_site_information_dict_contact_distance_16nm
 ):
     compare_measurements(
         shared_tmpdir,
-        f"{tmp_zarr}/contact_sites_distance_2/s0",
+        f"{tmp_zarr}/contact_sites_distance_16nm/s0",
         f"{tmp_zarr}/segmentation_1_downsampled/s0",
         f"{tmp_zarr}/segmentation_2/s0",
-        contact_site_information_dict_contact_distance_2,
+        contact_site_information_dict_contact_distance_16nm,
     )
 
 
-def test_measure_blockwise_downsampled_contact_sites_distance_3(
-    shared_tmpdir, tmp_zarr, contact_site_information_dict_contact_distance_3
+def test_measure_blockwise_downsampled_contact_sites_distance_24nm(
+    shared_tmpdir, tmp_zarr, contact_site_information_dict_contact_distance_24nm
 ):
     compare_measurements(
         shared_tmpdir,
-        f"{tmp_zarr}/contact_sites_distance_3/s0",
+        f"{tmp_zarr}/contact_sites_distance_24nm/s0",
         f"{tmp_zarr}/segmentation_1_downsampled/s0",
         f"{tmp_zarr}/segmentation_2/s0",
-        contact_site_information_dict_contact_distance_3,
+        contact_site_information_dict_contact_distance_24nm,
     )

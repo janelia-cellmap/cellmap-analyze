@@ -8,6 +8,7 @@ from scipy import ndimage
 import pandas as pd
 from tests.operations.test_measure import simple_object_information_dict
 from funlib.persistence import prepare_ds
+from tests.contact_site_fixture_helper import compute_contact_sites_ground_truth
 
 
 @pytest.fixture(
@@ -446,191 +447,27 @@ def segmentation_random(image_shape):
 
 
 @pytest.fixture(scope="session")
-def contact_sites_distance_1(image_shape, voxel_size):
-    """Ground truth contact sites for distance=1.
-    Empty for both isotropic and anisotropic cases."""
-    cs = np.zeros(image_shape, dtype=np.uint8)
-    return cs
+def contact_sites_distance_8nm(segmentation_1, segmentation_2, voxel_size):
+    """Ground truth contact sites for contact_distance_nm=8."""
+    return compute_contact_sites_ground_truth(
+        segmentation_1, segmentation_2, contact_distance_nm=8, voxel_size=voxel_size
+    )
 
 
 @pytest.fixture(scope="session")
-def contact_sites_distance_2(image_shape, voxel_size):
-    """Ground truth contact sites for distance=2."""
-    cs = np.zeros(image_shape, dtype=np.uint8)
-    is_isotropic = len(set(voxel_size)) == 1 if hasattr(voxel_size, "__iter__") else True
-    if is_isotropic:
-        cs[1:4, 2:5, 4:6] = 1
-        cs[1:4, 7:10, 4:8] = 2
-    # Anisotropic: no contacts (distance_nm = 2*8 = 16nm, gap is 64nm)
-    return cs
+def contact_sites_distance_16nm(segmentation_1, segmentation_2, voxel_size):
+    """Ground truth contact sites for contact_distance_nm=16."""
+    return compute_contact_sites_ground_truth(
+        segmentation_1, segmentation_2, contact_distance_nm=16, voxel_size=voxel_size
+    )
 
 
 @pytest.fixture(scope="session")
-def contact_sites_distance_3(image_shape, voxel_size):
-    """Ground truth contact sites for distance=3."""
-    cs = np.zeros(image_shape, dtype=np.uint8)
-    is_isotropic = len(set(voxel_size)) == 1 if hasattr(voxel_size, "__iter__") else True
-    if not is_isotropic:
-        # Anisotropic: no contacts (distance_nm = 3*8 = 24nm, gap is 64nm)
-        return cs
-    nonzeros = [
-        (0, 2, 4),
-        (0, 2, 5),
-        (0, 3, 4),
-        (0, 3, 5),
-        (0, 4, 4),
-        (0, 4, 5),
-        (0, 7, 4),
-        (0, 7, 5),
-        (0, 7, 6),
-        (0, 7, 7),
-        (0, 8, 4),
-        (0, 8, 5),
-        (0, 8, 6),
-        (0, 8, 7),
-        (0, 9, 4),
-        (0, 9, 5),
-        (0, 9, 6),
-        (0, 9, 7),
-        (1, 2, 2),
-        (1, 2, 3),
-        (1, 2, 4),
-        (1, 2, 5),
-        (1, 2, 6),
-        (1, 2, 7),
-        (1, 3, 2),
-        (1, 3, 3),
-        (1, 3, 4),
-        (1, 3, 5),
-        (1, 3, 6),
-        (1, 3, 7),
-        (1, 4, 2),
-        (1, 4, 3),
-        (1, 4, 4),
-        (1, 4, 5),
-        (1, 4, 6),
-        (1, 4, 7),
-        (1, 5, 2),
-        (1, 5, 3),
-        (1, 5, 4),
-        (1, 5, 5),
-        (1, 5, 6),
-        (1, 5, 7),
-        (1, 5, 8),
-        (1, 6, 2),
-        (1, 6, 3),
-        (1, 6, 4),
-        (1, 6, 5),
-        (1, 6, 6),
-        (1, 6, 7),
-        (1, 6, 8),
-        (1, 6, 9),
-        (1, 7, 2),
-        (1, 7, 3),
-        (1, 7, 4),
-        (1, 7, 5),
-        (1, 7, 6),
-        (1, 7, 7),
-        (1, 7, 8),
-        (1, 7, 9),
-        (1, 8, 2),
-        (1, 8, 3),
-        (1, 8, 4),
-        (1, 8, 5),
-        (1, 8, 6),
-        (1, 8, 7),
-        (1, 8, 8),
-        (1, 8, 9),
-        (1, 9, 2),
-        (1, 9, 3),
-        (1, 9, 4),
-        (1, 9, 5),
-        (1, 9, 6),
-        (1, 9, 7),
-        (1, 9, 8),
-        (1, 9, 9),
-        (2, 2, 3),
-        (2, 2, 4),
-        (2, 2, 5),
-        (2, 2, 6),
-        (2, 3, 3),
-        (2, 3, 4),
-        (2, 3, 5),
-        (2, 3, 6),
-        (2, 4, 3),
-        (2, 4, 4),
-        (2, 4, 5),
-        (2, 4, 6),
-        (2, 5, 4),
-        (2, 5, 5),
-        (2, 6, 4),
-        (2, 6, 5),
-        (2, 6, 6),
-        (2, 6, 7),
-        (2, 7, 3),
-        (2, 7, 4),
-        (2, 7, 5),
-        (2, 7, 6),
-        (2, 7, 7),
-        (2, 7, 8),
-        (2, 8, 3),
-        (2, 8, 4),
-        (2, 8, 5),
-        (2, 8, 6),
-        (2, 8, 7),
-        (2, 8, 8),
-        (2, 9, 3),
-        (2, 9, 4),
-        (2, 9, 5),
-        (2, 9, 6),
-        (2, 9, 7),
-        (2, 9, 8),
-        (3, 2, 4),
-        (3, 2, 5),
-        (3, 3, 4),
-        (3, 3, 5),
-        (3, 4, 4),
-        (3, 4, 5),
-        (3, 7, 4),
-        (3, 7, 5),
-        (3, 7, 6),
-        (3, 7, 7),
-        (3, 8, 4),
-        (3, 8, 5),
-        (3, 8, 6),
-        (3, 8, 7),
-        (3, 9, 4),
-        (3, 9, 5),
-        (3, 9, 6),
-        (3, 9, 7),
-        (4, 2, 4),
-        (4, 2, 5),
-        (4, 3, 4),
-        (4, 3, 5),
-        (4, 4, 4),
-        (4, 4, 5),
-        (4, 7, 4),
-        (4, 7, 5),
-        (4, 7, 6),
-        (4, 7, 7),
-        (4, 8, 4),
-        (4, 8, 7),
-        (4, 9, 4),
-        (4, 9, 5),
-        (4, 9, 6),
-        (4, 9, 7),
-    ]
-    for nz in nonzeros:
-        cs[nz] = 1
-    return cs
-
-
-
-
-# nonzeros = [
-#     (0, 2, 4),
-#     (0, 2, 5),
-#     (0, 3, 4),
+def contact_sites_distance_24nm(segmentation_1, segmentation_2, voxel_size):
+    """Ground truth contact sites for contact_distance_nm=24."""
+    return compute_contact_sites_ground_truth(
+        segmentation_1, segmentation_2, contact_distance_nm=24, voxel_size=voxel_size
+    )
 
 
 import pytest
@@ -767,9 +604,9 @@ def test_image_dict(
     segmentation_cells,
     affinities_cylinders,
     segmentation_1_downsampled,
-    contact_sites_distance_1,
-    contact_sites_distance_2,
-    contact_sites_distance_3,
+    contact_sites_distance_8nm,
+    contact_sites_distance_16nm,
+    contact_sites_distance_24nm,
     segmentation_for_skeleton,
 ):
     dict = {
@@ -796,9 +633,9 @@ def test_image_dict(
         "segmentation_random": segmentation_random,
         "segmentation_cells": segmentation_cells,
         "segmentation_for_skeleton": segmentation_for_skeleton,
-        "contact_sites_distance_1": contact_sites_distance_1,
-        "contact_sites_distance_2": contact_sites_distance_2,
-        "contact_sites_distance_3": contact_sites_distance_3,
+        "contact_sites_distance_8nm": contact_sites_distance_8nm,
+        "contact_sites_distance_16nm": contact_sites_distance_16nm,
+        "contact_sites_distance_24nm": contact_sites_distance_24nm,
     }
 
     return dict
