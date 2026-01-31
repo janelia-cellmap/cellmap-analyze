@@ -258,9 +258,8 @@ class MutexWatershed(ComputeConfigMixin):
         if not padding_voxels:
             padding_voxels = np.amax(neighborhood)
 
-        # Use minimum voxel size for uniform padding in physical units
-        padding = padding_voxels * min(connected_components_blockwise_idi.voxel_size)
-        # add half a block of padding
+        # Per-axis padding so each axis gets padding_voxels of context
+        padding = padding_voxels * np.array(connected_components_blockwise_idi.voxel_size)
         block = create_block_from_index(
             connected_components_blockwise_idi,
             block_index,
