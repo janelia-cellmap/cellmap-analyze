@@ -80,7 +80,7 @@ def test_contact_site_blocks(tmp_zarr, voxel_size, contact_distance_nm):
 
 
 @pytest.mark.parametrize("contact_distance_nm", [8, 16, 24])
-def test_different_voxel_sizes(tmp_zarr, voxel_size, contact_distance_nm):
+def test_contact_site_blocks_mismatched_voxel_sizes(tmp_zarr, voxel_size, contact_distance_nm):
     cs = ContactSites(
         f"{tmp_zarr}/segmentation_1_downsampled/s0",
         f"{tmp_zarr}/segmentation_2/s0",
