@@ -184,8 +184,11 @@ class ContactSites(ComputeConfigMixin):
         voxel_size,
         contact_distance_nm,
     ):
-        # Use minimum voxel size for uniform padding in physical units
-        padding_nm = padding_voxels * min(contact_sites_blockwise_idi.voxel_size)
+        # Per-axis padding in nm (integer multiples of voxel size per axis)
+        padding_nm = Coordinate(
+            padding_voxels * int(vs)
+            for vs in contact_sites_blockwise_idi.voxel_size
+        )
         block = create_block_from_index(
             contact_sites_blockwise_idi,
             block_index,

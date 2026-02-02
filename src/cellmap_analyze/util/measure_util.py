@@ -24,14 +24,20 @@ def trim_array_anisotropic(array, padding_nm, voxel_size):
 
     Args:
         array: The array to trim
-        padding_nm: Physical padding in nanometers (uniform across all axes)
+        padding_nm: Physical padding in nanometers. Can be a scalar (uniform)
+            or a per-axis iterable (e.g. Coordinate or tuple).
         voxel_size: Tuple of voxel sizes per axis (z, y, x)
 
     Returns:
         Trimmed array
     """
     # Calculate padding in voxels for each axis
-    padding_voxels = tuple(int(np.round(padding_nm / vs)) for vs in voxel_size)
+    if np.isscalar(padding_nm):
+        padding_voxels = tuple(int(np.round(padding_nm / vs)) for vs in voxel_size)
+    else:
+        padding_voxels = tuple(
+            int(np.round(pnm / vs)) for pnm, vs in zip(padding_nm, voxel_size)
+        )
 
     # Handle case where padding might be 0 or array is too small
     if all(p == 0 for p in padding_voxels):

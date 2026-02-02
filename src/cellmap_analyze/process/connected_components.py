@@ -25,6 +25,7 @@ import cc3d
 from collections import Counter
 import shutil
 from cellmap_analyze.util.measure_util import trim_array_anisotropic
+from funlib.geometry import Coordinate
 from cellmap_analyze.cythonizing.touching import get_touching_ids
 
 logging.basicConfig(
@@ -197,10 +198,16 @@ class ConnectedComponents(ComputeConfigMixin):
                 gaussian_smoothing_sigma_nm / vs for vs in input_idi.voxel_size
             )
             truncate = 4.0  # default
-            # Use maximum sigma for padding to ensure adequate coverage
-            padding_voxels = int(truncate * max(gaussian_smoothing_sigma_voxels) + 0.5)
-            # Use minimum voxel size for uniform padding in physical units
-            padding_nm = padding_voxels * min(input_idi.voxel_size)
+            # Calculate per-axis padding in voxels to ensure exact voxel alignment
+            padding_voxels_per_axis = tuple(
+                int(truncate * sigma + 0.5)
+                for sigma in gaussian_smoothing_sigma_voxels
+            )
+            # Convert to per-axis physical padding (exact multiples of voxel size)
+            padding_nm = Coordinate(
+                p * int(vs)
+                for p, vs in zip(padding_voxels_per_axis, input_idi.voxel_size)
+            )
 
         block = create_block_from_index(
             connected_components_blockwise_idi, block_index, padding=padding_nm
