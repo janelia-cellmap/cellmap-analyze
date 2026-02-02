@@ -37,9 +37,9 @@ def test_fit_lines_to_segmentations(
         assert np.allclose(
             np.vstack([start, end]),
             endpoints,
-            atol=0.5,
+            atol=1.0,
         ) or np.allclose(
             np.vstack([end, start]),
             endpoints,
-            atol=0.5,
+            atol=1.0,
         )

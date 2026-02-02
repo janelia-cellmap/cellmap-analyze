@@ -16,7 +16,7 @@ from tests.contact_site_fixture_helper import compute_contact_sites_ground_truth
     scope="session",
     params=[
         (8, 8, 8),  # isotropic
-        (32, 16, 8),  # anisotropic - all axes different
+        (3, 7, 5),  # anisotropic - all axes different, non-multiples
     ],
     ids=["isotropic", "anisotropic"],
 )

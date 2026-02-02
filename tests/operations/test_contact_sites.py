@@ -5,35 +5,38 @@ import numpy as np
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 
 
-def test_contact_site_whole_1(segmentation_1, segmentation_2, contact_sites_distance_8nm):
-    # Test using legacy behavior (no voxel_size/contact_distance_nm parameters)
-    # For isotropic data only - anisotropic tests will fail with this approach
+def test_contact_site_whole_8nm(
+    segmentation_1, segmentation_2, contact_sites_distance_8nm, voxel_size
+):
+    contact_distance_nm = 8
+    contact_distance_voxels = contact_distance_nm / float(np.min(voxel_size))
     cs = ContactSites.get_ndarray_contact_sites(
-        segmentation_1, segmentation_2, 1, zero_pad=True
+        segmentation_1, segmentation_2, contact_distance_voxels, zero_pad=True,
+        voxel_size=voxel_size, contact_distance_nm=contact_distance_nm,
     )
     assert np.array_equal(cs, contact_sites_distance_8nm)
 
 
-def test_contact_site_whole_2(
+def test_contact_site_whole_16nm(
     segmentation_1, segmentation_2, contact_sites_distance_16nm, voxel_size
 ):
-    # Legacy behavior (no voxel_size/contact_distance_nm) - isotropic only
-    if not np.all(voxel_size == voxel_size[0]):
-        pytest.skip("Legacy contact site API is isotropic only")
+    contact_distance_nm = 16
+    contact_distance_voxels = contact_distance_nm / float(np.min(voxel_size))
     cs = ContactSites.get_ndarray_contact_sites(
-        segmentation_1, segmentation_2, 2, zero_pad=True
+        segmentation_1, segmentation_2, contact_distance_voxels, zero_pad=True,
+        voxel_size=voxel_size, contact_distance_nm=contact_distance_nm,
     )
     assert np.array_equal(cs, contact_sites_distance_16nm)
 
 
-def test_contact_site_whole_3(
+def test_contact_site_whole_24nm(
     segmentation_1, segmentation_2, contact_sites_distance_24nm, voxel_size
 ):
-    # Legacy behavior (no voxel_size/contact_distance_nm) - isotropic only
-    if not np.all(voxel_size == voxel_size[0]):
-        pytest.skip("Legacy contact site API is isotropic only")
+    contact_distance_nm = 24
+    contact_distance_voxels = contact_distance_nm / float(np.min(voxel_size))
     cs = ContactSites.get_ndarray_contact_sites(
-        segmentation_1, segmentation_2, 3, zero_pad=True
+        segmentation_1, segmentation_2, contact_distance_voxels, zero_pad=True,
+        voxel_size=voxel_size, contact_distance_nm=contact_distance_nm,
     )
     assert np.array_equal(cs, contact_sites_distance_24nm)
 
