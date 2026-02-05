@@ -25,6 +25,19 @@ def voxel_size(request):
     return np.array(request.param)
 
 
+@pytest.fixture(
+    params=[
+        ((8, 8, 8), (5, 5, 5)),       # 1.6x upsampling
+        ((10, 10, 10), (16, 16, 16)), # 0.625x downsampling
+        ((8, 10, 5), (5, 4, 5)),      # Mixed anisotropic (1.6, 2.5, 1.0)
+    ],
+    ids=["upsampling_1.6x", "downsampling_0.625x", "anisotropic_mixed"],
+)
+def non_integer_voxel_sizes(request):
+    """Voxel size pairs that result in non-integer scale factors."""
+    return request.param
+
+
 @pytest.fixture(scope="session")
 def horizontal_cylinder_endpoints(voxel_size):
     # Element-wise multiplication for anisotropic support
