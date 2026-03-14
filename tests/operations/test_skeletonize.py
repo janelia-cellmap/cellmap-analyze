@@ -299,15 +299,15 @@ def test_skeletonize_without_erosion(tmp_zarr, tmp_skeletonize_csv):
     # ID 5 (cross shape) should have meaningful skeleton metrics
     row5 = metrics_df.loc[5]
 
-    # Cross has 3 arms meeting at a junction -> 3 branches
+    # Cross has 3 arms meeting at a junction -> exactly 3 branches
     assert (
-        row5["Number of Branches"] >= 3
-    ), f"Cross (ID 5) should have >= 3 branches, got {row5['Number of Branches']}"
+        row5["Number of Branches"] == 3
+    ), f"Cross (ID 5) should have 3 branches, got {row5['Number of Branches']}"
 
-    # Longest shortest path should span the longest arm pair through the junction
+    # Longest shortest path should be approximately 160 nm
     assert (
-        row5["Longest Shortest Path (nm)"] > 100
-    ), f"Cross (ID 5) longest shortest path too small: {row5['Longest Shortest Path (nm)']}"
+        abs(row5["Longest Shortest Path (nm)"] - 160) < 20
+    ), f"Cross (ID 5) longest shortest path should be ~160 nm, got {row5['Longest Shortest Path (nm)']}"
 
     # Radii should be reasonable (arms are 4 voxels wide, voxel_size=8nm -> ~16nm radius)
     assert (
