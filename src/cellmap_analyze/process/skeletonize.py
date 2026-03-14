@@ -1,5 +1,7 @@
 import numpy as np
 import pandas as pd
+import networkx as nx
+import edt as edt_module
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.mixins import ComputeConfigMixin
@@ -71,6 +73,15 @@ class Skeletonize(ComputeConfigMixin):
         logger.info(f"Output will be written to {output_path}")
 
     @staticmethod
+    def _empty_metrics():
+        return {
+            "longest_shortest_path_nm": 0.0,
+            "num_branches": 0,
+            "radius_mean_nm": np.nan,
+            "radius_std_nm": np.nan,
+        }
+
+    @staticmethod
     def calculate_id_skeleton(
         id_value,
         segmentation_idi: ImageDataInterface,
@@ -120,7 +131,10 @@ class Skeletonize(ComputeConfigMixin):
             # Check if there's any data
             if not np.any(data):
                 logger.warning(f"No voxels found for ID {id_value}, skipping")
-                return
+                return Skeletonize._empty_metrics()
+
+            # Compute EDT on pre-erosion mask for approximate radii
+            distance_transform = edt_module.edt(data, anisotropy=tuple(voxel_size))
 
             # Apply erosion if requested
             if erosion:
@@ -147,14 +161,18 @@ class Skeletonize(ComputeConfigMixin):
                     simplified_path = f"{output_path}/simplified/{id_value}"
                     empty_skeleton.write_neuroglancer_skeleton(simplified_path)
                     logger.info(f"Wrote empty skeleton for ID {id_value}")
-                    return
+                    return Skeletonize._empty_metrics()
 
-            # Skeletonize
+            # Skeletonize using Lee's algorithm (skimage default). It has
+            # known limitations (e.g. thin structures may lose branches) but
+            # is sufficient for now.
             skel = skeletonize(data)
 
             # Check if skeletonization produced anything
             if not np.any(skel):
-                logger.warning(f"Skeletonization produced no voxels for ID {id_value}, writing empty skeleton")
+                logger.warning(
+                    f"Skeletonization produced no voxels for ID {id_value}, writing empty skeleton"
+                )
                 # Write empty skeleton files
                 empty_skeleton = CustomSkeleton(vertices=[], edges=[])
                 full_path = f"{output_path}/full/{id_value}"
@@ -162,7 +180,13 @@ class Skeletonize(ComputeConfigMixin):
                 simplified_path = f"{output_path}/simplified/{id_value}"
                 empty_skeleton.write_neuroglancer_skeleton(simplified_path)
                 logger.info(f"Wrote empty skeleton for ID {id_value}")
-                return
+                return Skeletonize._empty_metrics()
+
+            # Sample radii at skeleton voxel positions
+            skel_coords = np.argwhere(skel)
+            radii = distance_transform[
+                skel_coords[:, 0], skel_coords[:, 1], skel_coords[:, 2]
+            ]
 
             # Convert to custom skeleton format
             # spacing parameter scales the vertices by voxel_size
@@ -196,6 +220,35 @@ class Skeletonize(ComputeConfigMixin):
             else:
                 pruned = skeleton
 
+            # Compute skeleton metrics on pruned skeleton
+            num_branches = len(pruned.polylines)
+            longest_shortest_path = 0.0
+            if len(pruned.vertices) > 1:
+                pruned_graph = pruned.skeleton_to_graph()
+                for component in nx.connected_components(pruned_graph):
+                    if len(component) < 2:
+                        continue
+                    subgraph = pruned_graph.subgraph(component)
+                    start = next(iter(component))
+                    lengths = nx.single_source_dijkstra_path_length(
+                        subgraph, start, weight="weight"
+                    )
+                    far_node = max(lengths, key=lengths.get)
+                    lengths2 = nx.single_source_dijkstra_path_length(
+                        subgraph, far_node, weight="weight"
+                    )
+                    component_diameter = max(lengths2.values())
+                    longest_shortest_path = max(
+                        longest_shortest_path, component_diameter
+                    )
+
+            skeleton_metrics = {
+                "longest_shortest_path_nm": longest_shortest_path,
+                "num_branches": num_branches,
+                "radius_mean_nm": float(np.mean(radii)),
+                "radius_std_nm": float(np.std(radii)),
+            }
+
             # Simplify
             if tolerance_nm > 0:
                 simplified = pruned.simplify(tolerance_nm)
@@ -214,7 +267,7 @@ class Skeletonize(ComputeConfigMixin):
                 simplified_path = f"{output_path}/simplified/{id_value}"
                 empty_skeleton.write_neuroglancer_skeleton(simplified_path)
                 logger.info(f"Wrote empty skeleton for ID {id_value}")
-                return
+                return Skeletonize._empty_metrics()
 
             # Ensure edges are properly shaped numpy arrays before writing
             # Handle case where there are no edges (single vertex)
@@ -241,6 +294,8 @@ class Skeletonize(ComputeConfigMixin):
             logger.info(
                 f"Wrote simplified skeleton for ID {id_value}: {len(simplified.vertices)} vertices"
             )
+
+            return skeleton_metrics
 
         except Exception as e:
             logger.error(f"Error processing ID {id_value}: {e}", exc_info=True)
@@ -313,17 +368,47 @@ class Skeletonize(ComputeConfigMixin):
 
         # Parallelize over IDs using dask
         num_ids = len(self.ids)
+        tmp_merge_dir = f"{self.output_path}/_tmp_skeleton_metrics_to_merge"
 
-        dask_util.compute_blockwise_partitions(
+        skeleton_metrics = dask_util.compute_blockwise_partitions(
             num_ids,
             self.num_workers,
             self.compute_args,
             logger,
             f"skeletonizing {num_ids} IDs from {self.segmentation_idi.path}",
             self._skeletonize_id_wrapper,
+            merge_info=(Skeletonize._merge_skeleton_metrics, tmp_merge_dir),
         )
 
+        self._write_skeleton_csv(skeleton_metrics)
+
         logger.info("Skeletonization complete")
+
+    @staticmethod
+    def _merge_skeleton_metrics(list_of_results):
+        merged = []
+        for result in list_of_results:
+            merged.append(result)
+        return merged
+
+    def _write_skeleton_csv(self, skeleton_metrics):
+        original_df = pd.read_csv(self.csv_path, index_col=0)
+        metrics_df = pd.DataFrame(skeleton_metrics)
+        metrics_df = metrics_df.set_index("id")
+        metrics_df = metrics_df.rename(
+            columns={
+                "longest_shortest_path_nm": "Longest Shortest Path (nm)",
+                "num_branches": "Number of Branches",
+                "radius_mean_nm": "Radius Mean (nm)",
+                "radius_std_nm": "Radius Std (nm)",
+            }
+        )
+        combined_df = original_df.join(metrics_df)
+        csv_dir = os.path.dirname(self.csv_path)
+        csv_basename = os.path.splitext(os.path.basename(self.csv_path))[0]
+        output_csv = os.path.join(csv_dir, f"{csv_basename}_with_skeletons.csv")
+        combined_df.to_csv(output_csv)
+        logger.info(f"Wrote skeleton metrics CSV to {output_csv}")
 
     def _skeletonize_id_wrapper(self, index):
         """
@@ -333,7 +418,7 @@ class Skeletonize(ComputeConfigMixin):
             index: Index into self.ids list
         """
         id_value = self.ids[index]
-        Skeletonize.calculate_id_skeleton(
+        result = Skeletonize.calculate_id_skeleton(
             id_value,
             self.segmentation_idi,
             self.bbox_df,
@@ -342,3 +427,7 @@ class Skeletonize(ComputeConfigMixin):
             self.min_branch_length_nm,
             self.tolerance_nm,
         )
+        if result is None:
+            result = Skeletonize._empty_metrics()
+        result["id"] = id_value
+        return result
