@@ -309,13 +309,10 @@ def test_skeletonize_without_erosion(tmp_zarr, tmp_skeletonize_csv):
         abs(row5["Longest Shortest Path (nm)"] - 160) < 20
     ), f"Cross (ID 5) longest shortest path should be ~160 nm, got {row5['Longest Shortest Path (nm)']}"
 
-    # Radii should be reasonable (arms are 4 voxels wide, voxel_size=8nm -> ~16nm radius)
+    # Radii should be approximately 16 nm (arms are 4 voxels wide, voxel_size=8nm)
     assert (
-        row5["Radius Mean (nm)"] > 10
-    ), f"Cross (ID 5) radius mean too small: {row5['Radius Mean (nm)']}"
-    assert not np.isnan(
-        row5["Radius Mean (nm)"]
-    ), "Cross (ID 5) radius mean should not be NaN"
+        abs(row5["Radius Mean (nm)"] - 16) < 4
+    ), f"Cross (ID 5) radius mean should be ~16 nm, got {row5['Radius Mean (nm)']}"
 
 
 def test_skeletonize_with_pruning_and_simplification(tmp_zarr, tmp_skeletonize_csv):
