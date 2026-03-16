@@ -288,6 +288,14 @@ class ImageDataInterface:
         self.roi = self.ds.roi
         self.offset = self.ds.roi.offset
 
+        # Handle multichannel metadata: if funlib parsed >3D voxel_size
+        # (e.g. from 4D OME-Zarr metadata with channel axis), strip channel dims
+        if len(self.voxel_size) > 3:
+            n_extra = len(self.voxel_size) - 3
+            self.voxel_size = Coordinate(self.voxel_size[n_extra:])
+            self.roi = Roi(self.roi.begin[n_extra:], self.roi.shape[n_extra:])
+            self.offset = self.roi.offset
+
         if "voxel_size" in self.ds.data.attrs:
             voxel_size = Coordinate(self.ds.data.attrs["voxel_size"])
             if self.voxel_size != voxel_size:
