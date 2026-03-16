@@ -420,6 +420,12 @@ def segmentation_random(image_shape):
 
 
 @pytest.fixture(scope="session")
+def raw_intensity_for_seg2(image_shape):
+    np.random.seed(123)
+    return np.random.rand(*image_shape).astype(np.float32) * 255
+
+
+@pytest.fixture(scope="session")
 def contact_sites_distance_1(image_shape):
     cs = np.zeros(image_shape, dtype=np.uint8)
     return cs
@@ -727,6 +733,7 @@ def test_image_dict(
     contact_sites_distance_2,
     contact_sites_distance_3,
     segmentation_for_skeleton,
+    raw_intensity_for_seg2,
 ):
     dict = {
         "blockwise_connected_components": blockwise_connected_components,
@@ -755,6 +762,7 @@ def test_image_dict(
         "contact_sites_distance_2": contact_sites_distance_2,
         "contact_sites_distance_3": contact_sites_distance_3,
         "segmentation_for_skeleton": segmentation_for_skeleton,
+        "raw_intensity_for_seg2": raw_intensity_for_seg2,
     }
     return dict
 
