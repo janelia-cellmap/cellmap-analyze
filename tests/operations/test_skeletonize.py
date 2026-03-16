@@ -289,6 +289,31 @@ def test_skeletonize_without_erosion(tmp_zarr, tmp_skeletonize_csv):
             len(full_verts) > 0
         ), f"ID {id_val}: No vertices in skeleton without erosion"
 
+    # Verify skeleton metrics CSV was written with expected columns
+    csv_dir = os.path.dirname(tmp_skeletonize_csv)
+    csv_basename = os.path.splitext(os.path.basename(tmp_skeletonize_csv))[0]
+    metrics_csv_path = os.path.join(csv_dir, f"{csv_basename}_with_skeletons.csv")
+    assert os.path.exists(metrics_csv_path), "Skeleton metrics CSV not created"
+    metrics_df = pd.read_csv(metrics_csv_path, index_col=0)
+
+    # ID 5 (cross shape) should have meaningful skeleton metrics
+    row5 = metrics_df.loc[5]
+
+    # Cross has 3 arms meeting at a junction -> exactly 3 branches
+    assert (
+        row5["Number of Branches"] == 3
+    ), f"Cross (ID 5) should have 3 branches, got {row5['Number of Branches']}"
+
+    # Longest shortest path should be approximately 160 nm
+    assert (
+        abs(row5["Longest Shortest Path (nm)"] - 160) < 20
+    ), f"Cross (ID 5) longest shortest path should be ~160 nm, got {row5['Longest Shortest Path (nm)']}"
+
+    # Radii should be approximately 16 nm (arms are 4 voxels wide, voxel_size=8nm)
+    assert (
+        abs(row5["Radius Mean (nm)"] - 16) < 4
+    ), f"Cross (ID 5) radius mean should be ~16 nm, got {row5['Radius Mean (nm)']}"
+
 
 def test_skeletonize_with_pruning_and_simplification(tmp_zarr, tmp_skeletonize_csv):
     """Test that pruning and simplification reduce the skeleton complexity."""
