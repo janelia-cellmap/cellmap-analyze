@@ -260,7 +260,7 @@ def test_skeletonize_produces_reasonable_skeletons(
             ), f"ID {id_val}: Edge references invalid vertex {edge[1]}"
 
 
-def test_skeletonize_without_erosion(tmp_zarr, tmp_skeletonize_csv):
+def test_skeletonize_without_erosion(tmp_zarr, tmp_skeletonize_csv, voxel_size):
     """Test skeletonization without erosion produces more detailed skeletons."""
     output_path = tmp_zarr + "/test_skeletonize_no_erosion"
 
@@ -298,6 +298,37 @@ def test_skeletonize_without_erosion(tmp_zarr, tmp_skeletonize_csv):
         assert (
             len(full_verts) > 0
         ), f"ID {id_val}: No vertices in skeleton without erosion"
+
+    # Verify skeleton metrics CSV was written with expected columns
+    csv_dir = os.path.dirname(tmp_skeletonize_csv)
+    csv_basename = os.path.splitext(os.path.basename(tmp_skeletonize_csv))[0]
+    metrics_csv_path = os.path.join(csv_dir, f"{csv_basename}_with_skeletons.csv")
+    assert os.path.exists(metrics_csv_path), "Skeleton metrics CSV not created"
+    metrics_df = pd.read_csv(metrics_csv_path, index_col=0)
+
+    # ID 5 (cross shape) should have meaningful skeleton metrics
+    row5 = metrics_df.loc[5]
+
+    # Cross has 3 arms meeting at a junction -> exactly 3 branches
+    assert (
+        row5["Number of Branches"] == 3
+    ), f"Cross (ID 5) should have 3 branches, got {row5['Number of Branches']}"
+
+    # Longest shortest path: two longest arms (X=30 voxels, Y=22 voxels) through junction
+    # Each arm extends from junction center to its tip; physical length depends on voxel size
+    vs = np.array(voxel_size)
+    # X arm half-length: ~15 voxels * vs[2], Y arm half-length: ~11 voxels * vs[1]
+    # Approximate expected path = X arm half * vs[2] + Y arm half * vs[1]
+    expected_path = 15 * vs[2] + 11 * vs[1]
+    assert (
+        abs(row5["Longest Shortest Path (nm)"] - expected_path) < expected_path * 0.3
+    ), f"Cross (ID 5) longest shortest path should be ~{expected_path} nm, got {row5['Longest Shortest Path (nm)']}"
+
+    # Radii should be approximately 2 voxels wide; use mean voxel size as approximation
+    expected_radius = 2 * np.mean(vs)
+    assert (
+        abs(row5["Radius Mean (nm)"] - expected_radius) < expected_radius * 0.5
+    ), f"Cross (ID 5) radius mean should be ~{expected_radius} nm, got {row5['Radius Mean (nm)']}"
 
 
 def test_skeletonize_with_pruning_and_simplification(tmp_zarr, tmp_skeletonize_csv):

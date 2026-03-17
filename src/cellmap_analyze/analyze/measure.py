@@ -77,6 +77,12 @@ class Measure(ComputeConfigMixin):
 
             self.contact_sites = True
 
+        if "raw_path" in kwargs and kwargs["raw_path"]:
+            self.raw_path = kwargs["raw_path"]
+            self.raw_idi = ImageDataInterface(self.raw_path, chunk_shape=chunk_shape)
+            self.raw_idi.output_voxel_size = self.input_idi.voxel_size
+            self.get_measurements_blockwise_extra_kwargs["raw_idi"] = self.raw_idi
+
         # Handle root datasets (empty name) by using "data" as default
         input_name = get_name_from_path(self.input_path)
         if not input_name:
@@ -171,6 +177,11 @@ class Measure(ComputeConfigMixin):
                 organelle_2_idi, block, voxel_size=input_idi.voxel_size
             )
 
+        raw_idi = kwargs.get("raw_idi")
+        if raw_idi is not None:
+            # Read raw at write_roi (no face-neighbor padding needed for intensity)
+            extra_kwargs["raw_data"] = raw_idi.to_ndarray_ts(block.write_roi)
+
         # get information only from actual block(not including padding)
         block_offset = np.array(block.write_roi.begin) + global_offset
         object_informations = get_object_information(
@@ -235,6 +246,12 @@ class Measure(ComputeConfigMixin):
             for d in ["X", "Y", "Z"]:
                 columns.append(f"{category} {d} (nm)")
 
+        self.has_raw_intensity = any(
+            oi.has_raw_intensity for oi in self.measurements.values()
+        )
+        if self.has_raw_intensity:
+            columns += ["Mean Intensity", "Std Intensity"]
+
         if self.contact_sites:
             organelle_1_name = get_name_from_path(self.organelle_1_path)
             organelle_2_name = get_name_from_path(self.organelle_2_path)
@@ -265,6 +282,8 @@ class Measure(ComputeConfigMixin):
                 *oi.bounding_box[:3][::-1],
                 *oi.bounding_box[3:][::-1],
             ]
+            if self.has_raw_intensity:
+                row += [oi.mean_intensity, oi.std_intensity]
             if self.contact_sites:
                 id_to_surface_area_dict_1 = (
                     oi.contacting_organelle_information_1.id_to_surface_area_dict

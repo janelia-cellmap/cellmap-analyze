@@ -68,9 +68,21 @@ class MutexWatershed(ComputeConfigMixin):
     ):
         super().__init__(num_workers)
         self.neighborhood = neighborhood
-        self.affinities_idi = ImageDataInterface(affinities_path)
-        if chunk_shape is None:
-            chunk_shape = self.affinities_idi.chunk_shape[1:]
+        # Support single path or list of paths (one per affinity channel)
+        # , concurrency_limit=None, timeout=30
+        if isinstance(affinities_path, list):
+            self.affinities_idis = [
+                ImageDataInterface(p)
+                for p in affinities_path
+            ]
+            self.affinities_idi = self.affinities_idis[0]
+            if chunk_shape is None:
+                chunk_shape = self.affinities_idi.chunk_shape
+        else:
+            self.affinities_idis = None
+            self.affinities_idi = ImageDataInterface(affinities_path)
+            if chunk_shape is None:
+                chunk_shape = self.affinities_idi.chunk_shape[1:]
         # affinities information
         self.neighborhood = neighborhood
         self.adjacent_edge_bias = adjacent_edge_bias
@@ -244,7 +256,7 @@ class MutexWatershed(ComputeConfigMixin):
 
     def calculate_block_connected_components(
         block_index,
-        affinities_idi: ImageDataInterface,
+        affinities_idi,
         connected_components_blockwise_idi: ImageDataInterface,
         neighborhood,
         adjacent_edge_bias,
@@ -265,17 +277,33 @@ class MutexWatershed(ComputeConfigMixin):
             block_index,
             padding=padding,
         )
+        logger.info(
+            f"Block {block_index}: read_roi={block.read_roi}, write_roi={block.write_roi}"
+        )
 
         if mask:
             mask_block = mask.process_block(roi=block.read_roi)
             if not mask_block.any():
                 connected_components_blockwise_idi.ds[block.write_roi] = 0
 
-        affinities = affinities_idi.to_ndarray_ts(block.read_roi)
+        # Support list of IDIs (one per affinity channel) or single 4D IDI
+        logger.info(f"Block {block_index}: reading affinities...")
+        if isinstance(affinities_idi, list):
+            affinities = np.stack(
+                [idi.to_ndarray_ts(block.read_roi) for idi in affinities_idi],
+                axis=0,
+            )
+        else:
+            affinities = affinities_idi.to_ndarray_ts(block.read_roi)
+        logger.info(
+            f"Block {block_index}: affinities loaded, shape={affinities.shape}, "
+            f"dtype={affinities.dtype}, mem={affinities.nbytes / 1e6:.1f} MB"
+        )
 
         if mask:
             affinities *= mask_block[None, :, :, :]
 
+        logger.info(f"Block {block_index}: running mutex watershed...")
         segmentation = MutexWatershed.mutex_watershed(
             affinities=affinities,
             neighborhood=neighborhood,
@@ -283,9 +311,11 @@ class MutexWatershed(ComputeConfigMixin):
             lr_bias=lr_bias,
             filter_val=filter_val,
         )
+        logger.info(f"Block {block_index}: running connected components...")
         segmentation = MutexWatershed.instancewise_instance_segmentation(
             segmentation, connectivity=connectivity, do_opening=do_opening
         )
+        logger.info(f"Block {block_index}: done, writing output...")
 
         # Calculate offset with per-axis division for anisotropic data
         global_id_offset = np.uint64(
@@ -306,6 +336,9 @@ class MutexWatershed(ComputeConfigMixin):
         num_blocks = dask_util.get_num_blocks(
             self.connected_components_blockwise_idi, roi=self.roi
         )
+        affinities_arg = (
+            self.affinities_idis if self.affinities_idis else self.affinities_idi
+        )
         dask_util.compute_blockwise_partitions(
             num_blocks,
             self.num_workers,
@@ -313,7 +346,7 @@ class MutexWatershed(ComputeConfigMixin):
             logger,
             f"calculating blockwise connected components with mws for {self.affinities_idi.path}",
             MutexWatershed.calculate_block_connected_components,
-            self.affinities_idi,
+            affinities_arg,
             self.connected_components_blockwise_idi,
             self.neighborhood,
             self.adjacent_edge_bias,

@@ -283,6 +283,23 @@ def get_contacting_organelles_information(
     return contacting_organelle_information_1, contacting_organelle_information_2
 
 
+def get_raw_intensity_stats(segmentation, raw_data, trim=1):
+    segmentation = trim_array(segmentation, trim)
+    mask = segmentation > 0
+    labels = segmentation[mask].ravel()
+    values = raw_data[mask].ravel().astype(np.float64)
+    if labels.size == 0:
+        return {}
+    unique_labels, inverse = fastremap.unique(labels, return_inverse=True)
+    raw_sums = np.bincount(inverse, weights=values)
+    raw_sum_sqs = np.bincount(inverse, weights=values**2)
+    raw_counts = np.bincount(inverse)
+    return {
+        int(lbl): (float(raw_sums[idx]), float(raw_sum_sqs[idx]), int(raw_counts[idx]))
+        for idx, lbl in enumerate(unique_labels)
+    }
+
+
 def get_object_information(
     object_data, voxel_size, id_offset=0, trim=0, offset=np.zeros((3,)), **kwargs
 ):
@@ -295,6 +312,8 @@ def get_object_information(
         organelle_1 = kwargs.get("organelle_1")
         organelle_2 = kwargs.get("organelle_2")
         is_contact_site = True
+
+    raw_data = kwargs.get("raw_data")
 
     ois = {}
     if np.any(trim_array(object_data, trim)):
@@ -317,6 +336,11 @@ def get_object_information(
                 trim=trim,
             )
 
+        if raw_data is not None:
+            raw_intensity_stats = get_raw_intensity_stats(
+                object_data, raw_data, trim=trim
+            )
+
         # Note some contact site ids may be overwritten but that shouldnt be an issue
         for _, region_prop in region_props.iterrows():
 
@@ -333,6 +357,14 @@ def get_object_information(
                         region_prop["ID"], ContactingOrganelleInformation()
                     ).id_to_surface_area_dict
                 )
+
+            if raw_data is not None:
+                stats = raw_intensity_stats.get(
+                    region_prop["ID"], (0.0, 0.0, 0)
+                )
+                extra_args["raw_sum"] = stats[0]
+                extra_args["raw_sum_sq"] = stats[1]
+                extra_args["raw_count"] = stats[2]
 
             # need to add global_id_offset here rather than before because region_props find_objects creates an array that is the length of the max id in the array
             # Convert to int to avoid pandas iterrows type coercion (uint8 -> float64)

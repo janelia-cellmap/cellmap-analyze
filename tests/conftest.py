@@ -460,6 +460,12 @@ def segmentation_random(image_shape):
 
 
 @pytest.fixture(scope="session")
+def raw_intensity_for_seg2(image_shape):
+    np.random.seed(123)
+    return np.random.rand(*image_shape).astype(np.float32) * 255
+
+
+@pytest.fixture(scope="session")
 def contact_sites_distance_8nm(segmentation_1, segmentation_2, voxel_size):
     """Ground truth contact sites for contact_distance_nm=8."""
     return compute_contact_sites_ground_truth(
@@ -541,13 +547,14 @@ def segmentation_for_skeleton():
     ) ** 2 <= radius**2
     seg[sphere_mask] = 4
 
-    # ID 5: Cross/plus shape (3D cross with branches in X, Y, Z directions)
-    # Center bar along Z
-    seg[35:45, 20:22, 20:22] = 5
-    # Branch along X
-    seg[39:41, 20:22, 15:25] = 5
-    # Branch along Y
-    seg[39:41, 15:25, 20:22] = 5
+    # ID 5: Cross/plus shape (3D cross with branches in Z, X, Y directions)
+    # Thick arms (4x4 cross-section) so skeletonize produces real branches.
+    # Z arm (top/bottom of junction): z=30..49, 20 voxels long
+    seg[30:50, 23:27, 23:27] = 5
+    # X arm (longest): z=38..41, x=10..39, 30 voxels long
+    seg[38:42, 23:27, 10:40] = 5
+    # Y arm: z=38..41, y=14..35, 22 voxels long
+    seg[38:42, 14:36, 23:27] = 5
 
     # ID 6: L-shaped structure
     seg[5:10, 30:35, 30:32] = 6  # Vertical part
@@ -621,6 +628,7 @@ def test_image_dict(
     contact_sites_distance_16nm,
     contact_sites_distance_24nm,
     segmentation_for_skeleton,
+    raw_intensity_for_seg2,
 ):
     dict = {
         "blockwise_connected_components": blockwise_connected_components,
@@ -646,6 +654,7 @@ def test_image_dict(
         "segmentation_random": segmentation_random,
         "segmentation_cells": segmentation_cells,
         "segmentation_for_skeleton": segmentation_for_skeleton,
+        "raw_intensity_for_seg2": raw_intensity_for_seg2,
         "contact_sites_distance_8nm": contact_sites_distance_8nm,
         "contact_sites_distance_16nm": contact_sites_distance_16nm,
         "contact_sites_distance_24nm": contact_sites_distance_24nm,

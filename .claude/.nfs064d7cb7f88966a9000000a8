@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/groups/scicompsoft/home/ackermand/miniconda3/condabin/mamba run -n basic-cellmap-analyze pytest:*)"
+    ]
+  }
+}

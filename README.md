@@ -1,6 +1,6 @@
 [![CI Status](https://github.com/janelia-cellmap/cellmap-analyze/actions/workflows/tests.yml/badge.svg)](https://github.com/janelia-cellmap/cellmap-analyze/actions/workflows/tests.yml) [![Codecov](https://codecov.io/gh/janelia-cellmap/cellmap-analyze/branch/main/graph/badge.svg)](https://app.codecov.io/gh/janelia-cellmap/cellmap-analyze)
 
-
+# NOTE: CURRENTLY ONLY WORKS WITH ISOTROPIC DATA!!!
 # cellmap-analyze
 
 A suite of Dask-powered tools for processing and analyzing terabyte-scale 3D segmentation datasets.

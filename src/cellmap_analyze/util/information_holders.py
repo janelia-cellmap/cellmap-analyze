@@ -52,6 +52,30 @@ class ObjectInformation:
             )
         else:
             self.radius_of_gyration = np.nan
+
+        self.has_raw_intensity = False
+        if "raw_sum" in kwargs or "raw_sum_sq" in kwargs or "raw_count" in kwargs:
+            if not (
+                "raw_sum" in kwargs
+                and "raw_sum_sq" in kwargs
+                and "raw_count" in kwargs
+            ):
+                raise ValueError(
+                    "Must provide all of raw_sum, raw_sum_sq, and raw_count for raw intensity statistics"
+                )
+            self.raw_sum = kwargs["raw_sum"]
+            self.raw_sum_sq = kwargs["raw_sum_sq"]
+            self.raw_count = kwargs["raw_count"]
+            self.has_raw_intensity = True
+            if self.raw_count > 0:
+                self.mean_intensity = self.raw_sum / self.raw_count
+                self.std_intensity = np.sqrt(
+                    max(0, self.raw_sum_sq / self.raw_count - self.mean_intensity**2)
+                )
+            else:
+                self.mean_intensity = np.nan
+                self.std_intensity = np.nan
+
         self.is_contact_site = False
         if (
             "id_to_surface_area_dict_1" in kwargs.keys()
@@ -83,6 +107,25 @@ class ObjectInformation:
         oi.surface_area = self.surface_area + other.surface_area
         oi.sum_r2 = self.sum_r2 + other.sum_r2
         oi.radius_of_gyration = np.sqrt(oi.sum_r2 / oi.counts - np.dot(oi.com, oi.com))
+
+        if self.has_raw_intensity != other.has_raw_intensity:
+            raise ValueError(
+                "Cannot add ObjectInformation objects with different has_raw_intensity values"
+            )
+        if self.has_raw_intensity:
+            oi.has_raw_intensity = True
+            oi.raw_sum = self.raw_sum + other.raw_sum
+            oi.raw_sum_sq = self.raw_sum_sq + other.raw_sum_sq
+            oi.raw_count = self.raw_count + other.raw_count
+            if oi.raw_count > 0:
+                oi.mean_intensity = oi.raw_sum / oi.raw_count
+                oi.std_intensity = np.sqrt(
+                    max(0, oi.raw_sum_sq / oi.raw_count - oi.mean_intensity**2)
+                )
+            else:
+                oi.mean_intensity = np.nan
+                oi.std_intensity = np.nan
+
         if self.is_contact_site != other.is_contact_site:
             raise ValueError(
                 "Cannot add ObjectInformation objects with different is_contact_site values"
@@ -124,8 +167,17 @@ class ObjectInformation:
                 atol=1e-13,
             )
             and self.bounding_box == other.bounding_box
+            and self.has_raw_intensity == other.has_raw_intensity
             and self.is_contact_site == other.is_contact_site
         )
+        if self.has_raw_intensity:
+            is_equal &= (
+                np.allclose(self.raw_sum, other.raw_sum, rtol=1e-13, atol=1e-13)
+                and np.allclose(
+                    self.raw_sum_sq, other.raw_sum_sq, rtol=1e-13, atol=1e-13
+                )
+                and self.raw_count == other.raw_count
+            )
         if not self.is_contact_site:
             return is_equal
         is_equal &= (
