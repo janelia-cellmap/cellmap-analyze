@@ -165,7 +165,9 @@ def to_ndarray_tensorstore(
     # Calculate per-axis rescale factors for anisotropic data
     rescale_factors = tuple(vs / ovs for vs, ovs in zip(voxel_size, output_voxel_size))
 
-    # For backward compatibility, use rescale_factor for uniform checks
+    # Check if any axis needs rescaling
+    needs_rescaling = any(rf != 1 for rf in rescale_factors)
+    # For fast-path direction (up vs down), use first axis as representative
     rescale_factor = rescale_factors[0]
 
     if swap_axes:
@@ -187,7 +189,7 @@ def to_ndarray_tensorstore(
         # with ts.Transaction() as txn:
         data = dataset.read().result()
         # Check if any rescaling is needed (anisotropic or isotropic)
-        if rescale_factor != 1:
+        if needs_rescaling:
             # Check if any rescale factor requires interpolation (non-integer)
             if requires_interpolation(rescale_factors):
                 # Use scipy.ndimage.zoom for non-integer scaling
@@ -195,14 +197,16 @@ def to_ndarray_tensorstore(
                 data = zoom(data, zoom=zoom_factors, order=interpolation_order)
             else:
                 # Use existing fast paths for integer or close-to-integer scaling
-                if rescale_factor > 1:
+                all_up = all(rf >= 1 for rf in rescale_factors)
+                all_down = all(rf <= 1 for rf in rescale_factors)
+                if all_up:
                     # Apply per-axis upsampling
                     data = (
                         data.repeat(int(round(rescale_factors[0])), axis=0 + channel_offset)
                         .repeat(int(round(rescale_factors[1])), axis=1 + channel_offset)
                         .repeat(int(round(rescale_factors[2])), axis=2 + channel_offset)
                     )
-                elif rescale_factor < 1:
+                elif all_down:
                     # Use simple slicing for integer downsampling
                     downsample_factors = tuple(int(round(1 / rf)) for rf in rescale_factors)
                     downsample_slices = (
@@ -210,6 +214,10 @@ def to_ndarray_tensorstore(
                         tuple(slice(None, None, factor) for factor in downsample_factors)
                     )
                     data = data[downsample_slices]
+                else:
+                    # Mixed up/down per axis — use zoom for correctness
+                    zoom_factors = (1,) * channel_offset + rescale_factors
+                    data = zoom(data, zoom=zoom_factors, order=interpolation_order)
         return data
 
     if offset is None:
@@ -296,7 +304,7 @@ def to_ndarray_tensorstore(
     #     padded_data[padded_slices] = dataset[valid_slices].read().result()
 
     # Resample if needed
-    if rescale_factor != 1:
+    if needs_rescaling:
         # Check if any rescale factor requires interpolation (non-integer)
         if requires_interpolation(rescale_factors):
             # Use map_coordinates for non-integer scaling to ensure global grid alignment
@@ -359,7 +367,9 @@ def to_ndarray_tensorstore(
             # Use existing fast paths for integer or close-to-integer scaling
             slices = (slice(None),) * channel_offset + snapped_slices
 
-            if rescale_factor > 1:
+            all_up = all(rf >= 1 for rf in rescale_factors)
+            all_down = all(rf <= 1 for rf in rescale_factors)
+            if all_up:
                 # Apply per-axis upsampling for anisotropic data
                 # Use round() instead of int() to handle factors like 1.999
                 data = (
@@ -367,7 +377,7 @@ def to_ndarray_tensorstore(
                     .repeat(int(round(rescale_factors[1])), axis=channel_offset + 1)
                     .repeat(int(round(rescale_factors[2])), axis=channel_offset + 2)
                 )
-            elif rescale_factor < 1:
+            elif all_down:
                 # Use simple slicing for integer downsampling (preserves exact labels)
                 # Calculate per-axis downsampling factors
                 downsample_factors = tuple(int(round(1 / rf)) for rf in rescale_factors)
@@ -379,6 +389,10 @@ def to_ndarray_tensorstore(
                     tuple(slice(None, None, factor) for factor in downsample_factors)
                 )
                 data = data[downsample_slices]
+            else:
+                # Mixed up/down per axis — use zoom for correctness
+                zoom_factors = (1,) * channel_offset + rescale_factors
+                data = zoom(data, zoom=zoom_factors, order=interpolation_order)
 
             data = data[slices]
 
