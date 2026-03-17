@@ -1,9 +1,8 @@
 [![CI Status](https://github.com/janelia-cellmap/cellmap-analyze/actions/workflows/tests.yml/badge.svg)](https://github.com/janelia-cellmap/cellmap-analyze/actions/workflows/tests.yml) [![Codecov](https://codecov.io/gh/janelia-cellmap/cellmap-analyze/branch/main/graph/badge.svg)](https://app.codecov.io/gh/janelia-cellmap/cellmap-analyze)
 
-# NOTE: CURRENTLY ONLY WORKS WITH ISOTROPIC DATA!!!
 # cellmap-analyze
 
-A suite of Dask-powered tools for processing and analyzing terabyte-scale 3D segmentation datasets.
+A suite of Dask-powered tools for processing and analyzing terabyte-scale 3D segmentation datasets. Supports both isotropic and anisotropic voxel sizes.
 
 ---
 
@@ -13,29 +12,33 @@ A suite of Dask-powered tools for processing and analyzing terabyte-scale 3D seg
 
 | Tool                     | CLI Command                  | Description                                                 |
 | ------------------------ | ---------------------------- | ----------------------------------------------------------- |
-| **Connected Components** | `connected-components`       | Threshold and mask segmentations.                           |
-| **Clean Components**     | `clean-connected-components` | Refine and clean existing segmentations.                    |
-| **Contact Sites**        | `contact-sites`              | Identify object contact regions with configurable contact distance. |
+| **Connected Components** | `connected-components`       | Threshold predictions, apply masks, and extract connected components. Volume thresholds are in physical units (nm³). |
+| **Clean Components**     | `clean-connected-components` | Refine existing segmentations by removing small/large components. |
+| **Contact Sites**        | `contact-sites`              | Identify regions where two segmentations are within a configurable physical distance. Handles mismatched voxel sizes by resampling to a common resolution. |
 | **Fill Holes**           | `fill-holes`              | Fill interior gaps in segmented volumes.                    |
 | **Filter IDs**           | `filter-ids`                 | Exclude unwanted segmentation IDs.                          |
-| **Mutex Watershed**           | `mws`                 | Mutex watershed agglomeration from affinities                          |
-| **Label With Mask**           | `label-with-mask`                 | Label one dataset with ids from another                          |
-| **Morphological Operations**           | `morphological-operations`                 | Allowe for erosion and dilation of a segmented dataset, but since ordering of processing may matter, there is no guarantee of consistency based on order of blocks processed|
-| **Skeletonize**           | `skeletonize`                 | Generate skeletons from segmented objects with optional pruning and simplification.|
+| **Mutex Watershed**      | `mws`                        | Mutex watershed agglomeration from affinities.              |
+| **Label With Mask**      | `label-with-mask`            | Label one dataset with IDs from another.                    |
+| **Morphological Operations** | `morphological-operations` | Erosion and dilation of segmented datasets. Processing order across blocks is not guaranteed. |
+| **Skeletonize**          | `skeletonize`                | Generate skeletons from segmented objects with optional pruning and simplification. Automatically resamples to isotropic resolution before skeletonization. |
 
 ### Analysis Tools
 
 | Tool                | CLI Command                  | Description                                                           |
 | ------------------- | ---------------------------- | --------------------------------------------------------------------- |
-| **Measurement**     | `measure`                    | Compute metrics (volume, surface area) for objects and contact sites. |
+| **Measurement**     | `measure`                    | Compute metrics (volume, surface area, radius of gyration, bounding box) for objects and contact sites. Supports raw intensity statistics when a raw dataset is provided. |
 | **Fit Lines**       | `fit_lines_to_segmentations` | Fit geometric lines to elongated/cylindrical structures.              |
 | **Assign to Cells** | `assign_to_cells`            | Map segmented objects to cells based on centers of mass.              |
 
 ---
 
-## Installation
+## Anisotropic data
 
-Install via PyPI:
+All operations handle anisotropic voxel sizes (e.g. `(8, 8, 32)` nm in ZYX). Physical-unit parameters like `minimum_volume_nm_3`, `contact_distance_nm`, and `gaussian_smoothing_sigma_nm` are automatically converted to the appropriate per-axis voxel units. When two datasets have different voxel sizes, they are resampled to a common resolution using nearest-neighbor interpolation.
+
+---
+
+## Installation
 
 ```bash
 pip install cellmap-analyze
