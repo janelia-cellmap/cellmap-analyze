@@ -32,8 +32,13 @@ def test_connected_components(
     maximum_volume_voxels,
     voxel_size,
 ):
-    minimum_volume_nm_3 = minimum_volume_voxels * voxel_size**3
-    maximum_volume_nm_3 = maximum_volume_voxels * voxel_size**3
+    # Calculate volume correctly for both isotropic and anisotropic voxel sizes
+    if np.isscalar(voxel_size):
+        voxel_volume = voxel_size**3
+    else:
+        voxel_volume = float(np.prod(voxel_size))
+    minimum_volume_nm_3 = minimum_volume_voxels * voxel_volume
+    maximum_volume_nm_3 = maximum_volume_voxels * voxel_volume
     cc = ConnectedComponents(
         input_path=f"{tmp_zarr}/intensity_image/s0",
         output_path=f"{tmp_zarr}/test_connected_components_minimum_volume_nm_3_{minimum_volume_nm_3}_maximum_volume_nm_3_{maximum_volume_nm_3}",
@@ -224,7 +229,11 @@ def test_gaussian_smoothing(
     voxel_size,
     gaussian_smoothing_sigma_voxels,
 ):
-    gaussian_smoothing_sigma_nm = gaussian_smoothing_sigma_voxels * voxel_size
+    # For anisotropic data, use minimum voxel size to convert sigma to nm
+    if np.isscalar(voxel_size):
+        gaussian_smoothing_sigma_nm = gaussian_smoothing_sigma_voxels * voxel_size
+    else:
+        gaussian_smoothing_sigma_nm = gaussian_smoothing_sigma_voxels * min(voxel_size)
     cc = ConnectedComponents(
         input_path=f"{tmp_zarr}/intensity_image/s0",
         output_path=f"{tmp_zarr}/test_connected_components_gaussian_smoothing_sigma_nm_{gaussian_smoothing_sigma_nm}",
@@ -235,10 +244,19 @@ def test_gaussian_smoothing(
     )
     cc.get_connected_components()
 
+    # For anisotropic data, calculate per-axis sigma values
+    if np.isscalar(voxel_size):
+        sigma_for_filter = gaussian_smoothing_sigma_voxels
+    else:
+        # Calculate per-axis sigma in voxels from the sigma in nm
+        sigma_for_filter = tuple(
+            gaussian_smoothing_sigma_nm / vs for vs in voxel_size
+        )
+
     smoothed_image = (
         gaussian_filter(
             intensity_image.astype(np.float32),
-            sigma=gaussian_smoothing_sigma_voxels,
+            sigma=sigma_for_filter,
             mode="constant",
             cval=0,
         )

@@ -10,11 +10,12 @@ from cellmap_analyze.cythonizing.bresenham3D import bresenham_3D_lines
 import logging
 from cellmap_analyze.process.connected_components import ConnectedComponents
 from scipy.spatial import KDTree
-from cellmap_analyze.util.measure_util import trim_array
+from cellmap_analyze.util.measure_util import trim_array, trim_array_anisotropic
 from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.util.zarr_util import (
     create_multiscale_dataset_idi,
 )
+from funlib.geometry import Coordinate
 import cc3d
 
 logging.basicConfig(
@@ -44,14 +45,20 @@ class ContactSites(ComputeConfigMixin):
         self.organelle_2_idi = ImageDataInterface(
             organelle_2_path, chunk_shape=chunk_shape
         )
-        output_voxel_size = min(
-            self.organelle_1_idi.voxel_size, self.organelle_2_idi.voxel_size
+        # Get element-wise minimum voxel size and ensure it's a Coordinate
+        output_voxel_size = Coordinate(
+            min(v1, v2) for v1, v2 in zip(self.organelle_1_idi.voxel_size, self.organelle_2_idi.voxel_size)
         )
         self.organelle_2_idi.output_voxel_size = output_voxel_size
         self.organelle_1_idi.output_voxel_size = output_voxel_size
         self.voxel_size = output_voxel_size
 
-        self.contact_distance_voxels = contact_distance_nm / output_voxel_size[0]
+        # Store contact distance in nm for physical distance calculations
+        self.contact_distance_nm = contact_distance_nm
+
+        # Use minimum voxel size across all dimensions to ensure we don't miss contacts
+        min_voxel_size = float(min(output_voxel_size))
+        self.contact_distance_voxels = float(contact_distance_nm / min_voxel_size)
 
         self.padding_voxels = int(np.ceil(self.contact_distance_voxels) + 1)
         # add one to ensure accuracy during surface area calculation since we need to make sure that neighboring ones are calculated
@@ -75,8 +82,9 @@ class ContactSites(ComputeConfigMixin):
 
         self.minimum_volume_nm_3 = minimum_volume_nm_3
         self.num_workers = num_workers
-        self.voxel_volume = np.prod(self.voxel_size)
-        self.voxel_face_area = self.voxel_size[1] * self.voxel_size[2]
+        self.voxel_volume = float(np.prod(self.voxel_size))
+        # For anisotropic data, use the minimum cross-sectional area
+        self.voxel_face_area = float(self.voxel_size[1] * self.voxel_size[2])
 
         # Use helper function to generate blockwise path (handles root datasets correctly)
         blockwise_path = get_output_path_from_input_path(output_path, "_blockwise")
@@ -96,6 +104,8 @@ class ContactSites(ComputeConfigMixin):
         contact_distance_voxels,
         mask_out_surface_voxels=False,
         zero_pad=False,
+        voxel_size=None,
+        contact_distance_nm=None,
     ):
         if zero_pad:
             organelle_1 = np.pad(organelle_1, 1)
@@ -121,14 +131,26 @@ class ContactSites(ComputeConfigMixin):
         object_2_surface_voxel_coordinates = np.argwhere(surface_voxels_2)
         del surface_voxels_1, surface_voxels_2
 
-        # Create KD-trees for efficient distance computation
-        tree1 = KDTree(object_1_surface_voxel_coordinates)
-        tree2 = KDTree(object_2_surface_voxel_coordinates)
-
-        # Find all pairs of points from both organelles within the threshold distance
-        contact_voxels_list_of_lists = tree1.query_ball_tree(
-            tree2, contact_distance_voxels
-        )
+        # For anisotropic data, scale coordinates to physical space
+        if voxel_size is not None and contact_distance_nm is not None:
+            # Scale voxel coordinates by voxel size to get physical coordinates
+            object_1_physical = object_1_surface_voxel_coordinates * voxel_size
+            object_2_physical = object_2_surface_voxel_coordinates * voxel_size
+            # Create KD-trees in physical space
+            tree1 = KDTree(object_1_physical)
+            tree2 = KDTree(object_2_physical)
+            # Find pairs within physical distance threshold
+            contact_voxels_list_of_lists = tree1.query_ball_tree(
+                tree2, contact_distance_nm
+            )
+        else:
+            # Legacy behavior for isotropic data or when voxel_size not provided
+            tree1 = KDTree(object_1_surface_voxel_coordinates)
+            tree2 = KDTree(object_2_surface_voxel_coordinates)
+            # Find all pairs of points from both organelles within the threshold distance
+            contact_voxels_list_of_lists = tree1.query_ball_tree(
+                tree2, contact_distance_voxels
+            )
 
         found_contact_voxels = bresenham_3D_lines(
             contact_voxels_list_of_lists,
@@ -159,37 +181,89 @@ class ContactSites(ComputeConfigMixin):
         contact_sites_blockwise_idi: ImageDataInterface,
         contact_distance_voxels,
         padding_voxels,
+        voxel_size,
+        contact_distance_nm,
     ):
+        # Per-axis padding in nm (integer multiples of voxel size per axis)
+        padding_nm = Coordinate(
+            padding_voxels * int(vs)
+            for vs in contact_sites_blockwise_idi.voxel_size
+        )
         block = create_block_from_index(
             contact_sites_blockwise_idi,
             block_index,
-            padding=padding_voxels * contact_sites_blockwise_idi.voxel_size[0],
+            padding=padding_nm,
         )
         organelle_1 = organelle_1_idi.to_ndarray_ts(block.read_roi)
+
+        # Calculate actual padding from array shape vs write ROI shape
+        # The write ROI is in physical coordinates, convert to voxels at output_voxel_size
+        write_roi_shape_voxels = tuple(
+            int(np.round(s / vs)) for s, vs in zip(block.write_roi.shape, voxel_size)
+        )
+
+        # Due to snap_to_grid and upsampling, the actual array size might differ slightly
+        # from what we expect. Calculate the padding based on the difference.
+        # The padding should be approximately symmetric, but might be off by 1 due to rounding
+        total_padding_voxels = tuple(
+            organelle_1.shape[i] - write_roi_shape_voxels[i]
+            for i in range(3)
+        )
+
+        # Helper function to trim with padding (approximately centered)
+        def trim_with_padding(arr):
+            slices = []
+            for i in range(3):
+                # Split padding approximately equally, but adjust if needed
+                pad_total = total_padding_voxels[i]
+                if pad_total <= 0:
+                    # No padding or array is smaller than expected
+                    slices.append(slice(None))
+                else:
+                    # Try to center the crop
+                    pad_before = pad_total // 2
+                    pad_after = pad_total - pad_before
+                    start = pad_before
+                    end = arr.shape[i] - pad_after
+                    slices.append(slice(start, end))
+            result = arr[tuple(slices)]
+            # Verify the result has the expected shape, otherwise adjust
+            if result.shape != tuple(write_roi_shape_voxels):
+                # Fallback: crop/pad to exact size
+                final_slices = []
+                for i in range(3):
+                    end = min(write_roi_shape_voxels[i], result.shape[i])
+                    final_slices.append(slice(0, end))
+                result = result[tuple(final_slices)]
+            return result
+
         if not np.any(organelle_1):
             # if organelle_1 is empty, we can skip this block
-            contact_sites_blockwise_idi.ds[block.write_roi] = trim_array(
-                np.zeros(organelle_1.shape, dtype=np.uint64), padding_voxels
+            contact_sites_blockwise_idi.ds[block.write_roi] = trim_with_padding(
+                np.zeros(organelle_1.shape, dtype=np.uint64)
             )
             return
         organelle_2 = organelle_2_idi.to_ndarray_ts(block.read_roi)
         if not np.any(organelle_2):
             # if organelle_2 is empty, we can skip this block
-            contact_sites_blockwise_idi.ds[block.write_roi] = trim_array(
-                np.zeros(organelle_1.shape, dtype=np.uint64), padding_voxels
+            contact_sites_blockwise_idi.ds[block.write_roi] = trim_with_padding(
+                np.zeros(organelle_1.shape, dtype=np.uint64)
             )
             return
+        # Calculate offset with per-axis division for anisotropic data
         global_id_offset = block_index * np.prod(
-            block.full_block_size / contact_sites_blockwise_idi.voxel_size[0],
+            block.full_block_size / contact_sites_blockwise_idi.voxel_size,
             dtype=np.uint64,
         )  # have to use full_block_size since before if we use write_roi, blocks on the end will be smaller and will have incorrect offsets
         contact_sites = ContactSites.get_ndarray_contact_sites(
-            organelle_1, organelle_2, contact_distance_voxels
+            organelle_1,
+            organelle_2,
+            contact_distance_voxels,
+            voxel_size=voxel_size,
+            contact_distance_nm=contact_distance_nm,
         )
         contact_sites[contact_sites > 0] += global_id_offset
-        contact_sites_blockwise_idi.ds[block.write_roi] = trim_array(
-            contact_sites, padding_voxels
-        )
+        contact_sites_blockwise_idi.ds[block.write_roi] = trim_with_padding(contact_sites)
 
     def calculate_contact_sites_blockwise(self):
         num_blocks = dask_util.get_num_blocks(
@@ -207,6 +281,8 @@ class ContactSites(ComputeConfigMixin):
             self.contact_sites_blockwise_idi,
             self.contact_distance_voxels,
             self.padding_voxels,
+            self.voxel_size,
+            self.contact_distance_nm,
         )
 
     def get_contact_sites(self):

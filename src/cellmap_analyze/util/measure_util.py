@@ -19,9 +19,43 @@ def trim_array(array, trim=1):
     return array
 
 
+def trim_array_anisotropic(array, padding_nm, voxel_size):
+    """Trim array with per-axis padding calculated from physical padding.
+
+    Args:
+        array: The array to trim
+        padding_nm: Physical padding in nanometers. Can be a scalar (uniform)
+            or a per-axis iterable (e.g. Coordinate or tuple).
+        voxel_size: Tuple of voxel sizes per axis (z, y, x)
+
+    Returns:
+        Trimmed array
+    """
+    # Calculate padding in voxels for each axis
+    if np.isscalar(padding_nm):
+        padding_voxels = tuple(int(np.round(padding_nm / vs)) for vs in voxel_size)
+    else:
+        padding_voxels = tuple(
+            int(np.round(pnm / vs)) for pnm, vs in zip(padding_nm, voxel_size)
+        )
+
+    # Handle case where padding might be 0 or array is too small
+    if all(p == 0 for p in padding_voxels):
+        return array
+
+    slices = []
+    for i, (p, dim_size) in enumerate(zip(padding_voxels, array.shape)):
+        if 2 * p >= dim_size:
+            # Padding is larger than array dimension - return empty array
+            return array[0:0]
+        slices.append(slice(p, dim_size - p) if p > 0 else slice(None))
+
+    return array[tuple(slices)]
+
+
 # chatgpt
 def calculate_surface_areas_voxelwise(
-    data: np.ndarray, voxel_face_area: float = 1, do_zero_padding: bool = True
+    data: np.ndarray, voxel_face_areas: tuple = (1, 1, 1), do_zero_padding: bool = True
 ) -> np.ndarray:
     # 1) Optionally pad with zeros (so we never have wrap or missing‐neighbor)
     if do_zero_padding:
@@ -33,7 +67,13 @@ def calculate_surface_areas_voxelwise(
     ndim = data.ndim
 
     # 3) For each axis, compare forward + backward with distinct slices
+    # Initialize surface_areas as float array (since face areas can differ per axis)
+    surface_areas = np.zeros_like(data, dtype=float)
+
     for axis in range(ndim):
+        # Get the face area for faces perpendicular to this axis
+        face_area = voxel_face_areas[axis]
+
         # forward neighbor: orig [:-1], neigh [1:]
         orig_fwd = [slice(None)] * ndim
         neigh_fwd = [slice(None)] * ndim
@@ -42,7 +82,7 @@ def calculate_surface_areas_voxelwise(
         of, nf = tuple(orig_fwd), tuple(neigh_fwd)
 
         mask_fwd = (data[of] > 0) & (data[of] != data[nf])
-        face_counts[of] += mask_fwd
+        surface_areas[of] += mask_fwd * face_area
 
         # backward neighbor: orig [1:], neigh [:-1]
         orig_bwd = [slice(None)] * ndim
@@ -52,12 +92,9 @@ def calculate_surface_areas_voxelwise(
         ob, nb = tuple(orig_bwd), tuple(neigh_bwd)
 
         mask_bwd = (data[ob] > 0) & (data[ob] != data[nb])
-        face_counts[ob] += mask_bwd
+        surface_areas[ob] += mask_bwd * face_area
 
-    # 4) Multiply by face area
-    surface_areas = face_counts * voxel_face_area
-
-    # 5) If we padded, trim off the 1-voxel border
+    # 4) If we padded, trim off the 1-voxel border
     if do_zero_padding:
         trim_slices = tuple(slice(1, -1) for _ in range(ndim))
         surface_areas = surface_areas[trim_slices]
@@ -67,11 +104,11 @@ def calculate_surface_areas_voxelwise(
 
 # chatgpt
 def get_surface_areas(
-    data: np.ndarray, voxel_face_area: float = 1, mask: np.ndarray = None, trim: int = 1
+    data: np.ndarray, voxel_face_areas: tuple = (1, 1, 1), mask: np.ndarray = None, trim: int = 1
 ):
     # 1) per‐voxel SAs
     surface_areas = calculate_surface_areas_voxelwise(
-        data, voxel_face_area, do_zero_padding=(trim == 0)
+        data, voxel_face_areas, do_zero_padding=(trim == 0)
     )
 
     # 2) optional trim
@@ -112,10 +149,21 @@ def get_volumes(data, voxel_volume=1, trim=1):
     return dict(zip(labels, counts * voxel_volume))
 
 
-def get_region_properties(data, voxel_edge_length=1, trim=1, offset=np.zeros((3,))):
-    voxel_face_area = voxel_edge_length**2
-    voxel_volume = voxel_edge_length**3
-    surface_areas = get_surface_areas(data, voxel_face_area=voxel_face_area, trim=trim)
+def get_region_properties(data, voxel_size=(1, 1, 1), trim=1, offset=np.zeros((3,))):
+    # Convert to tuple if needed
+    voxel_size = tuple(voxel_size) if hasattr(voxel_size, '__iter__') else (voxel_size, voxel_size, voxel_size)
+
+    # Calculate per-axis face areas (perpendicular to each axis)
+    # Face perpendicular to Z-axis has area Y × X
+    # Face perpendicular to Y-axis has area Z × X
+    # Face perpendicular to X-axis has area Z × Y
+    voxel_face_areas = (
+        voxel_size[1] * voxel_size[2],  # Z-axis faces: Y × X
+        voxel_size[0] * voxel_size[2],  # Y-axis faces: Z × X
+        voxel_size[0] * voxel_size[1],  # X-axis faces: Z × Y
+    )
+    voxel_volume = voxel_size[0] * voxel_size[1] * voxel_size[2]
+    surface_areas = get_surface_areas(data, voxel_face_areas=voxel_face_areas, trim=trim)
     data = trim_array(data, trim)
     ids, counts = fastremap.unique(data[data > 0], return_counts=True)
     # need this to get in correct order due to "bug" in fastremap: https://github.com/seung-lab/fastremap/issues/42
@@ -131,7 +179,7 @@ def get_region_properties(data, voxel_edge_length=1, trim=1, offset=np.zeros((3,
         ids,
         compute_sum_r2=True,
         center_on_voxels=center_on_voxels,
-        voxel_edge_length=voxel_edge_length,
+        voxel_size=voxel_size,
         offset=offset,
     )
 
@@ -164,23 +212,31 @@ def get_region_properties(data, voxel_edge_length=1, trim=1, offset=np.zeros((3,
             "COM Y (nm)": coms[:, 1],
             "COM Z (nm)": coms[:, 0],
             "sum_r2 (nm^2)": sum_r2,
-            "MIN X (nm)": bounding_boxes_coords[:, 2] * voxel_edge_length,
-            "MIN Y (nm)": bounding_boxes_coords[:, 1] * voxel_edge_length,
-            "MIN Z (nm)": bounding_boxes_coords[:, 0] * voxel_edge_length,
-            "MAX X (nm)": bounding_boxes_coords[:, 5] * voxel_edge_length,
-            "MAX Y (nm)": bounding_boxes_coords[:, 4] * voxel_edge_length,
-            "MAX Z (nm)": bounding_boxes_coords[:, 3] * voxel_edge_length,
+            "MIN X (nm)": bounding_boxes_coords[:, 2] * voxel_size[2],
+            "MIN Y (nm)": bounding_boxes_coords[:, 1] * voxel_size[1],
+            "MIN Z (nm)": bounding_boxes_coords[:, 0] * voxel_size[0],
+            "MAX X (nm)": bounding_boxes_coords[:, 5] * voxel_size[2],
+            "MAX Y (nm)": bounding_boxes_coords[:, 4] * voxel_size[1],
+            "MAX Z (nm)": bounding_boxes_coords[:, 3] * voxel_size[0],
         },
     )
     return df
 
 
 def get_contacting_organelle_information(
-    contact_sites, contacting_organelle, voxel_edge_length=1, trim=1
+    contact_sites, contacting_organelle, voxel_size=(1, 1, 1), trim=1
 ):
-    voxel_face_area = voxel_edge_length**2
+    # Convert to tuple if needed
+    voxel_size = tuple(voxel_size) if hasattr(voxel_size, '__iter__') else (voxel_size, voxel_size, voxel_size)
+
+    # Calculate per-axis face areas
+    voxel_face_areas = (
+        voxel_size[1] * voxel_size[2],  # Z-axis faces: Y × X
+        voxel_size[0] * voxel_size[2],  # Y-axis faces: Z × X
+        voxel_size[0] * voxel_size[1],  # X-axis faces: Z × Y
+    )
     surface_areas = calculate_surface_areas_voxelwise(
-        contacting_organelle, voxel_face_area
+        contacting_organelle, voxel_face_areas
     )
 
     # trim so we are only considering current block
@@ -216,13 +272,13 @@ def get_contacting_organelle_information(
 
 
 def get_contacting_organelles_information(
-    contact_sites, organelle_1, organelle_2, voxel_edge_length=1, trim=1
+    contact_sites, organelle_1, organelle_2, voxel_size=(1, 1, 1), trim=1
 ):
     contacting_organelle_information_1 = get_contacting_organelle_information(
-        contact_sites, organelle_1, voxel_edge_length, trim=trim
+        contact_sites, organelle_1, voxel_size, trim=trim
     )
     contacting_organelle_information_2 = get_contacting_organelle_information(
-        contact_sites, organelle_2, voxel_edge_length, trim=trim
+        contact_sites, organelle_2, voxel_size, trim=trim
     )
     return contacting_organelle_information_1, contacting_organelle_information_2
 
@@ -245,7 +301,7 @@ def get_raw_intensity_stats(segmentation, raw_data, trim=1):
 
 
 def get_object_information(
-    object_data, voxel_edge_length, id_offset=0, trim=0, offset=np.zeros((3,)), **kwargs
+    object_data, voxel_size, id_offset=0, trim=0, offset=np.zeros((3,)), **kwargs
 ):
     is_contact_site = False
     if "organelle_1" in kwargs or "organelle_2" in kwargs:
@@ -263,7 +319,7 @@ def get_object_information(
     if np.any(trim_array(object_data, trim)):
         region_props = get_region_properties(
             object_data,
-            voxel_edge_length,
+            voxel_size,
             trim=trim,
             offset=offset,
         )
@@ -276,7 +332,7 @@ def get_object_information(
                 object_data,
                 organelle_1,
                 organelle_2,
-                voxel_edge_length=voxel_edge_length,
+                voxel_size=voxel_size,
                 trim=trim,
             )
 
@@ -311,7 +367,8 @@ def get_object_information(
                 extra_args["raw_count"] = stats[2]
 
             # need to add global_id_offset here rather than before because region_props find_objects creates an array that is the length of the max id in the array
-            id = region_prop["ID"] + id_offset
+            # Convert to int to avoid pandas iterrows type coercion (uint8 -> float64)
+            id = int(region_prop["ID"]) + id_offset
             ois[id] = ObjectInformation(
                 counts=region_prop["Counts"],
                 volume=region_prop["Volume (nm^3)"],

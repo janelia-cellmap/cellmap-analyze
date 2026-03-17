@@ -1,4 +1,5 @@
 # %%
+import numpy as np
 from scipy import ndimage
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.block_util import erosion, dilation
@@ -67,13 +68,19 @@ class Mask:
                 block = block == mask_value
         else:
             total_iterations = sum(iterations)
-            padding = total_iterations * self.output_voxel_size[0]
-            block = self.idi.to_ndarray_ts(
-                roi.grow(
-                    padding,
-                    padding,
-                )
+            # Use minimum voxel size for uniform padding in physical units
+            min_voxel_size = min(self.output_voxel_size)
+            padding = total_iterations * min_voxel_size
+            grown_roi = roi.grow(padding, padding)
+            block = self.idi.to_ndarray_ts(grown_roi)
+
+            # Calculate actual padding from array shape vs original ROI shape
+            roi_shape_voxels = tuple(int(s / vs) for s, vs in zip(roi.shape, self.output_voxel_size))
+            actual_padding_voxels = tuple(
+                (block.shape[i] - roi_shape_voxels[i]) // 2
+                for i in range(3)
             )
+
             if mask_value is not None:
                 block = block == mask_value
             for operation, iterations in zip(operation, iterations):
@@ -82,11 +89,14 @@ class Mask:
                 else:
                     block = dilation(block, iterations, structuring_element)
 
-            block = block[
-                total_iterations:-total_iterations,
-                total_iterations:-total_iterations,
-                total_iterations:-total_iterations,
-            ]
+            # Trim using actual padding calculated from array shapes
+            slices = []
+            for p in actual_padding_voxels:
+                if p > 0:
+                    slices.append(slice(p, -p))
+                else:
+                    slices.append(slice(None))
+            block = block[tuple(slices)]
 
         if mask_type == "exclusive":
             block = block == 0

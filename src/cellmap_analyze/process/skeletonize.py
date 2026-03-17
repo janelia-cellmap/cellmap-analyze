@@ -9,6 +9,7 @@ from cellmap_analyze.util.skeleton_util import (
     CustomSkeleton,
     skimage_to_custom_skeleton_fast,
 )
+from scipy.ndimage import zoom
 from skimage.morphology import skeletonize, binary_erosion
 import logging
 import os
@@ -133,8 +134,18 @@ class Skeletonize(ComputeConfigMixin):
                 logger.warning(f"No voxels found for ID {id_value}, skipping")
                 return Skeletonize._empty_metrics()
 
+            # Resample to isotropic if needed so skeletonize thins uniformly
+            min_voxel = min(voxel_size)
+            is_anisotropic = not all(v == min_voxel for v in voxel_size)
+            if is_anisotropic:
+                zoom_factors = tuple(v / min_voxel for v in voxel_size)
+                data = zoom(data, zoom_factors, order=0)
+                isotropic_voxel_size = np.array([min_voxel] * 3)
+            else:
+                isotropic_voxel_size = voxel_size
+
             # Compute EDT on pre-erosion mask for approximate radii
-            distance_transform = edt_module.edt(data, anisotropy=tuple(voxel_size))
+            distance_transform = edt_module.edt(data, anisotropy=tuple(isotropic_voxel_size))
 
             # Apply erosion if requested
             if erosion:
@@ -191,7 +202,7 @@ class Skeletonize(ComputeConfigMixin):
             # Convert to custom skeleton format
             # spacing parameter scales the vertices by voxel_size
             skeleton = skimage_to_custom_skeleton_fast(
-                skel, spacing=segmentation_idi.voxel_size
+                skel, spacing=isotropic_voxel_size
             )
 
             # Transform vertices: add ROI offset and swap Z/X for neuroglancer (ZYX -> XYZ)

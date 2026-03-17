@@ -102,7 +102,7 @@ def create_block(
     write_roi = Roi(block_begin, block_size).intersect(roi)
     block_id = get_global_block_id(roi_shape_voxels, write_roi, voxel_size)
     read_roi = write_roi
-    if padding:
+    if np.any(padding):
         amount_neg = 0
         amount_pos = 0
         if padding_direction in ["both", "neg", "pos"]:

@@ -70,10 +70,12 @@ class LabelWithMask(ComputeConfigMixin):
         surface_voxels_only=False,
     ):
         padding_voxels = int(surface_voxels_only)
+        # Use minimum voxel size for uniform padding in physical units
+        padding_nm = padding_voxels * min(input_idi.voxel_size)
         block = create_block_from_index(
             input_idi,
             block_index,
-            padding=padding_voxels * input_idi.voxel_size,
+            padding=padding_nm,
         )
         input = input_idi.to_ndarray_ts(block.read_roi)
         mask = mask_idi.to_ndarray_ts(block.read_roi)
@@ -84,6 +86,7 @@ class LabelWithMask(ComputeConfigMixin):
             (input >= intensity_threshold_minimum)
             & (input < intensity_threshold_maximum)
         ) * mask
+        # Erosion operates uniformly in voxel space, so use uniform trimming
         output_idi.ds[block.write_roi] = trim_array(output, padding_voxels)
 
     def get_label_with_mask(self):

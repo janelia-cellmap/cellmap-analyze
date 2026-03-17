@@ -68,8 +68,10 @@ class CleanConnectedComponents(ComputeConfigMixin):
         if type(maximum_volume_nm_3) == str:
             maximum_volume_nm_3 = float(maximum_volume_nm_3)
 
-        self.minimum_volume_voxels = minimum_volume_nm_3 / np.prod(self.voxel_size)
-        self.maximum_volume_voxels = maximum_volume_nm_3 / np.prod(self.voxel_size)
+        # Ensure voxel volume is a scalar for consistent volume calculations
+        voxel_volume = float(np.prod(self.voxel_size))
+        self.minimum_volume_voxels = float(minimum_volume_nm_3 / voxel_volume)
+        self.maximum_volume_voxels = float(maximum_volume_nm_3 / voxel_volume)
 
         self.mask = None
         if mask_config:

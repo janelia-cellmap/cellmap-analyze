@@ -72,13 +72,16 @@ class FitLinesToSegmentations(ComputeConfigMixin):
 
     @staticmethod
     def fit_line_to_points(points, voxel_size, offset, line_origin):
-        # fit line to object voxels
-        _, _, vv = np.linalg.svd(points - np.mean(points, axis=0), full_matrices=False)
+        # fit line to object voxels in physical space
+        physical_points = points * voxel_size
+        _, _, vv = np.linalg.svd(
+            physical_points - np.mean(physical_points, axis=0), full_matrices=False
+        )
         line_direction = vv[0]
 
         # find endpoints of line segment so that we can write it as neuroglancer annotations
         start_point, end_point = FitLinesToSegmentations.find_min_max_projected_points(
-            points * voxel_size + offset,
+            physical_points + offset,
             line_origin,
             line_direction,
         )

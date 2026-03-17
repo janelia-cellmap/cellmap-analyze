@@ -113,12 +113,13 @@ class Measure(ComputeConfigMixin):
 
         for d in range(3):
             roi_shape = np.array(block.read_roi.shape)
-            roi_shape[d] = voxel_size
+            # Use per-axis voxel_size
+            roi_shape[d] = voxel_size[d]
 
             neg_off = roi_starts.copy()
             pos_off = roi_starts.copy()
 
-            neg_off[d] -= voxel_size
+            neg_off[d] -= voxel_size[d]
             pos_off[d] = roi_ends[d]
 
             negative_roi = Roi(neg_off, roi_shape)
@@ -159,7 +160,7 @@ class Measure(ComputeConfigMixin):
         data = Measure.pad_with_face_neighbor_blocks(
             input_idi,
             block,
-            voxel_size=input_idi.voxel_size[0],
+            voxel_size=input_idi.voxel_size,
             return_none_if_main_block_empty=True,
         )
         if data is None:
@@ -170,10 +171,10 @@ class Measure(ComputeConfigMixin):
             organelle_1_idi = kwargs.get("organelle_1_idi")
             organelle_2_idi = kwargs.get("organelle_2_idi")
             extra_kwargs["organelle_1"] = Measure.pad_with_face_neighbor_blocks(
-                organelle_1_idi, block, voxel_size=input_idi.voxel_size[0]
+                organelle_1_idi, block, voxel_size=input_idi.voxel_size
             )
             extra_kwargs["organelle_2"] = Measure.pad_with_face_neighbor_blocks(
-                organelle_2_idi, block, voxel_size=input_idi.voxel_size[0]
+                organelle_2_idi, block, voxel_size=input_idi.voxel_size
             )
 
         raw_idi = kwargs.get("raw_idi")
@@ -185,7 +186,7 @@ class Measure(ComputeConfigMixin):
         block_offset = np.array(block.write_roi.begin) + global_offset
         object_informations = get_object_information(
             data,
-            input_idi.voxel_size[0],
+            input_idi.voxel_size,
             trim=1,
             offset=block_offset,
             **extra_kwargs,

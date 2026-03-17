@@ -24,7 +24,8 @@ from scipy.ndimage import gaussian_filter
 import cc3d
 from collections import Counter
 import shutil
-from cellmap_analyze.util.measure_util import trim_array
+from cellmap_analyze.util.measure_util import trim_array_anisotropic
+from funlib.geometry import Coordinate
 from cellmap_analyze.cythonizing.touching import get_touching_ids
 
 logging.basicConfig(
@@ -146,8 +147,10 @@ class ConnectedComponents(ComputeConfigMixin):
         if type(maximum_volume_nm_3) == str:
             maximum_volume_nm_3 = float(maximum_volume_nm_3)
 
-        self.minimum_volume_voxels = minimum_volume_nm_3 / np.prod(self.voxel_size)
-        self.maximum_volume_voxels = maximum_volume_nm_3 / np.prod(self.voxel_size)
+        # Ensure voxel volume is a scalar for consistent volume calculations
+        voxel_volume = float(np.prod(self.voxel_size))
+        self.minimum_volume_voxels = float(minimum_volume_nm_3 / voxel_volume)
+        self.maximum_volume_voxels = float(maximum_volume_nm_3 / voxel_volume)
 
         self.mask = None
         if mask_config:
@@ -181,13 +184,30 @@ class ConnectedComponents(ComputeConfigMixin):
             invert = True
 
         padding_nm = 0
-        if gaussian_smoothing_sigma_nm:
-            gaussian_smoothing_sigma_voxels = (
-                gaussian_smoothing_sigma_nm / input_idi.voxel_size[0]
+        # Check if gaussian_smoothing_sigma_nm is set (handle both scalar and array)
+        has_gaussian_smoothing = (
+            gaussian_smoothing_sigma_nm is not None
+            and (
+                np.isscalar(gaussian_smoothing_sigma_nm) and gaussian_smoothing_sigma_nm > 0
+                or hasattr(gaussian_smoothing_sigma_nm, '__iter__') and np.any(np.array(gaussian_smoothing_sigma_nm) > 0)
+            )
+        )
+        if has_gaussian_smoothing:
+            # Calculate per-axis sigma for anisotropic Gaussian smoothing
+            gaussian_smoothing_sigma_voxels = tuple(
+                gaussian_smoothing_sigma_nm / vs for vs in input_idi.voxel_size
             )
             truncate = 4.0  # default
-            padding_voxels = int(truncate * gaussian_smoothing_sigma_voxels + 0.5)
-            padding_nm = padding_voxels * input_idi.voxel_size[0]
+            # Calculate per-axis padding in voxels to ensure exact voxel alignment
+            padding_voxels_per_axis = tuple(
+                int(truncate * sigma + 0.5)
+                for sigma in gaussian_smoothing_sigma_voxels
+            )
+            # Convert to per-axis physical padding (exact multiples of voxel size)
+            padding_nm = Coordinate(
+                p * int(vs)
+                for p, vs in zip(padding_voxels_per_axis, input_idi.voxel_size)
+            )
 
         block = create_block_from_index(
             connected_components_blockwise_idi, block_index, padding=padding_nm
@@ -205,16 +225,14 @@ class ConnectedComponents(ComputeConfigMixin):
 
         input = input_idi.to_ndarray_ts(block.read_roi)
 
-        if gaussian_smoothing_sigma_nm:
-            gaussian_smoothing_sigma_voxels = (
-                gaussian_smoothing_sigma_nm / input_idi.voxel_size[0]
-            )
+        if has_gaussian_smoothing:
+            # Apply anisotropic Gaussian filter with per-axis sigma
             input = gaussian_filter(
                 input.astype(np.float32),
-                sigma=gaussian_smoothing_sigma_voxels,
+                sigma=gaussian_smoothing_sigma_voxels,  # tuple for anisotropic
                 mode="nearest",
             )
-            input = trim_array(input, padding_voxels)
+            input = trim_array_anisotropic(input, padding_nm, input_idi.voxel_size)
 
         cc3d_connectivity = 6 + 12 * (connectivity >= 2) + 8 * (connectivity >= 3)
 
@@ -245,8 +263,9 @@ class ConnectedComponents(ComputeConfigMixin):
                 out_dtype=np.uint64,
             )
 
+        # Calculate offset with per-axis division for anisotropic data
         global_id_offset = block_index * np.prod(
-            block.full_block_size / connected_components_blockwise_idi.voxel_size[0],
+            block.full_block_size / connected_components_blockwise_idi.voxel_size,
             dtype=np.uint64,
         )
 

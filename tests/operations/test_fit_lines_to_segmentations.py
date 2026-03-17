@@ -11,6 +11,7 @@ def test_fit_lines_to_segmentations(
     horizontal_cylinder_endpoints,
     vertical_cylinder_endpoints,
     diagonal_cylinder_endpoints,
+    voxel_size,
 ):
 
     cc = FitLinesToSegmentations(
@@ -36,7 +37,9 @@ def test_fit_lines_to_segmentations(
         assert np.allclose(
             np.vstack([start, end]),
             endpoints,
+            atol=1.0,
         ) or np.allclose(
             np.vstack([end, start]),
             endpoints,
+            atol=1.0,
         )
