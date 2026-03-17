@@ -1,4 +1,5 @@
 ignore/
+scripts/
 .vscode/
 .claude/
 src/cellmap_analyze/cythonizing/*.c*
