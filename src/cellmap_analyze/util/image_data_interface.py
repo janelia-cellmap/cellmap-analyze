@@ -250,6 +250,9 @@ def to_ndarray_tensorstore(
         )
     )
 
+    # Check if the ROI has no overlap with the dataset
+    no_overlap = any(vs.start > vs.stop for vs in valid_slices)
+
     pad_width = [
         [valid_slice.start - s.start, s.stop - valid_slice.stop]
         for s, valid_slice in zip(roi_slices, valid_slices)
@@ -266,6 +269,21 @@ def to_ndarray_tensorstore(
         fill_value = 0
     if custom_fill_value:
         fill_value = custom_fill_value
+
+    if no_overlap:
+        if needs_rescaling:
+            # Use output voxel space for the shape
+            output_shape = (
+                ([dataset.shape[0]] if channel_offset > 0 else [])
+                + [int(round(original_roi.shape[i] / output_voxel_size[i])) for i in range(3)]
+            )
+        else:
+            output_shape = (
+                ([dataset.shape[0]] if channel_offset > 0 else [])
+                + [s.stop - s.start for s in roi_slices]
+            )
+        fv = 0 if fill_value == "edge" else fill_value
+        return np.full(output_shape, fv, dtype=dataset.dtype.numpy_dtype)
 
     # with ts.Transaction() as txn:
     try:

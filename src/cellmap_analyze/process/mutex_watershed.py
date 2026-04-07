@@ -153,13 +153,13 @@ class MutexWatershed(ComputeConfigMixin):
 
     @staticmethod
     def filter_fragments(
-        affs_data: np.ndarray, fragments_data: np.ndarray, filter_val: float
+        average_affs: np.ndarray, fragments_data: np.ndarray, filter_val: float
     ) -> None:
-        """Allows filtering of MWS fragments based on mean value of affinities & fragments. Will filter and update the fragment array in-place.
+        """Filter MWS fragments based on mean affinity value. Updates fragments in-place.
 
         Args:
-            aff_data (``np.ndarray``):
-                An array containing affinity data.
+            average_affs (``np.ndarray``):
+                Mean affinities across channels, shape matching spatial dims of fragments.
 
             fragments_data (``np.ndarray``):
                 An array containing fragment data.
@@ -167,9 +167,6 @@ class MutexWatershed(ComputeConfigMixin):
             filter_val (``float``):
                 Threshold to filter if the average value falls below.
         """
-
-        average_affs: float = np.mean(affs_data.data, axis=0)
-
         filtered_fragments: list = []
 
         fragment_ids: np.ndarray = np.unique(fragments_data)
@@ -183,7 +180,6 @@ class MutexWatershed(ComputeConfigMixin):
         filtered_fragments: np.ndarray = np.array(
             filtered_fragments, dtype=fragments_data.dtype
         )
-        # replace: np.ndarray = np.zeros_like(filtered_fragments)
         fastremap.mask(fragments_data, filtered_fragments, in_place=True)
 
     @staticmethod
@@ -191,7 +187,6 @@ class MutexWatershed(ComputeConfigMixin):
         affinities, neighborhood, adjacent_edge_bias, lr_bias, filter_val
     ):
         if affinities.dtype == np.uint8:
-            # logger.info("Assuming affinities are in [0,255]")
             max_affinity_value: float = 255.0
             affinities = affinities.astype(np.float64)
         else:
@@ -201,16 +196,23 @@ class MutexWatershed(ComputeConfigMixin):
         affinities /= max_affinity_value
 
         if affinities.max() < 1e-4:
-            segmentation = np.zeros(affinities.shape[1:], dtype=np.uint64)
-            return segmentation
+            return np.zeros(affinities.shape[1:], dtype=np.uint64)
 
-        random_noise = np.random.randn(*affinities.shape) * 0.0001
-        smoothed_affs = (
-            ndimage.gaussian_filter(
-                affinities, sigma=(0, *(np.amax(neighborhood, axis=0) / 3))
-            )
-            - 0.5
-        ) * 0.001
+        # Pre-compute average for filter_fragments before modifying affinities
+        average_affs = np.mean(affinities, axis=0) if filter_val > 0.0 else None
+
+        # Compute gaussian smoothing into a separate buffer, then accumulate
+        smoothed = np.empty_like(affinities)
+        ndimage.gaussian_filter(
+            affinities, sigma=(0, *(np.amax(neighborhood, axis=0) / 3)),
+            output=smoothed,
+        )
+        smoothed -= 0.5
+        smoothed *= 0.001
+        affinities += smoothed
+        del smoothed
+
+        # Add shift in-place
         shift = []
         bias_idx = -1
         previous_offset = np.linalg.norm(neighborhood[0])
@@ -227,15 +229,17 @@ class MutexWatershed(ComputeConfigMixin):
                     shift.append(current_offset * lr_bias)
             previous_offset = current_offset
         shift = np.array(shift).reshape((-1, *((1,) * (len(affinities.shape) - 1))))
+        affinities += shift
 
-        # filter fragments
-        segmentation = mws.agglom(
-            affinities + shift + random_noise + smoothed_affs,
-            offsets=neighborhood,
-        )
+        # Add noise per-channel to avoid allocating a full copy
+        for i in range(affinities.shape[0]):
+            affinities[i] += np.random.randn(*affinities.shape[1:]) * 0.0001
+
+        segmentation = mws.agglom(affinities, offsets=neighborhood)
+        del affinities
 
         if filter_val > 0.0:
-            MutexWatershed.filter_fragments(affinities, segmentation, filter_val)
+            MutexWatershed.filter_fragments(average_affs, segmentation, filter_val)
         # fragment_ids = fastremap.unique(segmentation[segmentation > 0])
         # fastremap.mask_except(segmentation, filtered_fragments, in_place=True)
         fastremap.renumber(segmentation, in_place=True)
@@ -277,17 +281,13 @@ class MutexWatershed(ComputeConfigMixin):
             block_index,
             padding=padding,
         )
-        logger.info(
-            f"Block {block_index}: read_roi={block.read_roi}, write_roi={block.write_roi}"
-        )
-
         if mask:
             mask_block = mask.process_block(roi=block.read_roi)
             if not mask_block.any():
                 connected_components_blockwise_idi.ds[block.write_roi] = 0
+                return
 
         # Support list of IDIs (one per affinity channel) or single 4D IDI
-        logger.info(f"Block {block_index}: reading affinities...")
         if isinstance(affinities_idi, list):
             affinities = np.stack(
                 [idi.to_ndarray_ts(block.read_roi) for idi in affinities_idi],
@@ -295,15 +295,15 @@ class MutexWatershed(ComputeConfigMixin):
             )
         else:
             affinities = affinities_idi.to_ndarray_ts(block.read_roi)
-        logger.info(
-            f"Block {block_index}: affinities loaded, shape={affinities.shape}, "
-            f"dtype={affinities.dtype}, mem={affinities.nbytes / 1e6:.1f} MB"
-        )
 
         if mask:
             affinities *= mask_block[None, :, :, :]
 
-        logger.info(f"Block {block_index}: running mutex watershed...")
+        # Skip blocks with no signal before expensive float64 conversion
+        if affinities.max() == 0:
+            connected_components_blockwise_idi.ds[block.write_roi] = 0
+            return
+
         segmentation = MutexWatershed.mutex_watershed(
             affinities=affinities,
             neighborhood=neighborhood,
@@ -311,11 +311,9 @@ class MutexWatershed(ComputeConfigMixin):
             lr_bias=lr_bias,
             filter_val=filter_val,
         )
-        logger.info(f"Block {block_index}: running connected components...")
         segmentation = MutexWatershed.instancewise_instance_segmentation(
             segmentation, connectivity=connectivity, do_opening=do_opening
         )
-        logger.info(f"Block {block_index}: done, writing output...")
 
         # Calculate offset with per-axis division for anisotropic data
         global_id_offset = np.uint64(
