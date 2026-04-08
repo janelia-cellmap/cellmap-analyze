@@ -197,7 +197,8 @@ class ConnectedComponents(ComputeConfigMixin):
         if has_gaussian_smoothing:
             # Calculate per-axis sigma for anisotropic Gaussian smoothing
             gaussian_smoothing_sigma_voxels = tuple(
-                gaussian_smoothing_sigma_nm / vs for vs in input_idi.voxel_size
+                gaussian_smoothing_sigma_nm / vs
+                for vs in input_idi.original_voxel_size
             )
             truncate = 4.0  # default
             # Calculate per-axis padding in voxels to ensure exact voxel alignment

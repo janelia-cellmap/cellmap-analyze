@@ -117,10 +117,12 @@ class Skeletonize(ComputeConfigMixin):
             max_z = row["MAX Z (nm)"]
 
             # Create ROI with 1-voxel padding
+            # Bounding box coords from CSV are in true nm; convert to scaled coordinates
             voxel_size = segmentation_idi.voxel_size
+            sf = segmentation_idi.voxel_size_scale_factor
             padding = voxel_size  # 1 voxel in each direction
-            start_point = np.array([min_z, min_y, min_x]) - padding
-            end_point = np.array([max_z, max_y, max_x]) + padding
+            start_point = np.array([min_z * sf, min_y * sf, min_x * sf]) - padding
+            end_point = np.array([max_z * sf, max_y * sf, max_x * sf]) + padding
             roi = Roi(start_point, end_point - start_point)
 
             logger.info(f"Processing ID {id_value}: ROI {roi}")
@@ -135,14 +137,16 @@ class Skeletonize(ComputeConfigMixin):
                 return Skeletonize._empty_metrics()
 
             # Resample to isotropic if needed so skeletonize thins uniformly
-            min_voxel = min(voxel_size)
-            is_anisotropic = not all(v == min_voxel for v in voxel_size)
+            # Use original (true nm) voxel_size for physical operations
+            original_vs = segmentation_idi.original_voxel_size
+            min_voxel = min(original_vs)
+            is_anisotropic = not all(v == min_voxel for v in original_vs)
             if is_anisotropic:
-                zoom_factors = tuple(v / min_voxel for v in voxel_size)
+                zoom_factors = tuple(v / min_voxel for v in original_vs)
                 data = zoom(data, zoom_factors, order=0)
                 isotropic_voxel_size = np.array([min_voxel] * 3)
             else:
-                isotropic_voxel_size = voxel_size
+                isotropic_voxel_size = np.array(original_vs)
 
             # Compute EDT on pre-erosion mask for approximate radii
             distance_transform = edt_module.edt(data, anisotropy=tuple(isotropic_voxel_size))
@@ -206,14 +210,15 @@ class Skeletonize(ComputeConfigMixin):
             )
 
             # Transform vertices: add ROI offset and swap Z/X for neuroglancer (ZYX -> XYZ)
-            # Vertices from skimage_to_custom_skeleton_fast are already in physical units
-            # but in local coordinates, so we need to add the ROI offset
+            # Vertices from skimage_to_custom_skeleton_fast are in true nm (local coords)
+            # start_point is in scaled coords, convert back to true nm
+            start_point_nm = np.array(start_point) / sf
             skeleton.vertices = [
                 tuple(
                     [
-                        v[2] + start_point[2],
-                        v[1] + start_point[1],
-                        v[0] + start_point[0],
+                        v[2] + start_point_nm[2],
+                        v[1] + start_point_nm[1],
+                        v[0] + start_point_nm[0],
                     ]
                 )
                 for v in skeleton.vertices
