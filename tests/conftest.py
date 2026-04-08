@@ -8,8 +8,9 @@ import numpy as np
     params=[
         (8, 8, 8),  # isotropic
         (3, 7, 5),  # anisotropic - all axes different, non-multiples
+        (3.54, 4, 4.5),  # non-integer voxel sizes
     ],
-    ids=["isotropic", "anisotropic"],
+    ids=["isotropic", "anisotropic", "non_integer"],
 )
 def voxel_size(request):
     """Voxel size in (Z, Y, X) order."""

@@ -156,8 +156,10 @@ class ObjectInformation:
 
     def __eq__(self, other: "ObjectInformation") -> bool:
         is_equal = (
-            self.volume == other.volume
-            and self.surface_area == other.surface_area
+            np.isclose(self.volume, other.volume, rtol=1e-13, atol=1e-13)
+            and np.isclose(
+                self.surface_area, other.surface_area, rtol=1e-13, atol=1e-13
+            )
             and np.allclose(self.com, other.com, rtol=1e-13, atol=1e-13)
             and np.allclose(self.sum_r2, other.sum_r2, rtol=1e-13, atol=1e-13)
             and np.allclose(
@@ -166,7 +168,9 @@ class ObjectInformation:
                 rtol=1e-13,
                 atol=1e-13,
             )
-            and self.bounding_box == other.bounding_box
+            and np.allclose(
+                self.bounding_box, other.bounding_box, rtol=1e-13, atol=1e-13
+            )
             and self.has_raw_intensity == other.has_raw_intensity
             and self.is_contact_site == other.is_contact_site
         )
