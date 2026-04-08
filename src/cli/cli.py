@@ -171,14 +171,14 @@ def fit_lines_to_segmentations():
             fit_lines.get_fit_lines_to_segmentations()
 
 
-def assign_to_cells():
-    from cellmap_analyze.analyze.assign_to_cells import AssignToCells
+def assign_to_organelles():
+    from cellmap_analyze.analyze.assign_to_organelles import AssignToOrganelles
 
     rp = RunProperties()
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
         with io_util.TimingMessager(
-            "AssignToCells", logger, final_message="Complete success"
+            "AssignToOrganelles", logger, final_message="Complete success"
         ):
-            atc = AssignToCells(**rp.run_config)
-            atc.get_cell_assignments()
+            ato = AssignToOrganelles(**rp.run_config)
+            ato.get_organelle_assignments()
