@@ -1,7 +1,10 @@
 # %%
 from typing import Union, List
 from cellmap_analyze.util import io_util
-from cellmap_analyze.util.io_util import get_output_path_from_input_path
+from cellmap_analyze.util.io_util import (
+    get_name_from_path,
+    get_output_path_from_input_path,
+)
 from cellmap_analyze.util.image_data_interface import (
     ImageDataInterface,
 )
@@ -22,13 +25,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class AssignToCells:
+class AssignToOrganelles:
     def __init__(
         self,
         organelle_csvs: Union[str, List[str]],
-        cell_ds_path: str,
+        target_organelle_ds_path: str,
         output_path: str,
-        cell_assignment_type: int = 0,
+        assignment_type: int = 0,
         iteration_distance_nm=10_000,
     ):
         if isinstance(organelle_csvs, str):
@@ -43,39 +46,45 @@ class AssignToCells:
                 df = df.iloc[:, :-2]
             self.organelle_info_dict[organelle_csv] = df
 
-        self.cell_idi = ImageDataInterface(cell_ds_path)
-        self.cell_assignment_type = cell_assignment_type
+        self.organelle_idi = ImageDataInterface(target_organelle_ds_path)
+        self.organelle_name = get_name_from_path(target_organelle_ds_path).capitalize()
+        self.assignment_type = assignment_type
         self.output_path = str(output_path).rstrip("/")
         self.iteration_distance_nm = iteration_distance_nm
 
     @staticmethod
-    def assign_to_containing_cell(cell_idi, df):
-        cell_data = cell_idi.to_ndarray_ts()
+    def assign_to_containing_organelle(organelle_idi, df, organelle_name):
+        organelle_data = organelle_idi.to_ndarray_ts()
         coms = df[["COM Z (nm)", "COM Y (nm)", "COM X (nm)"]].to_numpy()
         # Already have top left corners aligned since in measure_util get_region_properties we already center on voxel so that top left corners are aligned
-        inds = np.astype(coms // cell_idi.voxel_size, int)
-        in_bounds = np.all((inds >= cell_idi.domain.inclusive_min), axis=1) & np.all(
-            (inds < cell_idi.domain.exclusive_max), axis=1
-        )
+        inds = np.astype(coms // organelle_idi.voxel_size, int)
+        in_bounds = np.all(
+            (inds >= organelle_idi.domain.inclusive_min), axis=1
+        ) & np.all((inds < organelle_idi.domain.exclusive_max), axis=1)
 
-        df.loc[in_bounds, "Cell ID"] = cell_data[
+        id_col = f"{organelle_name} ID"
+        df.loc[in_bounds, id_col] = organelle_data[
             inds[in_bounds, 0], inds[in_bounds, 1], inds[in_bounds, 2]
         ]
-        df["Cell ID"] = df["Cell ID"].astype(int)
+        df[id_col] = df[id_col].astype(int)
 
     @staticmethod
-    def assign_to_n_nearest_cells(cell_idi, df, n, iteration_distance_nm):
+    def assign_to_n_nearest_organelles(
+        organelle_idi, df, n, iteration_distance_nm, organelle_name
+    ):
         coms = df[["COM Z (nm)", "COM Y (nm)", "COM X (nm)"]].to_numpy()
-        inds = np.astype(coms // cell_idi.voxel_size, int)
-        cell_data = cell_idi.to_ndarray_ts()
-        if len(fastremap.unique(cell_data[cell_data > 0])) < n:
+        inds = np.astype(coms // organelle_idi.voxel_size, int)
+        organelle_data = organelle_idi.to_ndarray_ts()
+        if len(fastremap.unique(organelle_data[organelle_data > 0])) < n:
             raise ValueError(
-                f"Number of unique cell ids in the segmentation ({fastremap.unique(cell_data[cell_data > 0])}) is less than n ({n})."
+                f"Number of unique organelle ids in the segmentation ({fastremap.unique(organelle_data[organelle_data > 0])}) is less than n ({n})."
                 " Please choose a smaller n or use a different assignment method."
             )
 
         num_points = len(coms)
-        boundaries = cell_data - fastmorph.erode(cell_data, erode_border=False)
+        boundaries = organelle_data - fastmorph.erode(
+            organelle_data, erode_border=False
+        )
         unique_ids = fastremap.unique(boundaries[boundaries > 0])
 
         # Initialize arrays to store the n closest distances and corresponding ids.
@@ -111,7 +120,7 @@ class AssignToCells:
                 # For the current unique object, get its boundary voxel coordinates, adjust by 0.5 for centering and scale.
                 coords = (
                     boundary_coords[boundary_ids == unique_id] + 0.5
-                ) * cell_idi.voxel_size
+                ) * organelle_idi.voxel_size
                 tree = spatial.KDTree(coords)
 
                 # Query only for the points (coms) that need updating.
@@ -119,24 +128,28 @@ class AssignToCells:
                     coms[update_mask],
                     distance_upper_bound=maximum_distance * iteration,
                 )
-                # Check if coms are within a cell
+                # Check if coms are within the organelle
                 updated_inds = inds[update_mask]
                 in_bounds = np.all(
-                    (updated_inds >= cell_idi.domain.inclusive_min), axis=1
-                ) & np.all((updated_inds < cell_idi.domain.exclusive_max), axis=1)
+                    (updated_inds >= organelle_idi.domain.inclusive_min), axis=1
+                ) & np.all(
+                    (updated_inds < organelle_idi.domain.exclusive_max), axis=1
+                )
                 valid_inds = updated_inds[in_bounds]
 
                 # Initialize an array of False of the same length as updated_inds.
-                within_cell = np.full(updated_inds.shape[0], False, dtype=bool)
+                within_organelle = np.full(updated_inds.shape[0], False, dtype=bool)
 
                 # For the indices that are in bounds, assign the comparison result.
-                within_cell[in_bounds] = (
-                    cell_data[valid_inds[:, 0], valid_inds[:, 1], valid_inds[:, 2]]
+                within_organelle[in_bounds] = (
+                    organelle_data[
+                        valid_inds[:, 0], valid_inds[:, 1], valid_inds[:, 2]
+                    ]
                     == unique_id
                 )
 
-                # If the com is within a cell, set the distance to 0
-                current_distances[within_cell] = 0
+                # If the com is within the organelle, set the distance to 0
+                current_distances[within_organelle] = 0
 
                 # Combine the current n best distances with the new candidate (this gives n+1 candidates per query point).
                 combined_distances = np.column_stack(
@@ -161,36 +174,37 @@ class AssignToCells:
                 closest_ids[update_mask] = sorted_ids[:, :n]
 
         # Update the DataFrame columns.
+        id_col = f"{organelle_name} ID"
+        dist_col = f"{organelle_name} Distance (nm)"
         if n > 1:
-            df["Cell ID"] = [row.tolist() for row in closest_ids]
-            df["Cell Distance (nm)"] = [row.tolist() for row in closest_distances]
+            df[id_col] = [row.tolist() for row in closest_ids]
+            df[dist_col] = [row.tolist() for row in closest_distances]
         else:
-            df["Cell ID"] = closest_ids[:, 0]
-            df["Cell Distance (nm)"] = closest_distances[:, 0]
+            df[id_col] = closest_ids[:, 0]
+            df[dist_col] = closest_distances[:, 0]
 
-    def assign_to_cells(self):
-        with io_util.TimingMessager("Assigning objects to cells", logger):
+    def assign_to_organelles(self):
+        with io_util.TimingMessager("Assigning objects to organelles", logger):
             for organelle_csv, df in self.organelle_info_dict.items():
-                # get filename from organelle_csv
-                filename = os.path.basename(organelle_csv)
-                if filename == "cell.csv":
+                id_col = f"{self.organelle_name} ID"
+                df[id_col] = 0
+                if self.assignment_type == 0:
+                    self.assign_to_containing_organelle(
+                        self.organelle_idi, df, self.organelle_name
+                    )
                     continue
-                df["Cell ID"] = 0
-                if "er.csv" in organelle_csv:
-                    df["Cell ID"] = df["Object ID"]
-                    continue
-                if self.cell_assignment_type == 0:
-                    self.assign_to_containing_cell(self.cell_idi, df)
-                    continue
-                df["Cell Distance (nm)"] = 0
-                self.assign_to_n_nearest_cells(
-                    self.cell_idi,
+                dist_col = f"{self.organelle_name} Distance (nm)"
+                df[dist_col] = 0
+                self.assign_to_n_nearest_organelles(
+                    self.organelle_idi,
                     df,
-                    self.cell_assignment_type,
+                    self.assignment_type,
                     self.iteration_distance_nm,
+                    self.organelle_name,
                 )
 
     def write_updated_csvs(self):
+        name = self.organelle_name.lower()
         with io_util.TimingMessager("Writing out updated dataframes", logger):
             os.makedirs(self.output_path, exist_ok=True)
             for csv, df in self.organelle_info_dict.items():
@@ -203,19 +217,21 @@ class AssignToCells:
                     )
                     os.makedirs(output_path, exist_ok=True)
 
-                if self.cell_assignment_type == 0:
+                if self.assignment_type == 0:
                     output_name = (
-                        f"{output_path}/{csv_name}_assigned_to_containing_cell"
+                        f"{output_path}/{csv_name}_assigned_to_containing_{name}"
                     )
-                elif self.cell_assignment_type == 1:
-                    output_name = f"{output_path}/{csv_name}_assigned_to_nearest_cell"
+                elif self.assignment_type == 1:
+                    output_name = (
+                        f"{output_path}/{csv_name}_assigned_to_nearest_{name}"
+                    )
                 else:
-                    output_name = f"{output_path}/{csv_name}_assigned_to_{self.cell_assignment_type}_nearest_cells"
+                    output_name = f"{output_path}/{csv_name}_assigned_to_{self.assignment_type}_nearest_{name}s"
                 df["Object ID"] = df["Object ID"].astype(
                     int
                 )  # in case was converted to float
                 df.to_csv(output_name + ".csv", index=False)
 
-    def get_cell_assignments(self):
-        self.assign_to_cells()
+    def get_organelle_assignments(self):
+        self.assign_to_organelles()
         self.write_updated_csvs()

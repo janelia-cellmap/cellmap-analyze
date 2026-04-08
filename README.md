@@ -28,7 +28,7 @@ A suite of Dask-powered tools for processing and analyzing terabyte-scale 3D seg
 | ------------------- | ---------------------------- | --------------------------------------------------------------------- |
 | **Measurement**     | `measure`                    | Compute metrics (volume, surface area, radius of gyration, bounding box) for objects and contact sites. Supports raw intensity statistics when a raw dataset is provided. |
 | **Fit Lines**       | `fit_lines_to_segmentations` | Fit geometric lines to elongated/cylindrical structures.              |
-| **Assign to Cells** | `assign_to_cells`            | Map segmented objects to cells based on centers of mass.              |
+| **Assign to Organelles** | `assign_to_organelles`  | Map segmented objects to organelles based on centers of mass.         |
 
 ---
 
