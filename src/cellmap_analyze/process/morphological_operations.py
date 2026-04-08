@@ -53,6 +53,7 @@ class MorphologicalOperations(ComputeConfigMixin):
                 mask_config,
                 output_voxel_size=self.input_idi.voxel_size,
                 connectivity=connectivity,
+                caller_scale_factor=self.input_idi.voxel_size_scale_factor,
             )
 
         self.operation = operation
@@ -66,6 +67,7 @@ class MorphologicalOperations(ComputeConfigMixin):
             voxel_size=self.input_idi.voxel_size,
             total_roi=self.roi,
             write_size=self.input_idi.chunk_shape * self.input_idi.voxel_size,
+            original_voxel_size=self.input_idi.original_voxel_size,
         )
 
     @staticmethod

@@ -129,6 +129,7 @@ class ConnectedComponents(ComputeConfigMixin):
                 total_roi=self.roi,
                 write_size=template_idi.chunk_shape * self.voxel_size,
                 custom_fill_value=self.oob_value,
+                original_voxel_size=template_idi.original_voxel_size,
             )
             self.do_full_connected_components = True
         else:
@@ -147,8 +148,8 @@ class ConnectedComponents(ComputeConfigMixin):
         if type(maximum_volume_nm_3) == str:
             maximum_volume_nm_3 = float(maximum_volume_nm_3)
 
-        # Ensure voxel volume is a scalar for consistent volume calculations
-        voxel_volume = float(np.prod(self.voxel_size))
+        # Use original (true nm) voxel size for physical volume calculations
+        voxel_volume = float(np.prod(template_idi.original_voxel_size))
         self.minimum_volume_voxels = float(minimum_volume_nm_3 / voxel_volume)
         self.maximum_volume_voxels = float(maximum_volume_nm_3 / voxel_volume)
 
@@ -158,6 +159,7 @@ class ConnectedComponents(ComputeConfigMixin):
                 mask_config,
                 output_voxel_size=self.voxel_size,
                 connectivity=connectivity,
+                caller_scale_factor=template_idi.voxel_size_scale_factor,
             )
 
         self.connectivity = connectivity
@@ -643,6 +645,7 @@ class ConnectedComponents(ComputeConfigMixin):
             voxel_size=original_idi.voxel_size,
             total_roi=roi,
             write_size=original_idi.chunk_shape * original_idi.voxel_size,
+            original_voxel_size=original_idi.original_voxel_size,
         )
 
         num_blocks = dask_util.get_num_blocks(original_idi, roi=roi)

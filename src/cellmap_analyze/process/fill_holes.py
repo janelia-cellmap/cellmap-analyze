@@ -179,6 +179,7 @@ class FillHoles(ComputeConfigMixin):
             voxel_size=self.voxel_size,
             total_roi=self.roi,
             write_size=self.input_idi.chunk_shape * self.input_idi.voxel_size,
+            original_voxel_size=self.input_idi.original_voxel_size,
         )
 
         num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)

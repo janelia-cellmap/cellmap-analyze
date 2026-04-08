@@ -40,9 +40,18 @@ class LabelWithMask(ComputeConfigMixin):
         self.mask_idi = ImageDataInterface(
             mask_path,
             chunk_shape=chunk_shape,
-            output_voxel_size=self.input_idi.voxel_size,
             custom_fill_value="edge",  # in case of doing erosion later for surface voxel testing
         )
+        # Align scale factors so both IDIs share the same coordinate space
+        from cellmap_analyze.util.voxel_size_utils import compute_common_scale_factor
+
+        common_sf = compute_common_scale_factor(
+            self.input_idi.voxel_size_scale_factor,
+            self.mask_idi.voxel_size_scale_factor,
+        )
+        self.input_idi.rescale_to_factor(common_sf)
+        self.mask_idi.rescale_to_factor(common_sf)
+        self.mask_idi.output_voxel_size = self.input_idi.voxel_size
 
         self.roi = roi
         if self.roi is None:
@@ -57,6 +66,7 @@ class LabelWithMask(ComputeConfigMixin):
             voxel_size=self.input_idi.voxel_size,
             total_roi=self.roi,
             write_size=self.input_idi.chunk_shape * self.input_idi.voxel_size,
+            original_voxel_size=self.input_idi.original_voxel_size,
         )
 
     @staticmethod

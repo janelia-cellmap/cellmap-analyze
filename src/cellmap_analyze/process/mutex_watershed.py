@@ -120,6 +120,7 @@ class MutexWatershed(ComputeConfigMixin):
             voxel_size=self.voxel_size,
             total_roi=self.roi,
             write_size=np.array(chunk_shape) * self.voxel_size,
+            original_voxel_size=self.affinities_idi.original_voxel_size,
         )
         self.connected_components_blockwise_idi = ImageDataInterface(
             self.connected_components_blockwise_path + "/s0",
@@ -136,8 +137,13 @@ class MutexWatershed(ComputeConfigMixin):
             maximum_volume_nm_3 = float(maximum_volume_nm_3)
         self.minimum_volume_nm_3 = minimum_volume_nm_3
         self.maximum_volume_nm_3 = maximum_volume_nm_3
-        self.minimum_volume_voxels = minimum_volume_nm_3 / np.prod(self.voxel_size)
-        self.maximum_volume_voxels = maximum_volume_nm_3 / np.prod(self.voxel_size)
+        # Use original (true nm) voxel size for physical volume calculations
+        self.minimum_volume_voxels = minimum_volume_nm_3 / np.prod(
+            self.affinities_idi.original_voxel_size
+        )
+        self.maximum_volume_voxels = maximum_volume_nm_3 / np.prod(
+            self.affinities_idi.original_voxel_size
+        )
 
         self.mask_config = mask_config
         self.mask = None
@@ -146,6 +152,7 @@ class MutexWatershed(ComputeConfigMixin):
                 self.mask_config,
                 output_voxel_size=self.voxel_size,
                 connectivity=connectivity,
+                caller_scale_factor=self.affinities_idi.voxel_size_scale_factor,
             )
 
         self.connectivity = connectivity

@@ -82,7 +82,14 @@ def write_multiscales_metadata(
 
 
 def create_multiscale_dataset(
-    output_path, dtype, voxel_size, total_roi, write_size, scale=0, mode="w"
+    output_path,
+    dtype,
+    voxel_size,
+    total_roi,
+    write_size,
+    scale=0,
+    mode="w",
+    original_voxel_size=None,
 ):
 
     filename, dataset = split_dataset_path(output_path, scale=scale)
@@ -111,14 +118,36 @@ def create_multiscale_dataset(
         # Named dataset case: has a dataset name
         metadata_path = filename + "/" + dataset_base
 
+    # Write OME-Zarr metadata with the original (true) float voxel size
+    # so that other tools can read the correct physical coordinates.
+    # The scaled integer voxel_size is only used internally for funlib compatibility.
+    metadata_voxel_size = (
+        list(original_voxel_size) if original_voxel_size is not None else voxel_size
+    )
+    if original_voxel_size is not None:
+        # Convert scaled offset back to true physical coordinates
+        from cellmap_analyze.util.voxel_size_utils import scale_voxel_size_to_integers
+
+        _, scale_factor = scale_voxel_size_to_integers(original_voxel_size)
+        metadata_translation = [
+            float(b) / scale_factor for b in total_roi.get_begin()
+        ]
+    else:
+        metadata_translation = total_roi.get_begin()
+
     write_multiscales_metadata(
         metadata_path,
         f"s{scale}",
-        voxel_size,
-        total_roi.get_begin(),
+        metadata_voxel_size,
+        metadata_translation,
         "nanometer",
         ["z", "y", "x"],
     )
+
+    # Also store original_voxel_size directly on the array for reliable round-tripping
+    if original_voxel_size is not None:
+        ds.data.attrs["original_voxel_size"] = list(original_voxel_size)
+
     return ds
 
 
@@ -132,9 +161,17 @@ def create_multiscale_dataset_idi(
     mode="w",
     custom_fill_value=None,
     chunk_shape=None,
+    original_voxel_size=None,
 ):
     create_multiscale_dataset(
-        output_path, dtype, voxel_size, total_roi, write_size, scale=scale, mode=mode
+        output_path,
+        dtype,
+        voxel_size,
+        total_roi,
+        write_size,
+        scale=scale,
+        mode=mode,
+        original_voxel_size=original_voxel_size,
     )
     if mode == "w":
         mode = "r+"

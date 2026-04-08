@@ -3,6 +3,7 @@ import numpy as np
 from scipy import ndimage
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.block_util import erosion, dilation
+from cellmap_analyze.util.voxel_size_utils import compute_common_scale_factor
 from functools import partial
 
 
@@ -17,6 +18,7 @@ class Mask:
         connectivity=2,
         mask_value=None,
         chunk_shape=None,
+        caller_scale_factor=1,
     ):
         if type(operation) == str:
             operation = [operation]
@@ -30,14 +32,23 @@ class Mask:
         if "erosion" in operation:
             self.idi = ImageDataInterface(
                 path,
-                output_voxel_size=output_voxel_size,
                 custom_fill_value="edge",
                 chunk_shape=chunk_shape,
             )
         else:
             self.idi = ImageDataInterface(
-                path, output_voxel_size=output_voxel_size, chunk_shape=chunk_shape
+                path, chunk_shape=chunk_shape
             )
+
+        # Align scale factors: rescale mask IDI to match caller's coordinate space
+        common_sf = compute_common_scale_factor(
+            self.idi.voxel_size_scale_factor, caller_scale_factor
+        )
+        self.idi.rescale_to_factor(common_sf)
+
+        # Now set output_voxel_size (both are in the same scaled space)
+        if output_voxel_size is not None:
+            self.idi.output_voxel_size = output_voxel_size
         self.output_voxel_size = output_voxel_size
         if not self.output_voxel_size:
             self.output_voxel_size = self.idi.voxel_size
@@ -107,7 +118,9 @@ class Mask:
 
 
 class MasksFromConfig:
-    def __init__(self, mask_config_dict, output_voxel_size, connectivity=2):
+    def __init__(
+        self, mask_config_dict, output_voxel_size, connectivity=2, caller_scale_factor=1
+    ):
         self.connectivity = connectivity
         self.mask_dict = {}
         for mask_name, mask_config in mask_config_dict.items():
@@ -115,6 +128,7 @@ class MasksFromConfig:
                 **mask_config,
                 output_voxel_size=output_voxel_size,
                 connectivity=connectivity,
+                caller_scale_factor=caller_scale_factor,
             )
 
     def process_block(self, roi):
