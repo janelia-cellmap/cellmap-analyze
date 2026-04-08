@@ -26,7 +26,19 @@ class ContactingOrganelleInformation:
         return coi
 
     def __eq__(self, other: "ContactingOrganelleInformation") -> bool:
-        return self.id_to_surface_area_dict == other.id_to_surface_area_dict
+        if set(self.id_to_surface_area_dict.keys()) != set(
+            other.id_to_surface_area_dict.keys()
+        ):
+            return False
+        return all(
+            np.isclose(
+                self.id_to_surface_area_dict[k],
+                other.id_to_surface_area_dict[k],
+                rtol=1e-13,
+                atol=1e-13,
+            )
+            for k in self.id_to_surface_area_dict
+        )
 
 
 class ObjectInformation:

@@ -481,6 +481,11 @@ class ImageDataInterface:
         self.roi = Roi(scaled_offset, Coordinate(array_shape) * self.voxel_size)
         self.offset = self.roi.offset
 
+        # Update the underlying funlib Array to use our scaled voxel_size/roi
+        # so that ds[roi] indexing converts physical -> voxel coords correctly
+        self.ds.voxel_size = self.voxel_size
+        self.ds.roi = self.roi
+
         self.custom_fill_value = custom_fill_value
         self.concurrency_limit = concurrency_limit
         if output_voxel_size is not None:
@@ -517,6 +522,9 @@ class ImageDataInterface:
         self.roi = Roi(scaled_offset, Coordinate(array_shape) * self.voxel_size)
         self.offset = self.roi.offset
         self.output_voxel_size = self.voxel_size
+        # Keep funlib Array in sync
+        self.ds.voxel_size = self.voxel_size
+        self.ds.roi = self.roi
 
     def to_ndarray_ts(self, roi=None):
         if not self.ts:
