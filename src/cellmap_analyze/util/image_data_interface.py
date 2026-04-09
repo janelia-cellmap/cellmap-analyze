@@ -1,5 +1,6 @@
 # %%
 import logging
+import os
 from pathlib import Path
 import tensorstore as ts
 import numpy as np
@@ -12,7 +13,7 @@ from cellmap_analyze.util.voxel_size_utils import (
     read_raw_offset,
     scale_voxel_size_to_integers,
 )
-from funlib.persistence import open_ds
+from cellmap_analyze.util.zarr_io import open_dataset
 from scipy.ndimage import zoom, map_coordinates
 import time
 import random
@@ -93,11 +94,22 @@ def read_with_retries(dataset, valid_slices, max_retries=10, timeout=5, base_del
             time.sleep(delay + jitter)
 
 
+def _detect_zarr_driver(dataset_path: str) -> str:
+    """Detect whether a zarr dataset is v2 or v3 format.
+
+    Returns 'zarr' for v2, 'zarr3' for v3, or 'n5' for N5.
+    """
+    if dataset_path.rfind(".n5") > dataset_path.rfind(".zarr"):
+        return "n5"
+    # Check for zarr v3 format marker (zarr.json at dataset level)
+    if os.path.exists(os.path.join(dataset_path, "zarr.json")):
+        return "zarr3"
+    return "zarr"
+
+
 def open_ds_tensorstore(dataset_path: str, mode="r", concurrency_limit=None):
-    # open with zarr or n5 depending on extension
-    filetype = (
-        "zarr" if dataset_path.rfind(".zarr") > dataset_path.rfind(".n5") else "n5"
-    )
+    # open with zarr, zarr3, or n5 depending on format
+    filetype = _detect_zarr_driver(dataset_path)
     if concurrency_limit:
         spec = {
             "driver": filetype,
@@ -441,7 +453,7 @@ class ImageDataInterface:
         dataset_path = str(Path(dataset_path).resolve())
         self.path = dataset_path
         filename, dataset = split_dataset_path(dataset_path)
-        self.ds = open_ds(filename, dataset, mode=mode)
+        self.ds = open_dataset(filename, dataset, mode=mode)
         self.filetype = (
             "zarr" if dataset_path.rfind(".zarr") > dataset_path.rfind(".n5") else "n5"
         )
