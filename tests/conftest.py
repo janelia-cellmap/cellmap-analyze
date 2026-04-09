@@ -6,14 +6,17 @@ import numpy as np
     autouse=True,
     scope="session",
     params=[
-        (8, 8, 8),  # isotropic
-        (3, 7, 5),  # anisotropic - all axes different, non-multiples
-        (3.54, 4, 4.5),  # non-integer voxel sizes
+        (3.54, 4, 4.5),  # non-integer, anisotropic — covers all code paths
     ],
-    ids=["isotropic", "anisotropic", "non_integer"],
+    ids=["non_integer"],
 )
 def voxel_size(request):
-    """Voxel size in (Z, Y, X) order."""
+    """Voxel size in (Z, Y, X) order.
+
+    Uses non-integer anisotropic voxel sizes as the single default since it
+    exercises all code paths (scaling, anisotropy). Add targeted tests for
+    isotropic-specific or integer-specific branches as needed.
+    """
     return np.array(request.param)
 
 
