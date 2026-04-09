@@ -184,7 +184,7 @@ def test_measure_blockwise(shared_tmpdir, tmp_zarr, segmentation_name, request):
     )
     m.measure()
     assert m.measurements == simple_object_information_dict(
-        request.getfixturevalue(segmentation_name), m.input_idi.voxel_size
+        request.getfixturevalue(segmentation_name), m.input_idi.original_voxel_size
     )
 
 

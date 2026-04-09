@@ -12,6 +12,10 @@ from cellmap_analyze.process.connected_components import ConnectedComponents
 from scipy.spatial import KDTree
 from cellmap_analyze.util.measure_util import trim_array, trim_array_anisotropic
 from cellmap_analyze.util.mixins import ComputeConfigMixin
+from cellmap_analyze.util.voxel_size_utils import (
+    compute_common_scale_factor,
+    scale_voxel_size_to_integers,
+)
 from cellmap_analyze.util.zarr_util import (
     create_multiscale_dataset_idi,
 )
@@ -45,19 +49,40 @@ class ContactSites(ComputeConfigMixin):
         self.organelle_2_idi = ImageDataInterface(
             organelle_2_path, chunk_shape=chunk_shape
         )
-        # Get element-wise minimum voxel size and ensure it's a Coordinate
+        # Align scale factors so both IDIs share the same coordinate space
+        common_sf = compute_common_scale_factor(
+            self.organelle_1_idi.voxel_size_scale_factor,
+            self.organelle_2_idi.voxel_size_scale_factor,
+        )
+        self.organelle_1_idi.rescale_to_factor(common_sf)
+        self.organelle_2_idi.rescale_to_factor(common_sf)
+
+        # Get element-wise minimum voxel size in common scaled space
         output_voxel_size = Coordinate(
-            min(v1, v2) for v1, v2 in zip(self.organelle_1_idi.voxel_size, self.organelle_2_idi.voxel_size)
+            min(v1, v2)
+            for v1, v2 in zip(
+                self.organelle_1_idi.voxel_size, self.organelle_2_idi.voxel_size
+            )
         )
         self.organelle_2_idi.output_voxel_size = output_voxel_size
         self.organelle_1_idi.output_voxel_size = output_voxel_size
         self.voxel_size = output_voxel_size
+        self.voxel_size_scale_factor = common_sf
+
+        # Compute original (true nm) output voxel size for physical calculations
+        self.original_voxel_size = tuple(
+            min(v1, v2)
+            for v1, v2 in zip(
+                self.organelle_1_idi.original_voxel_size,
+                self.organelle_2_idi.original_voxel_size,
+            )
+        )
 
         # Store contact distance in nm for physical distance calculations
         self.contact_distance_nm = contact_distance_nm
 
-        # Use minimum voxel size across all dimensions to ensure we don't miss contacts
-        min_voxel_size = float(min(output_voxel_size))
+        # Use minimum voxel size in true nm across all dimensions
+        min_voxel_size = float(min(self.original_voxel_size))
         self.contact_distance_voxels = float(contact_distance_nm / min_voxel_size)
 
         self.padding_voxels = int(np.ceil(self.contact_distance_voxels) + 1)
@@ -82,9 +107,11 @@ class ContactSites(ComputeConfigMixin):
 
         self.minimum_volume_nm_3 = minimum_volume_nm_3
         self.num_workers = num_workers
-        self.voxel_volume = float(np.prod(self.voxel_size))
-        # For anisotropic data, use the minimum cross-sectional area
-        self.voxel_face_area = float(self.voxel_size[1] * self.voxel_size[2])
+        # Use original (true nm) voxel size for physical unit calculations
+        self.voxel_volume = float(np.prod(self.original_voxel_size))
+        self.voxel_face_area = float(
+            self.original_voxel_size[1] * self.original_voxel_size[2]
+        )
 
         # Use helper function to generate blockwise path (handles root datasets correctly)
         blockwise_path = get_output_path_from_input_path(output_path, "_blockwise")
@@ -95,6 +122,7 @@ class ContactSites(ComputeConfigMixin):
             voxel_size=self.voxel_size,
             total_roi=self.roi,
             write_size=self.organelle_1_idi.chunk_shape * self.voxel_size,
+            original_voxel_size=self.original_voxel_size,
         )
 
     @staticmethod
@@ -197,9 +225,12 @@ class ContactSites(ComputeConfigMixin):
         organelle_1 = organelle_1_idi.to_ndarray_ts(block.read_roi)
 
         # Calculate actual padding from array shape vs write ROI shape
-        # The write ROI is in physical coordinates, convert to voxels at output_voxel_size
+        # The write ROI is in scaled physical coordinates, convert to voxels
         write_roi_shape_voxels = tuple(
-            int(np.round(s / vs)) for s, vs in zip(block.write_roi.shape, voxel_size)
+            int(np.round(s / vs))
+            for s, vs in zip(
+                block.write_roi.shape, contact_sites_blockwise_idi.voxel_size
+            )
         )
 
         # Due to snap_to_grid and upsampling, the actual array size might differ slightly
@@ -281,7 +312,7 @@ class ContactSites(ComputeConfigMixin):
             self.contact_sites_blockwise_idi,
             self.contact_distance_voxels,
             self.padding_voxels,
-            self.voxel_size,
+            self.original_voxel_size,
             self.contact_distance_nm,
         )
 

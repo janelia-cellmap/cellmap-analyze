@@ -103,17 +103,22 @@ class FitLinesToSegmentations(ComputeConfigMixin):
 
     def fit_lines_to_objects(self, df):
         results_df = []
+        sf = self.segmentation_idi.voxel_size_scale_factor
+        original_vs = np.array(self.segmentation_idi.original_voxel_size)
         for _, row in df.iterrows():
             id = row["Object ID"]
-            box_min = np.array([row[f"MIN {d} (nm)"] for d in ["Z", "Y", "X"]])
-            box_max = np.array([row[f"MAX {d} (nm)"] for d in ["Z", "Y", "X"]])
-            # define an roi to actually ecompass the bounding box
+            # Bounding box coords from CSV are in true nm; convert to scaled for ROI
+            box_min = np.array([row[f"MIN {d} (nm)"] for d in ["Z", "Y", "X"]]) * sf
+            box_max = np.array([row[f"MAX {d} (nm)"] for d in ["Z", "Y", "X"]]) * sf
+            # define an roi to actually encompass the bounding box
             roi = Roi(
                 box_min - self.voxel_size, (box_max - box_min) + self.voxel_size * 2
             )
             data = self.segmentation_idi.to_ndarray_ts(roi)
+            # Use original voxel_size for physical calculations, convert offset back
+            roi_offset_nm = np.array(roi.offset) / sf
             line_start, line_end = FitLinesToSegmentations.fit_line_to_object(
-                data, id, self.voxel_size, roi.offset
+                data, id, original_vs, roi_offset_nm
             )
             result_df = pd.DataFrame([row])
 

@@ -14,7 +14,11 @@ import pandas as pd
 import logging
 
 from cellmap_analyze.util.measure_util import get_object_information
-from funlib.geometry import Roi
+from cellmap_analyze.util.voxel_size_utils import (
+    compute_common_scale_factor,
+    scale_voxel_size_to_integers,
+)
+from funlib.geometry import Coordinate, Roi
 import os
 
 from cellmap_analyze.util.mixins import ComputeConfigMixin
@@ -62,8 +66,23 @@ class Measure(ComputeConfigMixin):
             self.organelle_2_idi = ImageDataInterface(
                 self.organelle_2_path, chunk_shape=chunk_shape
             )
-            output_voxel_size = min(
-                self.organelle_1_idi.voxel_size, self.organelle_2_idi.voxel_size
+            # Align scale factors across all IDIs so they share coordinate space
+            common_sf = compute_common_scale_factor(
+                self.input_idi.voxel_size_scale_factor,
+                self.organelle_1_idi.voxel_size_scale_factor,
+                self.organelle_2_idi.voxel_size_scale_factor,
+            )
+            self.input_idi.rescale_to_factor(common_sf)
+            self.organelle_1_idi.rescale_to_factor(common_sf)
+            self.organelle_2_idi.rescale_to_factor(common_sf)
+
+            # Element-wise min in the common scaled space
+            output_voxel_size = Coordinate(
+                min(v1, v2)
+                for v1, v2 in zip(
+                    self.organelle_1_idi.voxel_size,
+                    self.organelle_2_idi.voxel_size,
+                )
             )
             self.organelle_1_idi.output_voxel_size = output_voxel_size
             self.organelle_2_idi.output_voxel_size = output_voxel_size
@@ -80,6 +99,13 @@ class Measure(ComputeConfigMixin):
         if "raw_path" in kwargs and kwargs["raw_path"]:
             self.raw_path = kwargs["raw_path"]
             self.raw_idi = ImageDataInterface(self.raw_path, chunk_shape=chunk_shape)
+            # Align scale factors between raw and input
+            raw_sf = compute_common_scale_factor(
+                self.input_idi.voxel_size_scale_factor,
+                self.raw_idi.voxel_size_scale_factor,
+            )
+            self.input_idi.rescale_to_factor(raw_sf)
+            self.raw_idi.rescale_to_factor(raw_sf)
             self.raw_idi.output_voxel_size = self.input_idi.voxel_size
             self.get_measurements_blockwise_extra_kwargs["raw_idi"] = self.raw_idi
 
@@ -183,10 +209,14 @@ class Measure(ComputeConfigMixin):
             extra_kwargs["raw_data"] = raw_idi.to_ndarray_ts(block.write_roi)
 
         # get information only from actual block(not including padding)
-        block_offset = np.array(block.write_roi.begin) + global_offset
+        # Convert block offset from scaled coordinates back to true nm
+        block_offset = (
+            np.array(block.write_roi.begin) / input_idi.voxel_size_scale_factor
+            + global_offset
+        )
         object_informations = get_object_information(
             data,
-            input_idi.voxel_size,
+            input_idi.original_voxel_size,
             trim=1,
             offset=block_offset,
             **extra_kwargs,

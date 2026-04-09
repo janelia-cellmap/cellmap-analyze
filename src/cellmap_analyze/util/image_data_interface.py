@@ -7,6 +7,11 @@ from funlib.geometry import Coordinate
 from funlib.geometry import Roi
 
 from cellmap_analyze.util.io_util import split_dataset_path, print_with_datetime
+from cellmap_analyze.util.voxel_size_utils import (
+    read_raw_voxel_size,
+    read_raw_offset,
+    scale_voxel_size_to_integers,
+)
 from funlib.persistence import open_ds
 from scipy.ndimage import zoom, map_coordinates
 import time
@@ -442,7 +447,6 @@ class ImageDataInterface:
         )
         self.swap_axes = self.filetype == "n5"
         self.ts = None
-        self.voxel_size = self.ds.voxel_size
         self.dtype = self.ds.dtype
         self.chunk_shape = self.ds.chunk_shape
         if chunk_shape is not None:
@@ -450,27 +454,37 @@ class ImageDataInterface:
                 chunk_shape = Coordinate(chunk_shape)
             self.chunk_shape = chunk_shape
 
-        self.roi = self.ds.roi
-        self.offset = self.ds.roi.offset
+        # Read the raw float voxel_size and offset from zarr attributes
+        # BEFORE funlib.geometry.Coordinate truncates them to integers.
+        raw_voxel_size = read_raw_voxel_size(self.ds)
+        raw_offset = read_raw_offset(self.ds)
 
-        # Handle multichannel metadata: if funlib parsed >3D voxel_size
-        # (e.g. from 4D OME-Zarr metadata with channel axis), strip channel dims
-        if len(self.voxel_size) > 3:
-            n_extra = len(self.voxel_size) - 3
-            self.voxel_size = Coordinate(self.voxel_size[n_extra:])
-            self.roi = Roi(self.roi.begin[n_extra:], self.roi.shape[n_extra:])
-            self.offset = self.roi.offset
+        # Handle multichannel metadata: strip extra (non-spatial) dims
+        n_spatial = 3
+        if len(raw_voxel_size) > n_spatial:
+            n_extra = len(raw_voxel_size) - n_spatial
+            raw_voxel_size = raw_voxel_size[n_extra:]
+            raw_offset = raw_offset[n_extra:]
 
-        if "voxel_size" in self.ds.data.attrs:
-            voxel_size = Coordinate(self.ds.data.attrs["voxel_size"])
-            if self.voxel_size != voxel_size:
-                # precedence given to the latter
-                self.roi /= voxel_size
-                self.offset /= voxel_size
+        # Scale float voxel sizes to integers for funlib compatibility
+        scaled_vs, scale_factor = scale_voxel_size_to_integers(raw_voxel_size)
+        self.original_voxel_size = raw_voxel_size
+        self._raw_offset = raw_offset
+        self.voxel_size_scale_factor = scale_factor
+        self.voxel_size = Coordinate(scaled_vs)
 
-                self.voxel_size = Coordinate(self.ds.data.attrs["voxel_size"])
-                self.roi *= self.voxel_size
-                self.offset *= self.voxel_size
+        # Recompute ROI in scaled physical coordinates from the array shape
+        array_shape = self.ds.data.shape[-n_spatial:]
+        scaled_offset = Coordinate(
+            int(round(o * scale_factor)) for o in raw_offset
+        )
+        self.roi = Roi(scaled_offset, Coordinate(array_shape) * self.voxel_size)
+        self.offset = self.roi.offset
+
+        # Update the underlying funlib Array to use our scaled voxel_size/roi
+        # so that ds[roi] indexing converts physical -> voxel coords correctly
+        self.ds.voxel_size = self.voxel_size
+        self.ds.roi = self.roi
 
         self.custom_fill_value = custom_fill_value
         self.concurrency_limit = concurrency_limit
@@ -482,6 +496,35 @@ class ImageDataInterface:
         self.max_retries = max_retries
         self.timeout = timeout
         self.interpolation_order = interpolation_order
+
+    def rescale_to_factor(self, new_scale_factor):
+        """Rescale this IDI's internal coordinates to use a new scale factor.
+
+        Used when combining multiple IDIs that need to share the same
+        scaled coordinate space (e.g., contact sites).
+
+        Args:
+            new_scale_factor: The new integer scale factor to use.
+        """
+        if new_scale_factor == self.voxel_size_scale_factor:
+            return
+
+        self.voxel_size_scale_factor = new_scale_factor
+        scaled_vs = tuple(
+            int(round(v * new_scale_factor)) for v in self.original_voxel_size
+        )
+        self.voxel_size = Coordinate(scaled_vs)
+
+        array_shape = self.ds.data.shape[-3:]
+        scaled_offset = Coordinate(
+            int(round(o * new_scale_factor)) for o in self._raw_offset
+        )
+        self.roi = Roi(scaled_offset, Coordinate(array_shape) * self.voxel_size)
+        self.offset = self.roi.offset
+        self.output_voxel_size = self.voxel_size
+        # Keep funlib Array in sync
+        self.ds.voxel_size = self.voxel_size
+        self.ds.roi = self.roi
 
     def to_ndarray_ts(self, roi=None):
         if not self.ts:

@@ -20,14 +20,12 @@ def test_image_data_interface_whole(
     )
 
 
-def test_image_data_interface_roi(tmp_zarr, voxel_size, image_with_holes_filled):
+def test_image_data_interface_roi(tmp_zarr, image_with_holes_filled):
     idi = ImageDataInterface(f"{tmp_zarr}/image_with_holes_filled/s0")
 
     roi = Roi((1, 1, 1), (5, 5, 5))
-    # Ensure voxel_size is a Coordinate for ROI multiplication
-    if not isinstance(voxel_size, Coordinate):
-        voxel_size = Coordinate(voxel_size)
-    test_data = idi.to_ndarray_ts(roi * voxel_size)
+    # Use IDI's voxel_size (scaled integers) for ROI operations
+    test_data = idi.to_ndarray_ts(roi * idi.voxel_size)
     ground_truth = image_with_holes_filled[roi.to_slices()]
     assert np.array_equal(
         test_data,
@@ -37,17 +35,14 @@ def test_image_data_interface_roi(tmp_zarr, voxel_size, image_with_holes_filled)
 
 @pytest.mark.parametrize("fill_value", [0, 100])
 def test_image_data_interface_constant_fill_values(
-    tmp_zarr, voxel_size, image_with_holes_filled, fill_value
+    tmp_zarr, image_with_holes_filled, fill_value
 ):
     idi = ImageDataInterface(
         f"{tmp_zarr}/image_with_holes_filled/s0", custom_fill_value=fill_value
     )
 
     roi = Roi((-1, -1, -1), (6, 6, 6))
-    # Ensure voxel_size is a Coordinate for ROI multiplication
-    if not isinstance(voxel_size, Coordinate):
-        voxel_size = Coordinate(voxel_size)
-    test_data = idi.to_ndarray_ts(roi * voxel_size)
+    test_data = idi.to_ndarray_ts(roi * idi.voxel_size)
     ground_truth = np.pad(
         image_with_holes_filled[:5, :5, :5],
         pad_width=((1, 0), (1, 0), (1, 0)),
@@ -61,16 +56,13 @@ def test_image_data_interface_constant_fill_values(
     )
 
 
-def test_image_data_interface_reflect(tmp_zarr, voxel_size, image_with_holes_filled):
+def test_image_data_interface_reflect(tmp_zarr, image_with_holes_filled):
     idi = ImageDataInterface(
         f"{tmp_zarr}/image_with_holes_filled/s0", custom_fill_value="edge"
     )
 
     roi = Roi((-1, -1, -1), (6, 6, 6))
-    # Ensure voxel_size is a Coordinate for ROI multiplication
-    if not isinstance(voxel_size, Coordinate):
-        voxel_size = Coordinate(voxel_size)
-    test_data = idi.to_ndarray_ts(roi * voxel_size)
+    test_data = idi.to_ndarray_ts(roi * idi.voxel_size)
     ground_truth = np.pad(
         image_with_holes_filled[:5, :5, :5],
         pad_width=((1, 0), (1, 0), (1, 0)),

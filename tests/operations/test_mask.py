@@ -31,13 +31,10 @@ def test_masks(tmp_zarr, mask_one, mask_two, voxel_size):
     connectivity = 2
     structuring_element = ndimage.generate_binary_structure(3, connectivity)
 
-    # Ensure voxel_size is a tuple (handle both scalar and array cases)
-    if np.isscalar(voxel_size):
-        output_voxel_size = Coordinate(3 * [voxel_size])
-        voxel_size_tuple = (voxel_size, voxel_size, voxel_size)
-    else:
-        output_voxel_size = Coordinate(voxel_size)
-        voxel_size_tuple = tuple(voxel_size)
+    # Get the scaled voxel_size from the IDI (matches what's in the zarr)
+    idi = ImageDataInterface(f"{tmp_zarr}/mask_one/s0")
+    output_voxel_size = idi.voxel_size
+    voxel_size_tuple = tuple(float(v) for v in voxel_size)
 
     # Calculate per-axis padding in voxels for anisotropic data
     min_voxel_size = min(voxel_size_tuple)
@@ -64,6 +61,7 @@ def test_masks(tmp_zarr, mask_one, mask_two, voxel_size):
         mask_dict,
         output_voxel_size=output_voxel_size,
         connectivity=connectivity,
+        caller_scale_factor=idi.voxel_size_scale_factor,
     )
     test_data = test_masks.process_block(roi=None)
     assert np.array_equal(

@@ -2,8 +2,9 @@
 
 import pytest
 import numpy as np
-from funlib.geometry import Roi
+from funlib.geometry import Coordinate, Roi
 from skimage import measure
+from cellmap_analyze.util.voxel_size_utils import scale_voxel_size_to_integers
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset
 import os
 from scipy import ndimage
@@ -532,21 +533,28 @@ def write_zarrs(tmp_zarr, test_image_dict, voxel_size, chunk_size):
         )
         data_path = f"{tmp_zarr}/{data_name}"
 
-        ds_voxel_size = tuple(int(v) for v in current_voxel_size)
+        # Scale voxel_size to integers for funlib compatibility (handles floats)
+        original_voxel_size = tuple(float(v) for v in current_voxel_size)
+        scaled_voxel_size, scale_factor = scale_voxel_size_to_integers(
+            original_voxel_size
+        )
+
         data_shape = data.shape
         if len(data_shape) == 4:
             data_shape = data_shape[1:]
 
-        total_roi = Roi((0, 0, 0), np.array(data_shape) * current_voxel_size)
+        total_roi = Roi(
+            (0, 0, 0), Coordinate(data_shape) * Coordinate(scaled_voxel_size)
+        )
         write_size = (
-            chunk_size * current_voxel_size
+            Coordinate(chunk_size) * Coordinate(scaled_voxel_size)
             if (
                 data_name != "segmentation_cylinders"
                 and data_name != "affinities_cylinders"
                 and data_name != "segmentation_spheres"
                 and data_name != "segmentation_for_skeleton"
             )
-            else np.array((20, 20, 20)) * current_voxel_size
+            else Coordinate(20, 20, 20) * Coordinate(scaled_voxel_size)
         )
 
         if "affinities" in data_name:
@@ -555,17 +563,20 @@ def write_zarrs(tmp_zarr, test_image_dict, voxel_size, chunk_size):
                 data_name,
                 total_roi=total_roi,
                 write_size=write_size,
-                voxel_size=ds_voxel_size,
+                voxel_size=scaled_voxel_size,
                 dtype=np.uint8,
                 num_channels=np.shape(data)[0],
             )
+            # Store original voxel_size for round-tripping
+            ds.data.attrs["original_voxel_size"] = list(original_voxel_size)
         else:
             ds = create_multiscale_dataset(
                 data_path,
                 dtype=data.dtype,
-                voxel_size=ds_voxel_size,
+                voxel_size=scaled_voxel_size,
                 total_roi=total_roi,
                 write_size=write_size,
+                original_voxel_size=original_voxel_size,
             )
 
         ds.data[:] = data
