@@ -447,6 +447,19 @@ def segmentation_for_skeleton():
 
     seg[z_plane, 44:47, 18:20] = 7
 
+    # ID 8: C-shape that wraps back and touches itself at a diagonal corner
+    # Two thick arms connected through a base, tips touch only diagonally.
+    # Base: horizontal bar
+    seg[35:38, 40:43, 35:45] = 8
+    # Left arm going up
+    seg[35:38, 43:48, 35:38] = 8
+    # Right arm going up
+    seg[35:38, 43:48, 42:45] = 8
+    # Tips touch diagonally at (35:38, 48, 38) and (35:38, 48, 42)
+    # but NOT at faces -- add the very tip voxels so they are corner-adjacent
+    seg[36, 48, 38] = 8
+    seg[36, 48, 41] = 8
+
     return seg
 
 
