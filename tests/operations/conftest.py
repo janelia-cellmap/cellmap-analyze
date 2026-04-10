@@ -10,7 +10,7 @@ import os
 from scipy import ndimage
 import pandas as pd
 from tests.test_utils import simple_object_information_dict
-from funlib.persistence import prepare_ds
+from cellmap_analyze.util.zarr_io import prepare_ds
 from tests.contact_site_fixture_helper import compute_contact_sites_ground_truth
 
 

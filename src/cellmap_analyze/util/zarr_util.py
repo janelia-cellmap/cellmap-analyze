@@ -1,8 +1,8 @@
-import json
 import shutil
 
+import zarr
 from cellmap_analyze.util.io_util import split_dataset_path
-from funlib.persistence import prepare_ds
+from cellmap_analyze.util.zarr_io import prepare_ds
 import os
 import shutil
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
@@ -76,9 +76,9 @@ def write_multiscales_metadata(
     multiscales_metadata = generate_multiscales_metadata(
         ds_name, voxel_Size, translation, units, axes
     )
-    # write out metadata to .zattrs file
-    with open(f"{base_ds_path}/.zattrs", "w") as f:
-        json.dump(multiscales_metadata, f, indent=3)
+    # Write via zarr API so it works for both v2 (.zattrs) and v3 (zarr.json)
+    group = zarr.open_group(base_ds_path, mode="a")
+    group.attrs.update(multiscales_metadata)
 
 
 def create_multiscale_dataset(

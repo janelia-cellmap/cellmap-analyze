@@ -1,10 +1,9 @@
 """Integration tests for non-integer voxel size support."""
-import json
 import numpy as np
 import pytest
 import zarr
 from funlib.geometry import Coordinate, Roi
-from funlib.persistence import prepare_ds
+from cellmap_analyze.util.zarr_io import prepare_ds
 
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.zarr_util import (
@@ -162,10 +161,11 @@ class TestOutputMetadata:
             original_voxel_size=original_vs,
         )
 
-        # Read back the OME-Zarr metadata
-        zattrs_path = str(tmp_path / "output.zarr" / "test_ds" / ".zattrs")
-        with open(zattrs_path) as f:
-            metadata = json.load(f)
+        # Read back the OME-Zarr metadata via zarr API (works for v2 and v3)
+        group = zarr.open_group(
+            str(tmp_path / "output.zarr" / "test_ds"), mode="r"
+        )
+        metadata = dict(group.attrs)
 
         scale_transform = metadata["multiscales"][0]["datasets"][0][
             "coordinateTransformations"

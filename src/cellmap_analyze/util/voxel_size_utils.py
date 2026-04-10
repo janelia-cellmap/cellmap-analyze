@@ -149,13 +149,35 @@ def _extract_ome_translation(attrs):
 def _read_parent_attrs(ds):
     """Try to read attributes from the parent zarr group."""
     try:
+        import os
         import zarr
 
+        # Get the filesystem path of the array's store root
         store = ds.data.store
-        parent_path = "/".join(ds.data.path.split("/")[:-1]) if ds.data.path else ""
-        if parent_path:
-            parent = zarr.open(store, mode="r", path=parent_path)
-            return dict(parent.attrs)
+        store_root = getattr(store, "root", None)
+        if store_root:
+            # store.root may be a pathlib.Path or a string (possibly with file:// prefix)
+            store_root = str(store_root)
+            if store_root.startswith("file://"):
+                store_root = store_root[len("file://"):]
+
+        # Determine the array's position within the store
+        array_name = getattr(ds.data, "name", None) or getattr(ds.data, "path", "")
+        array_name = array_name.strip("/")
+
+        if array_name and store_root:
+            # Array opened within a group hierarchy — navigate via store
+            parent_path = "/".join(array_name.split("/")[:-1])
+            if parent_path:
+                parent = zarr.open_group(store, mode="r", path=parent_path)
+                return dict(parent.attrs)
+        elif store_root:
+            # Array opened directly (zarr.open_array on full path) —
+            # the store root IS the array path, so parent is one directory up
+            parent_dir = os.path.dirname(store_root)
+            if os.path.isdir(parent_dir):
+                parent = zarr.open_group(parent_dir, mode="r")
+                return dict(parent.attrs)
     except Exception:
         pass
     return None

@@ -6,7 +6,7 @@ from cellmap_analyze.util.image_data_interface import (
     requires_interpolation,
 )
 from funlib.geometry import Roi, Coordinate
-from funlib.persistence import prepare_ds
+from cellmap_analyze.util.zarr_io import prepare_ds
 
 
 class TestHelperFunctions:
