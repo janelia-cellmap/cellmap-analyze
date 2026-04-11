@@ -111,6 +111,9 @@ def remove_unbridged_adjacencies(data, connectivity=6):
     checks whether they share a bridging voxel at the desired connectivity
     level. If not, the voxel is marked for removal.
 
+    Uses a Cython implementation when available (much faster for large arrays),
+    falling back to a numpy vectorized version otherwise.
+
     Args:
         data: 3D boolean array.
         connectivity: 6 — keep only face-adjacent connections; remove voxels
