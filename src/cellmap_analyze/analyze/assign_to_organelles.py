@@ -2,7 +2,7 @@
 from typing import Union, List
 from cellmap_analyze.util import io_util
 from cellmap_analyze.util.io_util import (
-    get_name_from_path,
+    get_leaf_name_from_path,
     get_output_path_from_input_path,
 )
 from cellmap_analyze.util.image_data_interface import (
@@ -47,7 +47,7 @@ class AssignToOrganelles:
             self.organelle_info_dict[organelle_csv] = df
 
         self.organelle_idi = ImageDataInterface(target_organelle_ds_path)
-        self.organelle_name = get_name_from_path(target_organelle_ds_path).capitalize()
+        self.organelle_name = get_leaf_name_from_path(target_organelle_ds_path).capitalize()
         self.assignment_type = assignment_type
         self.output_path = str(output_path).rstrip("/")
         self.iteration_distance_nm = iteration_distance_nm

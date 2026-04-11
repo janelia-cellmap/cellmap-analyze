@@ -57,6 +57,31 @@ def get_name_from_path(path):
     return data_name
 
 
+def get_leaf_name_from_path(path):
+    """Get just the leaf dataset name, ignoring nesting within the container.
+
+    Examples:
+        "/path/data.zarr/nested/dataset/s0" -> "dataset"
+        "/path/data.zarr/dataset/s0" -> "dataset"
+        "/path/data.zarr/s0" -> ""
+        "/path/data.zarr" -> ""
+        "/path/to/dataset/s0" -> "dataset"  (no .zarr/.n5)
+        "/path/to/dataset" -> "dataset"  (no .zarr/.n5, no scale)
+    """
+    path = str(path).rstrip("/")
+
+    if ".zarr" in path or ".n5" in path:
+        name = get_name_from_path(path)
+    else:
+        # No zarr/n5 extension — strip scale and take last component
+        stripped = split_on_last_scale(path)
+        name = os.path.basename(stripped) if stripped else ""
+
+    if "/" in name:
+        return name.rsplit("/", 1)[1]
+    return name
+
+
 def split_dataset_path(dataset_path, scale=None) -> tuple[str, str]:
     """Split the dataset path into the filename and dataset
 

@@ -11,6 +11,7 @@ from cellmap_analyze.util.io_util import (
     split_on_last_scale,
     split_dataset_path,
     get_name_from_path,
+    get_leaf_name_from_path,
     get_output_path_from_input_path,
 )
 
@@ -103,6 +104,50 @@ class TestGetNameFromPath:
     def test_n5_format(self):
         """Test extracting name from n5 format."""
         name = get_name_from_path("/path/data.n5/dataset/s0")
+        assert name == "dataset"
+
+
+class TestGetLeafNameFromPath:
+    """Test the get_leaf_name_from_path function."""
+
+    def test_normal_dataset(self):
+        name = get_leaf_name_from_path("/path/data.zarr/dataset/s0")
+        assert name == "dataset"
+
+    def test_nested_dataset(self):
+        name = get_leaf_name_from_path("/path/data.zarr/nested/dataset/s0")
+        assert name == "dataset"
+
+    def test_deeply_nested_dataset(self):
+        name = get_leaf_name_from_path("/path/data.zarr/a/b/c/s0")
+        assert name == "c"
+
+    def test_root_dataset(self):
+        name = get_leaf_name_from_path("/path/data.zarr/s0")
+        assert name == ""
+
+    def test_without_scale(self):
+        name = get_leaf_name_from_path("/path/data.zarr/dataset")
+        assert name == "dataset"
+
+    def test_n5_format(self):
+        name = get_leaf_name_from_path("/path/data.n5/nested/dataset/s0")
+        assert name == "dataset"
+
+    def test_zarr_is_dataset(self):
+        name = get_leaf_name_from_path("/path/data.zarr")
+        assert name == ""
+
+    def test_zarr_is_dataset_with_scale(self):
+        name = get_leaf_name_from_path("/path/data.zarr/s0")
+        assert name == ""
+
+    def test_no_zarr_with_scale(self):
+        name = get_leaf_name_from_path("/path/to/dataset/s0")
+        assert name == "dataset"
+
+    def test_no_zarr_without_scale(self):
+        name = get_leaf_name_from_path("/path/to/dataset")
         assert name == "dataset"
 
 
