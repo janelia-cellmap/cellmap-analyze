@@ -4,7 +4,7 @@ from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
-from cellmap_analyze.util.io_util import get_name_from_path, get_output_path_from_input_path
+from cellmap_analyze.util.io_util import get_leaf_name_from_path, get_output_path_from_input_path
 from cellmap_analyze.cythonizing.process_arrays import initialize_contact_site_array
 from cellmap_analyze.cythonizing.bresenham3D import bresenham_3D_lines
 import logging
@@ -92,10 +92,10 @@ class ContactSites(ComputeConfigMixin):
         if self.roi is None:
             self.roi = self.organelle_1_idi.roi.intersect(self.organelle_2_idi.roi)
 
-        if not get_name_from_path(output_path):
+        if not get_leaf_name_from_path(output_path):
             output_path = (
                 output_path
-                + f"/{get_name_from_path(organelle_1_path)}_{get_name_from_path(organelle_2_path)}_contacts"
+                + f"/{get_leaf_name_from_path(organelle_1_path)}_{get_leaf_name_from_path(organelle_2_path)}_contacts"
             )
 
         self.output_path = str(output_path).rstrip("/")

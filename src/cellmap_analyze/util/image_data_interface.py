@@ -250,11 +250,12 @@ def to_ndarray_tensorstore(
             slice(snapped_offset[i], snapped_end[i]) for i in range(3)
         )
 
-    roi = roi.snap_to_grid(voxel_size)
+    # Subtract offset before snapping so snap_to_grid aligns to the
+    # actual voxel boundaries (offset, offset+vs, offset+2*vs, …)
+    # instead of (0, vs, 2*vs, …).
     roi -= offset
+    roi = roi.snap_to_grid(voxel_size)
     roi /= voxel_size
-
-    # in the event that we are passing things at half voxel offsets, we need to snap the roi to the grid
 
     # Specify the range
     roi_slices = roi.to_slices()

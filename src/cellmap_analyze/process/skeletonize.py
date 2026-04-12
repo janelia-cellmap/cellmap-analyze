@@ -23,6 +23,128 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# --- Unbridged adjacency removal helpers ---
+#
+# Two voxels can be adjacent in three ways:
+#   face-adjacent   (6-conn):  differ in 1 axis, share a face
+#   edge-adjacent   (18-conn): differ in 2 axes, share an edge
+#   vertex-adjacent (26-conn): differ in 3 axes, share only a corner point
+#
+# A "bridge" is a third voxel that is face-adjacent (or edge-adjacent,
+# depending on mode) to BOTH voxels in a pair. If at least one bridge
+# voxel is foreground, the pair is connected at the desired connectivity
+# without relying on the weaker adjacency.
+#
+# Only half the directions are listed (first nonzero component positive)
+# because the A->B and B->A relationships are symmetric.
+
+# Edge-adjacent pairs and their face bridges.
+# For an offset like (1,1,0), the 2 face bridges are found by zeroing
+# each nonzero component: (1,0,0) and (0,1,0).
+_EDGE_ADJ_FACE_BRIDGES = [
+    ((1, 1, 0), [(1, 0, 0), (0, 1, 0)]),
+    ((1, -1, 0), [(1, 0, 0), (0, -1, 0)]),
+    ((1, 0, 1), [(1, 0, 0), (0, 0, 1)]),
+    ((1, 0, -1), [(1, 0, 0), (0, 0, -1)]),
+    ((0, 1, 1), [(0, 1, 0), (0, 0, 1)]),
+    ((0, 1, -1), [(0, 1, 0), (0, 0, -1)]),
+]
+
+# Vertex-adjacent pairs and their face bridges only.
+# For an offset like (1,1,1), the 3 face bridges are found by keeping
+# one nonzero component at a time: (1,0,0), (0,1,0), (0,0,1).
+_VERTEX_ADJ_FACE_BRIDGES = [
+    ((1, 1, 1), [(1, 0, 0), (0, 1, 0), (0, 0, 1)]),
+    ((1, 1, -1), [(1, 0, 0), (0, 1, 0), (0, 0, -1)]),
+    ((1, -1, 1), [(1, 0, 0), (0, -1, 0), (0, 0, 1)]),
+    ((1, -1, -1), [(1, 0, 0), (0, -1, 0), (0, 0, -1)]),
+]
+
+# Vertex-adjacent pairs with all bridges (3 face + 3 edge = 6 per pair).
+# Edge bridges are found by keeping two nonzero components at a time:
+# e.g. for (1,1,1) -> (1,1,0), (1,0,1), (0,1,1).
+_VERTEX_ADJ_ALL_BRIDGES = [
+    (
+        (1, 1, 1),
+        [(1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 0), (1, 0, 1), (0, 1, 1)],
+    ),
+    (
+        (1, 1, -1),
+        [(1, 0, 0), (0, 1, 0), (0, 0, -1), (1, 1, 0), (1, 0, -1), (0, 1, -1)],
+    ),
+    (
+        (1, -1, 1),
+        [(1, 0, 0), (0, -1, 0), (0, 0, 1), (1, -1, 0), (1, 0, 1), (0, -1, 1)],
+    ),
+    (
+        (1, -1, -1),
+        [(1, 0, 0), (0, -1, 0), (0, 0, -1), (1, -1, 0), (1, 0, -1), (0, -1, -1)],
+    ),
+]
+
+
+def _shift(data, dz, dy, dx):
+    """Shift a 3D boolean array by (dz, dy, dx), filling vacated edges with False."""
+    result = np.zeros_like(data)
+    sz_src, sz_dst = _shift_slices(dz, data.shape[0])
+    sy_src, sy_dst = _shift_slices(dy, data.shape[1])
+    sx_src, sx_dst = _shift_slices(dx, data.shape[2])
+    result[sz_dst, sy_dst, sx_dst] = data[sz_src, sy_src, sx_src]
+    return result
+
+
+def _shift_slices(delta, size):
+    """Return (source_slice, dest_slice) for a shift of `delta` along an axis of `size`."""
+    if delta > 0:
+        return slice(0, size - delta), slice(delta, size)
+    elif delta < 0:
+        return slice(-delta, size), slice(0, size + delta)
+    else:
+        return slice(None), slice(None)
+
+
+def remove_unbridged_adjacencies(data, connectivity=6):
+    """Remove foreground voxels whose only connection to a neighbor is weaker
+    than the specified connectivity.
+
+    For each pair of edge-adjacent or vertex-adjacent foreground voxels,
+    checks whether they share a bridging voxel at the desired connectivity
+    level. If not, the voxel is marked for removal.
+
+    Uses a Cython implementation when available (much faster for large arrays),
+    falling back to a numpy vectorized version otherwise.
+
+    Args:
+        data: 3D boolean array.
+        connectivity: 6 — keep only face-adjacent connections; remove voxels
+                          that are only edge- or vertex-adjacent without a
+                          face bridge.
+                      18 — keep face- and edge-adjacent connections; remove
+                           voxels that are only vertex-adjacent without a
+                           face or edge bridge.
+
+    Returns:
+        Modified boolean array with unbridged voxels removed.
+    """
+    if connectivity == 6:
+        pairs = _EDGE_ADJ_FACE_BRIDGES + _VERTEX_ADJ_FACE_BRIDGES
+    elif connectivity == 18:
+        pairs = _VERTEX_ADJ_ALL_BRIDGES
+    else:
+        raise ValueError(f"connectivity must be 6 or 18, got {connectivity}")
+
+    to_remove = np.zeros_like(data)
+    for offset, bridges in pairs:
+        neighbor = _shift(data, *offset)
+        any_bridge = np.zeros_like(data)
+        for b in bridges:
+            any_bridge |= _shift(data, *b)
+        problem = data & neighbor & ~any_bridge
+        to_remove |= problem
+
+    return data & ~to_remove
+
+
 class Skeletonize(ComputeConfigMixin):
     def __init__(
         self,
@@ -44,7 +166,11 @@ class Skeletonize(ComputeConfigMixin):
             csv_path: Path to CSV containing bounding box info with columns:
                      MIN X (nm), MIN Y (nm), MIN Z (nm), MAX X (nm), MAX Y (nm), MAX Z (nm)
                      and index column for IDs
-            erosion: Whether to apply binary erosion before skeletonization
+            erosion: Controls pre-skeletonization erosion.
+                     True or "full": standard binary erosion with 6-connectivity cross SE.
+                     6: targeted removal of edge/vertex-only bridges (keep face-connected).
+                     18: targeted removal of vertex-only bridges (keep face+edge-connected).
+                     False or None: no erosion.
             min_branch_length_nm: Minimum branch length for pruning (in nm)
             tolerance_nm: Tolerance for simplification (in nm)
             num_workers: Number of parallel workers
@@ -54,6 +180,19 @@ class Skeletonize(ComputeConfigMixin):
         self.segmentation_idi = ImageDataInterface(segmentation_path, timeout=timeout)
         self.output_path = str(output_path).rstrip("/")
         self.csv_path = csv_path
+        # Normalize erosion parameter
+        if erosion is True:
+            erosion = "full"
+        elif erosion is False or erosion is None:
+            erosion = None
+        elif erosion in (6, 18):
+            erosion = str(erosion)
+        elif erosion in ("full", "6", "18"):
+            pass
+        else:
+            raise ValueError(
+                f"erosion must be True, False, None, 'full', 6, 18, '6', or '18', got {erosion!r}"
+            )
         self.erosion = erosion
         self.min_branch_length_nm = min_branch_length_nm
         self.tolerance_nm = tolerance_nm
@@ -88,7 +227,7 @@ class Skeletonize(ComputeConfigMixin):
         segmentation_idi: ImageDataInterface,
         bbox_df: pd.DataFrame,
         output_path: str,
-        erosion: bool,
+        erosion: str,
         min_branch_length_nm: float,
         tolerance_nm: float,
     ):
@@ -100,7 +239,7 @@ class Skeletonize(ComputeConfigMixin):
             segmentation_idi: ImageDataInterface for the segmentation
             bbox_df: DataFrame with bounding box information
             output_path: Base output path
-            erosion: Whether to apply erosion
+            erosion: Erosion mode ("full", "6", "18", or None)
             min_branch_length_nm: Minimum branch length for pruning
             tolerance_nm: Tolerance for simplification
         """
@@ -152,7 +291,7 @@ class Skeletonize(ComputeConfigMixin):
             distance_transform = edt_module.edt(data, anisotropy=tuple(isotropic_voxel_size))
 
             # Apply erosion if requested
-            if erosion:
+            if erosion == "full":
                 # Define a 3D cross-shaped structuring element (6-connectivity)
                 cross_3d = np.array(
                     [
@@ -163,7 +302,12 @@ class Skeletonize(ComputeConfigMixin):
                     dtype=bool,
                 )
                 data = binary_erosion(data, cross_3d)
+            elif erosion == "6":
+                data = remove_unbridged_adjacencies(data, connectivity=6)
+            elif erosion == "18":
+                data = remove_unbridged_adjacencies(data, connectivity=18)
 
+            if erosion is not None:
                 # Check if erosion removed everything
                 if not np.any(data):
                     logger.warning(

@@ -80,8 +80,18 @@ def compute_reference_skeleton(
     if not np.any(data):
         return None
 
+    from cellmap_analyze.process.skeletonize import remove_unbridged_adjacencies
+
+    # Normalize erosion parameter (same as Skeletonize.__init__)
+    if erosion is True:
+        erosion = "full"
+    elif erosion is False or erosion is None:
+        erosion = None
+    elif erosion in (6, 18):
+        erosion = str(erosion)
+
     # Apply erosion if requested
-    if erosion:
+    if erosion == "full":
         cross_3d = np.array(
             [
                 [[0, 0, 0], [0, 1, 0], [0, 0, 0]],
@@ -91,6 +101,10 @@ def compute_reference_skeleton(
             dtype=bool,
         )
         data = binary_erosion(data, cross_3d)
+    elif erosion == "6":
+        data = remove_unbridged_adjacencies(data, connectivity=6)
+    elif erosion == "18":
+        data = remove_unbridged_adjacencies(data, connectivity=18)
 
     if not np.any(data):
         return None
@@ -160,11 +174,11 @@ def test_skeletonize_single_worker(tmp_zarr, tmp_skeletonize_csv):
             seg_props = json.load(f)
             assert seg_props["@type"] == "neuroglancer_segment_properties"
             assert "ids" in seg_props["inline"]
-            assert set(seg_props["inline"]["ids"]) == {"1", "2", "3", "4", "5", "6", "7"}
+            assert set(seg_props["inline"]["ids"]) == {"1", "2", "3", "4", "5", "6", "7", "8"}
 
     # Check that skeleton files were created for all IDs (including empty skeletons)
     # Note: Some IDs (like ID 7 figure-8) may be completely removed by erosion and written as empty skeletons
-    ids = [1, 2, 3, 4, 5, 6, 7]
+    ids = [1, 2, 3, 4, 5, 6, 7, 8]
     for id_val in ids:
         # All IDs should have skeleton files (even if empty)
         full_path = f"{output_path}/full/{id_val}"
@@ -199,7 +213,7 @@ def test_skeletonize_produces_reasonable_skeletons(
     skeletonizer.skeletonize()
 
     # For each ID, verify the skeleton has reasonable properties
-    ids = [1, 2, 3, 4, 5, 6, 7]
+    ids = [1, 2, 3, 4, 5, 6, 7, 8]
     for id_val in ids:
         test_skeleton_path = f"{output_path}/full/{id_val}"
 
@@ -286,7 +300,7 @@ def test_skeletonize_without_erosion(tmp_zarr, tmp_skeletonize_csv, voxel_size):
     # for certain block cross-sections (e.g. 6x6, 8x6, 4x4) due to symmetric
     # surface removal. After isotropic resampling, small objects (IDs 1-3) may
     # hit these problematic dimensions and lose their skeletons entirely.
-    ids = [1, 2, 3, 4, 5, 6, 7]
+    ids = [1, 2, 3, 4, 5, 6, 7, 8]
     ids_with_vertices = []
     for id_val in ids:
         full_path = f"{output_path}/full/{id_val}"
@@ -414,7 +428,7 @@ def test_skeletonize_with_roi_padding(tmp_zarr, tmp_skeletonize_csv, voxel_size)
     # For each ID, verify that the skeleton is within the expected bounds
     df = pd.read_csv(tmp_skeletonize_csv, index_col=0)
 
-    for id_val in [1, 2, 3, 4, 5, 6]:
+    for id_val in [1, 2, 3, 4, 5, 6, 8]:
         test_skeleton_path = f"{output_path}/full/{id_val}"
         if not os.path.exists(test_skeleton_path):
             continue
@@ -602,3 +616,211 @@ def test_skeletonize_preserves_loops(tmp_zarr, tmp_skeletonize_csv, voxel_size):
             f"Figure-8 with {len(cycles)} loops should have at least 1 branch point, "
             f"but found {branch_points}"
         )
+
+
+# =============================================================================
+# Unit tests for remove_unbridged_adjacencies
+# =============================================================================
+
+
+class TestRemoveUnbridgedAdjacencies:
+    """Unit tests for the remove_unbridged_adjacencies function."""
+
+    def test_edge_adjacent_no_bridge_removed_conn6(self):
+        """Two voxels edge-adjacent with no face bridge should have one removed at connectivity=6."""
+        from cellmap_analyze.process.skeletonize import remove_unbridged_adjacencies
+
+        data = np.zeros((5, 5, 5), dtype=bool)
+        data[1, 1, 1] = True
+        data[2, 2, 1] = True  # edge-adjacent via (1,1,0), no face bridge
+        result = remove_unbridged_adjacencies(data, connectivity=6)
+        # At least one should be removed
+        assert result.sum() < data.sum()
+
+    def test_edge_adjacent_with_bridge_kept_conn6(self):
+        """Two voxels edge-adjacent WITH a face bridge should both be kept at connectivity=6."""
+        from cellmap_analyze.process.skeletonize import remove_unbridged_adjacencies
+
+        data = np.zeros((5, 5, 5), dtype=bool)
+        data[1, 1, 1] = True
+        data[2, 2, 1] = True  # edge-adjacent
+        data[2, 1, 1] = True  # face bridge between them
+        result = remove_unbridged_adjacencies(data, connectivity=6)
+        assert result.sum() == data.sum()
+
+    def test_corner_adjacent_no_bridge_removed_both_modes(self):
+        """Two voxels vertex-adjacent with no bridge should have one removed in both modes."""
+        from cellmap_analyze.process.skeletonize import remove_unbridged_adjacencies
+
+        data = np.zeros((5, 5, 5), dtype=bool)
+        data[1, 1, 1] = True
+        data[2, 2, 2] = True  # vertex-adjacent, no bridges
+
+        result_6 = remove_unbridged_adjacencies(data, connectivity=6)
+        assert result_6.sum() < data.sum()
+
+        result_18 = remove_unbridged_adjacencies(data, connectivity=18)
+        assert result_18.sum() < data.sum()
+
+    def test_corner_adjacent_with_edge_bridge_only(self):
+        """Vertex-adjacent pair with edge bridge only: kept for conn=18, removed for conn=6."""
+        from cellmap_analyze.process.skeletonize import remove_unbridged_adjacencies
+
+        data = np.zeros((5, 5, 5), dtype=bool)
+        data[1, 1, 1] = True
+        data[2, 2, 2] = True  # vertex-adjacent
+        data[2, 2, 1] = True  # edge bridge (differs in 2 axes from [1,1,1])
+
+        # connectivity=18: edge bridge exists, should keep both original voxels
+        result_18 = remove_unbridged_adjacencies(data, connectivity=18)
+        assert result_18[1, 1, 1] and result_18[2, 2, 2]
+
+        # connectivity=6: the edge bridge voxel (2,2,1) is itself only
+        # edge-connected to (1,1,1), so it gets removed. But A and B survive
+        # this single pass because (2,2,1) was still present when checked.
+        result_6 = remove_unbridged_adjacencies(data, connectivity=6)
+        assert not result_6[2, 2, 1]  # edge bridge removed
+        # A and B both survive the single pass (bridge was present when checked)
+        assert result_6[1, 1, 1] and result_6[2, 2, 2]
+
+    def test_solid_cube_unchanged(self):
+        """A solid cube should have no voxels removed (all neighbors are face-bridged)."""
+        from cellmap_analyze.process.skeletonize import remove_unbridged_adjacencies
+
+        data = np.zeros((10, 10, 10), dtype=bool)
+        data[2:6, 2:6, 2:6] = True
+        original_count = data.sum()
+
+        result_6 = remove_unbridged_adjacencies(data, connectivity=6)
+        assert result_6.sum() == original_count
+
+        result_18 = remove_unbridged_adjacencies(data, connectivity=18)
+        assert result_18.sum() == original_count
+
+    def test_c_shape_diagonal_broken_body_intact(self):
+        """A C-shape touching itself at a diagonal should have the diagonal broken."""
+        from cellmap_analyze.process.skeletonize import remove_unbridged_adjacencies
+
+        data = np.zeros((7, 12, 12), dtype=bool)
+        # Base
+        data[2:5, 2:5, 2:10] = True
+        # Left arm
+        data[2:5, 5:10, 2:5] = True
+        # Right arm
+        data[2:5, 5:10, 7:10] = True
+        # Tips touch diagonally
+        data[3, 10, 5] = True
+        data[3, 10, 6] = True
+
+        original_count = data.sum()
+        result = remove_unbridged_adjacencies(data, connectivity=6)
+
+        # Should remove the diagonal-only tip voxels but keep the body
+        assert result.sum() < original_count
+        # Body should be intact
+        assert result[2:5, 2:5, 2:10].all()
+        assert result[2:5, 5:10, 2:5].all()
+        assert result[2:5, 5:10, 7:10].all()
+
+    def test_invalid_connectivity_raises(self):
+        """Invalid connectivity value should raise ValueError."""
+        from cellmap_analyze.process.skeletonize import remove_unbridged_adjacencies
+
+        data = np.zeros((3, 3, 3), dtype=bool)
+        with pytest.raises(ValueError):
+            remove_unbridged_adjacencies(data, connectivity=26)
+
+
+# =============================================================================
+# Integration tests for new erosion modes
+# =============================================================================
+
+
+def test_skeletonize_diagonal_6_erosion(tmp_zarr, tmp_skeletonize_csv):
+    """Test skeletonization with connectivity=6 erosion mode."""
+    output_path = tmp_zarr + "/test_skeletonize_diagonal_6"
+
+    skeletonizer = Skeletonize(
+        segmentation_path=f"{tmp_zarr}/segmentation_for_skeleton/s0",
+        output_path=output_path,
+        csv_path=tmp_skeletonize_csv,
+        erosion=6,
+        min_branch_length_nm=0,
+        tolerance_nm=0,
+        num_workers=1,
+    )
+
+    skeletonizer.skeletonize()
+
+    # Check that skeleton files were created for all IDs
+    for id_val in [1, 2, 3, 4, 5, 6, 7, 8]:
+        full_path = f"{output_path}/full/{id_val}"
+        simplified_path = f"{output_path}/simplified/{id_val}"
+        assert os.path.exists(full_path), f"Full skeleton missing for ID {id_val}"
+        assert os.path.exists(simplified_path), f"Simplified skeleton missing for ID {id_val}"
+
+
+def test_skeletonize_diagonal_18_erosion(tmp_zarr, tmp_skeletonize_csv):
+    """Test skeletonization with connectivity=18 erosion mode."""
+    output_path = tmp_zarr + "/test_skeletonize_diagonal_18"
+
+    skeletonizer = Skeletonize(
+        segmentation_path=f"{tmp_zarr}/segmentation_for_skeleton/s0",
+        output_path=output_path,
+        csv_path=tmp_skeletonize_csv,
+        erosion=18,
+        min_branch_length_nm=0,
+        tolerance_nm=0,
+        num_workers=1,
+    )
+
+    skeletonizer.skeletonize()
+
+    # Check that skeleton files were created for all IDs
+    for id_val in [1, 2, 3, 4, 5, 6, 7, 8]:
+        full_path = f"{output_path}/full/{id_val}"
+        simplified_path = f"{output_path}/simplified/{id_val}"
+        assert os.path.exists(full_path), f"Full skeleton missing for ID {id_val}"
+        assert os.path.exists(simplified_path), f"Simplified skeleton missing for ID {id_val}"
+
+
+def test_skeletonize_backward_compat_erosion_true(tmp_zarr, tmp_skeletonize_csv):
+    """Test that erosion=True still works (backward compatibility)."""
+    output_path = tmp_zarr + "/test_skeletonize_compat_true"
+
+    skeletonizer = Skeletonize(
+        segmentation_path=f"{tmp_zarr}/segmentation_for_skeleton/s0",
+        output_path=output_path,
+        csv_path=tmp_skeletonize_csv,
+        erosion=True,
+        min_branch_length_nm=0,
+        tolerance_nm=0,
+        num_workers=1,
+    )
+
+    assert skeletonizer.erosion == "full"
+    skeletonizer.skeletonize()
+
+    for id_val in [1, 2, 3, 4, 5, 6, 7, 8]:
+        assert os.path.exists(f"{output_path}/full/{id_val}")
+
+
+def test_skeletonize_backward_compat_erosion_false(tmp_zarr, tmp_skeletonize_csv):
+    """Test that erosion=False still works (backward compatibility)."""
+    output_path = tmp_zarr + "/test_skeletonize_compat_false"
+
+    skeletonizer = Skeletonize(
+        segmentation_path=f"{tmp_zarr}/segmentation_for_skeleton/s0",
+        output_path=output_path,
+        csv_path=tmp_skeletonize_csv,
+        erosion=False,
+        min_branch_length_nm=0,
+        tolerance_nm=0,
+        num_workers=1,
+    )
+
+    assert skeletonizer.erosion is None
+    skeletonizer.skeletonize()
+
+    for id_val in [1, 2, 3, 4, 5, 6, 7, 8]:
+        assert os.path.exists(f"{output_path}/full/{id_val}")

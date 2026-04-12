@@ -8,7 +8,7 @@ from cellmap_analyze.util.dask_util import (
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.information_holders import ObjectInformation
 from cellmap_analyze.util.io_util import (
-    get_name_from_path,
+    get_leaf_name_from_path,
 )
 import pandas as pd
 import logging
@@ -110,7 +110,7 @@ class Measure(ComputeConfigMixin):
             self.get_measurements_blockwise_extra_kwargs["raw_idi"] = self.raw_idi
 
         # Handle root datasets (empty name) by using "data" as default
-        input_name = get_name_from_path(self.input_path)
+        input_name = get_leaf_name_from_path(self.input_path)
         if not input_name:
             input_name = "data"
         self.output_directory = (
@@ -259,7 +259,7 @@ class Measure(ComputeConfigMixin):
 
     def write_measurements(self):
         os.makedirs(self.output_path, exist_ok=True)
-        file_name = get_name_from_path(self.input_path)
+        file_name = get_leaf_name_from_path(self.input_path)
         # Handle root datasets (empty name) by using "measurements" as filename
         if not file_name:
             file_name = "measurements"
@@ -283,8 +283,8 @@ class Measure(ComputeConfigMixin):
             columns += ["Mean Intensity", "Std Intensity"]
 
         if self.contact_sites:
-            organelle_1_name = get_name_from_path(self.organelle_1_path)
-            organelle_2_name = get_name_from_path(self.organelle_2_path)
+            organelle_1_name = get_leaf_name_from_path(self.organelle_1_path)
+            organelle_2_name = get_leaf_name_from_path(self.organelle_2_path)
             # Handle root datasets (empty names) by using defaults
             if not organelle_1_name:
                 organelle_1_name = "organelle_1"
