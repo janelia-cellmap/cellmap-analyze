@@ -150,13 +150,15 @@ def prepare_ds(
     # Get the leaf array name
     array_name = ds_name.split("/")[-1] if "/" in ds_name else ds_name
 
-    # Create the array within the appropriate group
+    # Create the array, matching the container's zarr format so
+    # v2 containers get v2 arrays and v3 containers get v3 arrays
     arr = zarr.open_array(
         store=os.path.join(filename, ds_name),
         shape=shape,
         chunks=chunk_shape,
         dtype=dtype,
         mode="w" if delete else "a",
+        zarr_format=root.metadata.zarr_format,
     )
 
     # Write metadata

@@ -277,3 +277,51 @@ class TestZarrV2BackwardCompat:
         s0_path = os.path.join(str(tmp_path / "ngff.zarr" / "mito" / "s0"))
         assert os.path.exists(os.path.join(s0_path, "zarr.json"))
         assert not os.path.exists(os.path.join(s0_path, ".zarray"))
+
+    def test_prepare_ds_matches_container_format(self, tmp_path):
+        """prepare_ds should create arrays matching the container's zarr format.
+
+        A v2 container (root .zgroup) should get v2 arrays (.zarray),
+        not v3 arrays (zarr.json). This ensures tools like Neuroglancer
+        that inherit the format from the root group can read the arrays.
+        """
+        from cellmap_analyze.util.zarr_io import prepare_ds
+
+        # Create a v2 container
+        v2_path = str(tmp_path / "v2container.zarr")
+        os.makedirs(v2_path)
+        with open(os.path.join(v2_path, ".zgroup"), "w") as f:
+            json.dump({"zarr_format": 2}, f)
+        with open(os.path.join(v2_path, ".zattrs"), "w") as f:
+            json.dump({}, f)
+
+        vs = Coordinate(8, 8, 8)
+        shape = (10, 10, 10)
+        roi = Roi(Coordinate(0, 0, 0), Coordinate(shape) * vs)
+
+        prepare_ds(v2_path, "seg/s0", roi, vs, np.uint8, write_size=roi.shape)
+
+        # Array should be v2 format
+        s0_path = os.path.join(v2_path, "seg", "s0")
+        assert os.path.exists(os.path.join(s0_path, ".zarray")), (
+            "Expected .zarray (v2) in v2 container but not found"
+        )
+        assert not os.path.exists(os.path.join(s0_path, "zarr.json")), (
+            "Found zarr.json (v3) in v2 container — format mismatch"
+        )
+
+        # Create a v3 container
+        v3_path = str(tmp_path / "v3container.zarr")
+        import zarr
+        zarr.open_group(v3_path, mode="w", zarr_format=3)
+
+        prepare_ds(v3_path, "seg/s0", roi, vs, np.uint8, write_size=roi.shape)
+
+        # Array should be v3 format
+        s0_path = os.path.join(v3_path, "seg", "s0")
+        assert os.path.exists(os.path.join(s0_path, "zarr.json")), (
+            "Expected zarr.json (v3) in v3 container but not found"
+        )
+        assert not os.path.exists(os.path.join(s0_path, ".zarray")), (
+            "Found .zarray (v2) in v3 container — format mismatch"
+        )
