@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 
@@ -9,11 +10,55 @@ from cellmap_analyze.util.cellmap_array import CellMapArray
 
 logger = logging.getLogger(__name__)
 
+# Map N5 dataType strings to numpy dtypes
+_N5_DTYPE_MAP = {
+    "uint8": np.uint8,
+    "uint16": np.uint16,
+    "uint32": np.uint32,
+    "uint64": np.uint64,
+    "int8": np.int8,
+    "int16": np.int16,
+    "int32": np.int32,
+    "int64": np.int64,
+    "float32": np.float32,
+    "float64": np.float64,
+}
+
+
+class N5ArrayMetadata:
+    """Lightweight metadata wrapper for N5 arrays.
+
+    Provides the same metadata interface as zarr.Array (shape, chunks, dtype,
+    attrs) by reading the N5 attributes.json directly. Actual data reads go
+    through tensorstore in ImageDataInterface.
+    """
+
+    def __init__(self, path):
+        attrs_path = os.path.join(path, "attributes.json")
+        with open(attrs_path) as f:
+            self._attrs = json.load(f)
+
+        self.shape = tuple(self._attrs["dimensions"])
+        self.chunks = tuple(self._attrs["blockSize"])
+        self.dtype = np.dtype(_N5_DTYPE_MAP[self._attrs["dataType"]])
+        self.attrs = self._attrs
+
+    def __getitem__(self, slices):
+        raise NotImplementedError(
+            "N5ArrayMetadata does not support direct data access. "
+            "Use ImageDataInterface.to_ndarray_ts() instead."
+        )
+
+    def __setitem__(self, slices, value):
+        raise NotImplementedError(
+            "N5ArrayMetadata does not support direct data access."
+        )
+
 
 def open_dataset(filename, ds_name, mode="r"):
     """Open a zarr dataset and return a CellMapArray.
 
-    Supports zarr v2, v3, and hybrid (v2 groups with v3 arrays) formats.
+    Supports zarr v2, v3, hybrid (v2 groups with v3 arrays), and N5 formats.
 
     Args:
         filename: Path to the zarr container directory.
@@ -27,9 +72,16 @@ def open_dataset(filename, ds_name, mode="r"):
     full_path = os.path.join(filename, ds_name)
     try:
         ds = zarr.open_array(full_path, mode=mode)
-    except Exception as e:
-        logger.error("failed to open %s/%s", filename, ds_name)
-        raise e
+    except Exception:
+        # Zarr 3.x cannot open N5 natively — fall back to reading
+        # the N5 attributes.json for metadata.
+        n5_attrs_path = os.path.join(full_path, "attributes.json")
+        if os.path.exists(n5_attrs_path):
+            logger.debug("falling back to N5 metadata reader for %s", full_path)
+            ds = N5ArrayMetadata(full_path)
+        else:
+            logger.error("failed to open %s/%s", filename, ds_name)
+            raise
 
     voxel_size, offset = _read_voxel_size_offset(ds)
     return CellMapArray(ds, voxel_size, offset)
@@ -98,13 +150,15 @@ def prepare_ds(
     # Get the leaf array name
     array_name = ds_name.split("/")[-1] if "/" in ds_name else ds_name
 
-    # Create the array within the appropriate group
+    # Create the array, matching the container's zarr format so
+    # v2 containers get v2 arrays and v3 containers get v3 arrays
     arr = zarr.open_array(
         store=os.path.join(filename, ds_name),
         shape=shape,
         chunks=chunk_shape,
         dtype=dtype,
         mode="w" if delete else "a",
+        zarr_format=root.metadata.zarr_format,
     )
 
     # Write metadata

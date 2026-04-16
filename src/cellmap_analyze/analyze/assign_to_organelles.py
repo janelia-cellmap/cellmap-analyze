@@ -8,12 +8,15 @@ from cellmap_analyze.util.io_util import (
 from cellmap_analyze.util.image_data_interface import (
     ImageDataInterface,
 )
+from cellmap_analyze.util.mixins import ComputeConfigMixin
+from cellmap_analyze.util import dask_util
+from cellmap_analyze.util.dask_util import create_block_from_index
+from funlib.geometry import Coordinate
 import logging
 import pandas as pd
 import numpy as np
 import os
 from scipy import spatial
-from tqdm import tqdm
 import fastremap
 import fastmorph
 
@@ -25,7 +28,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class AssignToOrganelles:
+class AssignToOrganelles(ComputeConfigMixin):
     def __init__(
         self,
         organelle_csvs: Union[str, List[str]],
@@ -33,7 +36,9 @@ class AssignToOrganelles:
         output_path: str,
         assignment_type: int = 0,
         iteration_distance_nm=10_000,
+        num_workers: int = 1,
     ):
+        super().__init__(num_workers)
         if isinstance(organelle_csvs, str):
             organelle_csvs = [organelle_csvs]
 
@@ -47,141 +52,345 @@ class AssignToOrganelles:
             self.organelle_info_dict[organelle_csv] = df
 
         self.organelle_idi = ImageDataInterface(target_organelle_ds_path)
-        self.organelle_name = get_leaf_name_from_path(target_organelle_ds_path).capitalize()
+        self.organelle_name = get_leaf_name_from_path(
+            target_organelle_ds_path
+        ).capitalize()
         self.assignment_type = assignment_type
         self.output_path = str(output_path).rstrip("/")
         self.iteration_distance_nm = iteration_distance_nm
 
     @staticmethod
-    def assign_to_containing_organelle(organelle_idi, df, organelle_name):
-        organelle_data = organelle_idi.to_ndarray_ts()
-        coms = df[["COM Z (nm)", "COM Y (nm)", "COM X (nm)"]].to_numpy()
-        # Already have top left corners aligned since in measure_util get_region_properties we already center on voxel so that top left corners are aligned
-        inds = np.astype(coms // organelle_idi.voxel_size, int)
-        in_bounds = np.all(
-            (inds >= organelle_idi.domain.inclusive_min), axis=1
-        ) & np.all((inds < organelle_idi.domain.exclusive_max), axis=1)
+    def _group_coms_by_block(coms_nm, organelle_idi, com_row_indices=None):
+        """Group COM positions by block index.
 
-        id_col = f"{organelle_name} ID"
-        df.loc[in_bounds, id_col] = organelle_data[
-            inds[in_bounds, 0], inds[in_bounds, 1], inds[in_bounds, 2]
-        ]
-        df[id_col] = df[id_col].astype(int)
+        Args:
+            coms_nm: Array of COM positions in nm, shape (N, 3).
+            organelle_idi: ImageDataInterface for the organelle dataset.
+            com_row_indices: Optional list of original DataFrame row indices.
+                If None, uses range(len(coms_nm)).
 
-    @staticmethod
-    def assign_to_n_nearest_organelles(
-        organelle_idi, df, n, iteration_distance_nm, organelle_name
-    ):
-        coms = df[["COM Z (nm)", "COM Y (nm)", "COM X (nm)"]].to_numpy()
-        inds = np.astype(coms // organelle_idi.voxel_size, int)
-        organelle_data = organelle_idi.to_ndarray_ts()
-        if len(fastremap.unique(organelle_data[organelle_data > 0])) < n:
-            raise ValueError(
-                f"Number of unique organelle ids in the segmentation ({fastremap.unique(organelle_data[organelle_data > 0])}) is less than n ({n})."
-                " Please choose a smaller n or use a different assignment method."
+        Returns:
+            Tuple of (block_to_com_rows dict, nchunks array).
+            block_to_com_rows maps block_linear_index -> list of df row indices.
+        """
+        if com_row_indices is None:
+            com_row_indices = list(range(len(coms_nm)))
+
+        voxel_size = np.array(organelle_idi.voxel_size)
+        chunk_shape = np.array(organelle_idi.chunk_shape)
+        if len(chunk_shape) == 4:
+            chunk_shape = chunk_shape[1:]
+        block_size = chunk_shape * voxel_size
+        roi_start = np.array(organelle_idi.roi.get_begin())
+        roi_end = np.array(organelle_idi.roi.get_end())
+        nchunks = np.ceil((roi_end - roi_start) / block_size).astype(int)
+
+        # Compute block coordinates for each COM, clamp to valid range
+        block_coords = ((coms_nm - roi_start) / block_size).astype(int)
+        block_coords = np.clip(block_coords, 0, nchunks - 1)
+
+        # Convert to linear indices
+        block_indices = np.ravel_multi_index(block_coords.T, nchunks)
+
+        # Group by block
+        block_to_com_rows = {}
+        for i, block_idx in enumerate(block_indices):
+            block_to_com_rows.setdefault(int(block_idx), []).append(
+                com_row_indices[i]
             )
 
-        num_points = len(coms)
-        boundaries = organelle_data - fastmorph.erode(
-            organelle_data, erode_border=False
-        )
-        unique_ids = fastremap.unique(boundaries[boundaries > 0])
+        return block_to_com_rows, nchunks
 
-        # Initialize arrays to store the n closest distances and corresponding ids.
-        # Every query point gets an array of size n.
-        closest_distances = np.full((num_points, n), np.inf)
-        closest_ids = np.zeros((num_points, n), dtype=int)
+    @staticmethod
+    def _process_containing_block(
+        partition_index,
+        organelle_idi,
+        coms_path,
+        block_indices,
+        block_to_com_rows,
+    ):
+        block_index = block_indices[partition_index]
+        com_rows = block_to_com_rows[block_index]
 
-        boundary_coords = np.argwhere(boundaries)
-        boundary_ids = boundaries[
-            boundary_coords[:, 0], boundary_coords[:, 1], boundary_coords[:, 2]
-        ]
+        coms_nm = np.load(coms_path, mmap_mode="r")
 
-        maximum_distance = iteration_distance_nm
-        iteration = 0
+        block = create_block_from_index(organelle_idi, block_index)
+        seg = organelle_idi.to_ndarray_ts(block.read_roi)
 
-        # Continue looping until every query point has n finite (non-inf) distances.
-        while np.any(np.any(np.isinf(closest_distances), axis=1)):
-            iteration += 1
-            # Global update mask: select only those query points that still have at least one np.inf.
-            global_update_mask = np.any(np.isinf(closest_distances), axis=1)
-            if not np.any(global_update_mask):
+        voxel_size = np.array(organelle_idi.voxel_size)
+        roi_begin = np.array(block.read_roi.get_begin())
+
+        results = {}
+        for row_idx in com_rows:
+            com = coms_nm[row_idx]
+            local_idx = ((com - roi_begin) / voxel_size).astype(int)
+
+            if np.all(local_idx >= 0) and np.all(local_idx < seg.shape):
+                results[row_idx] = int(
+                    seg[local_idx[0], local_idx[1], local_idx[2]]
+                )
+            else:
+                results[row_idx] = 0
+
+        return results
+
+    @staticmethod
+    def _process_n_nearest_block(
+        partition_index,
+        organelle_idi,
+        coms_path,
+        block_indices,
+        block_to_com_rows,
+        n,
+        initial_padding,
+    ):
+        block_index = block_indices[partition_index]
+        com_rows = block_to_com_rows[block_index]
+
+        coms_nm = np.load(coms_path, mmap_mode="r")
+
+        voxel_size = np.array(organelle_idi.voxel_size)
+        padding = initial_padding
+        dataset_roi = organelle_idi.roi
+        results = {}
+
+        while True:
+            block = create_block_from_index(
+                organelle_idi,
+                block_index,
+                padding=padding,
+                read_beyond_roi=False,
+            )
+            # Check if we've covered the full dataset
+            covers_full_dataset = block.read_roi.contains(dataset_roi)
+            seg = organelle_idi.to_ndarray_ts(block.read_roi)
+
+            roi_begin = np.array(block.read_roi.get_begin())
+            roi_end = np.array(block.read_roi.get_end())
+
+            # Extract boundaries
+            boundaries = seg - fastmorph.erode(seg, erode_border=False)
+            boundary_voxels = np.argwhere(boundaries > 0)
+
+            if len(boundary_voxels) == 0:
+                padding = Coordinate(p * 2 for p in padding)
+                continue
+
+            boundary_ids = boundaries[
+                boundary_voxels[:, 0],
+                boundary_voxels[:, 1],
+                boundary_voxels[:, 2],
+            ]
+            boundary_coords_nm = (
+                roi_begin + (boundary_voxels + 0.5) * voxel_size
+            )
+            unique_boundary_ids = fastremap.unique(boundary_ids)
+
+            # Filter to only COMs not yet verified
+            pending_rows = [r for r in com_rows if r not in results]
+            if not pending_rows:
                 break
 
-            # Loop over each unique boundary id.
-            for unique_id in tqdm(unique_ids):
-                # Create an update mask for query points that need updates and do not already have this unique_id.
-                # We check along the row: if the current candidate list already contains this unique_id, skip updating it.
-                already_has_id = np.any(closest_ids == unique_id, axis=1)
-                update_mask = global_update_mask & ~already_has_id
-                if not np.any(update_mask):
-                    continue
+            pending_coms = np.array([coms_nm[r] for r in pending_rows])
 
-                # For the current unique object, get its boundary voxel coordinates, adjust by 0.5 for centering and scale.
-                coords = (
-                    boundary_coords[boundary_ids == unique_id] + 0.5
-                ) * organelle_idi.voxel_size
-                tree = spatial.KDTree(coords)
+            # Margins: min distance from each COM to any face of read_roi
+            # that is interior to the dataset (faces at the dataset edge
+            # don't need checking — there's nothing beyond them)
+            ds_begin = np.array(dataset_roi.get_begin())
+            ds_end = np.array(dataset_roi.get_end())
+            face_dists_neg = pending_coms - roi_begin  # (C, 3)
+            face_dists_pos = roi_end - pending_coms  # (C, 3)
+            # Mask out faces that touch the dataset boundary (set to inf)
+            at_ds_begin = np.isclose(roi_begin, ds_begin)
+            at_ds_end = np.isclose(roi_end, ds_end)
+            face_dists_neg[:, at_ds_begin] = np.inf
+            face_dists_pos[:, at_ds_end] = np.inf
+            margins = np.minimum(
+                np.min(face_dists_neg, axis=1),
+                np.min(face_dists_pos, axis=1),
+            )
 
-                # Query only for the points (coms) that need updating.
-                current_distances, _ = tree.query(
-                    coms[update_mask],
-                    distance_upper_bound=maximum_distance * iteration,
-                )
-                # Check if coms are within the organelle
-                updated_inds = inds[update_mask]
-                in_bounds = np.all(
-                    (updated_inds >= organelle_idi.domain.inclusive_min), axis=1
-                ) & np.all(
-                    (updated_inds < organelle_idi.domain.exclusive_max), axis=1
-                )
-                valid_inds = updated_inds[in_bounds]
+            # Containing organelle check (vectorized)
+            local_inds = ((pending_coms - roi_begin) / voxel_size).astype(
+                int
+            )
+            in_bounds = np.all(local_inds >= 0, axis=1) & np.all(
+                local_inds < seg.shape, axis=1
+            )
+            containing_ids = np.zeros(len(pending_rows), dtype=int)
+            if np.any(in_bounds):
+                valid = local_inds[in_bounds]
+                containing_ids[in_bounds] = seg[
+                    valid[:, 0], valid[:, 1], valid[:, 2]
+                ]
 
-                # Initialize an array of False of the same length as updated_inds.
-                within_organelle = np.full(updated_inds.shape[0], False, dtype=bool)
+            # Per-organelle KDTree: build one tree per organelle,
+            # query all COMs for nearest boundary point
+            num_unique = len(unique_boundary_ids)
+            min_dist_per_org = np.full(
+                (len(pending_rows), num_unique), np.inf
+            )
+            for j, uid in enumerate(unique_boundary_ids):
+                mask = boundary_ids == uid
+                tree = spatial.KDTree(boundary_coords_nm[mask])
+                dists, _ = tree.query(pending_coms)
+                min_dist_per_org[:, j] = dists
 
-                # For the indices that are in bounds, assign the comparison result.
-                within_organelle[in_bounds] = (
-                    organelle_data[
-                        valid_inds[:, 0], valid_inds[:, 1], valid_inds[:, 2]
-                    ]
-                    == unique_id
-                )
+                # Override distance to 0 for COMs inside this organelle
+                is_containing = containing_ids == uid
+                if np.any(is_containing):
+                    min_dist_per_org[is_containing, j] = 0.0
 
-                # If the com is within the organelle, set the distance to 0
-                current_distances[within_organelle] = 0
+            # For each COM, sort organelles by distance, take top n
+            sort_order = np.argsort(min_dist_per_org, axis=1)
+            sorted_dists = np.take_along_axis(
+                min_dist_per_org, sort_order, axis=1
+            )
+            sorted_ids = unique_boundary_ids[sort_order]
 
-                # Combine the current n best distances with the new candidate (this gives n+1 candidates per query point).
-                combined_distances = np.column_stack(
-                    [closest_distances[update_mask], current_distances]
-                )
-                combined_ids = np.column_stack(
-                    [
-                        closest_ids[update_mask],
-                        np.full(np.sum(update_mask), unique_id, dtype=int),
-                    ]
-                )
+            unverified_rows = []
+            for i, row_idx in enumerate(pending_rows):
+                top_n_ids = np.zeros(n, dtype=int)
+                top_n_dists = np.full(n, np.inf)
+                num_to_take = min(n, num_unique)
+                top_n_ids[:num_to_take] = sorted_ids[i, :num_to_take]
+                top_n_dists[:num_to_take] = sorted_dists[i, :num_to_take]
 
-                # For each query point, sort candidates so that the smallest distances come first.
-                sort_order = np.argsort(combined_distances, axis=1)
-                sorted_distances = np.take_along_axis(
-                    combined_distances, sort_order, axis=1
-                )
-                sorted_ids = np.take_along_axis(combined_ids, sort_order, axis=1)
+                # Handle containing organelle not in boundary set
+                cid = containing_ids[i]
+                if cid > 0 and cid not in top_n_ids[:num_to_take]:
+                    top_n_ids[num_to_take - 1] = cid
+                    top_n_dists[num_to_take - 1] = 0.0
+                    order = np.argsort(top_n_dists)
+                    top_n_ids = top_n_ids[order]
+                    top_n_dists = top_n_dists[order]
 
-                # Update the candidate arrays for only the query points that needed an update.
-                closest_distances[update_mask] = sorted_distances[:, :n]
-                closest_ids[update_mask] = sorted_ids[:, :n]
+                d_n = top_n_dists[n - 1] if num_unique >= n else np.inf
+                if covers_full_dataset or d_n < margins[i]:
+                    results[row_idx] = {
+                        "ids": top_n_ids,
+                        "distances": top_n_dists,
+                    }
+                else:
+                    unverified_rows.append(row_idx)
 
-        # Update the DataFrame columns.
+            if not unverified_rows:
+                break
+
+            # Double padding and retry for unverified COMs only
+            padding = Coordinate(p * 2 for p in padding)
+            com_rows = unverified_rows
+
+        return results
+
+    @staticmethod
+    def _merge_dicts(list_of_dicts):
+        merged = {}
+        for d in list_of_dicts:
+            if d is not None:
+                merged.update(d)
+        return merged
+
+    def _save_coms_to_tmp(self, coms):
+        """Save COM array to a temp file for workers to read."""
+        tmp_dir = os.path.join(self.output_path, ".tmp_assign")
+        os.makedirs(tmp_dir, exist_ok=True)
+        coms_path = os.path.join(tmp_dir, "coms.npy")
+        np.save(coms_path, coms)
+        return coms_path
+
+    def assign_to_containing_organelle(self, df, organelle_name):
+        coms = df[["COM Z (nm)", "COM Y (nm)", "COM X (nm)"]].to_numpy()
+        coms_path = self._save_coms_to_tmp(coms)
+
+        block_to_com_rows, _ = self._group_coms_by_block(
+            coms, self.organelle_idi
+        )
+        block_indices = sorted(block_to_com_rows.keys())
+
+        if not block_indices:
+            return
+
+        output_dir = os.path.join(self.output_path, ".tmp_assign_containing")
+        results = dask_util.compute_blockwise_partitions(
+            len(block_indices),
+            self.num_workers,
+            self.compute_args,
+            logger,
+            f"assigning containing {organelle_name}",
+            AssignToOrganelles._process_containing_block,
+            self.organelle_idi,
+            coms_path,
+            block_indices,
+            block_to_com_rows,
+            merge_info=(AssignToOrganelles._merge_dicts, output_dir),
+        )
+
+        id_col = f"{organelle_name} ID"
+        for row_idx, org_id in results.items():
+            df.at[row_idx, id_col] = org_id
+        df[id_col] = df[id_col].astype(int)
+
+        os.remove(coms_path)
+
+    def assign_to_n_nearest_organelles(self, df, n, organelle_name):
+        coms = df[["COM Z (nm)", "COM Y (nm)", "COM X (nm)"]].to_numpy()
+        coms_path = self._save_coms_to_tmp(coms)
+
+        voxel_size = np.array(self.organelle_idi.voxel_size)
+        chunk_shape = np.array(self.organelle_idi.chunk_shape)
+        if len(chunk_shape) == 4:
+            chunk_shape = chunk_shape[1:]
+        block_size_nm = chunk_shape * voxel_size
+
+        # Initial padding: half block size, aligned to voxel grid
+        half_block = max(block_size_nm) / 2
+        padding = Coordinate(
+            int(np.ceil(half_block / vs)) * vs for vs in voxel_size
+        )
+
+        block_to_com_rows, _ = self._group_coms_by_block(
+            coms, self.organelle_idi
+        )
+        block_indices = sorted(block_to_com_rows.keys())
+
+        if not block_indices:
+            return
+
+        output_dir = os.path.join(self.output_path, ".tmp_assign_nearest")
+        # Each block handles its own padding expansion internally
+        results = dask_util.compute_blockwise_partitions(
+            len(block_indices),
+            self.num_workers,
+            self.compute_args,
+            logger,
+            f"assigning {n} nearest {organelle_name}",
+            AssignToOrganelles._process_n_nearest_block,
+            self.organelle_idi,
+            coms_path,
+            block_indices,
+            block_to_com_rows,
+            n,
+            padding,
+            merge_info=(AssignToOrganelles._merge_dicts, output_dir),
+        )
+
+        os.remove(coms_path)
+
+        # Apply results to DataFrame
         id_col = f"{organelle_name} ID"
         dist_col = f"{organelle_name} Distance (nm)"
+
         if n > 1:
-            df[id_col] = [row.tolist() for row in closest_ids]
-            df[dist_col] = [row.tolist() for row in closest_distances]
+            df[id_col] = [[] for _ in range(len(df))]
+            df[dist_col] = [[] for _ in range(len(df))]
+            for row_idx, result in results.items():
+                df.at[row_idx, id_col] = result["ids"].tolist()
+                df.at[row_idx, dist_col] = result["distances"].tolist()
         else:
-            df[id_col] = closest_ids[:, 0]
-            df[dist_col] = closest_distances[:, 0]
+            for row_idx, result in results.items():
+                df.at[row_idx, id_col] = int(result["ids"][0])
+                df.at[row_idx, dist_col] = float(result["distances"][0])
 
     def assign_to_organelles(self):
         with io_util.TimingMessager("Assigning objects to organelles", logger):
@@ -190,17 +399,13 @@ class AssignToOrganelles:
                 df[id_col] = 0
                 if self.assignment_type == 0:
                     self.assign_to_containing_organelle(
-                        self.organelle_idi, df, self.organelle_name
+                        df, self.organelle_name
                     )
                     continue
                 dist_col = f"{self.organelle_name} Distance (nm)"
                 df[dist_col] = 0
                 self.assign_to_n_nearest_organelles(
-                    self.organelle_idi,
-                    df,
-                    self.assignment_type,
-                    self.iteration_distance_nm,
-                    self.organelle_name,
+                    df, self.assignment_type, self.organelle_name
                 )
 
     def write_updated_csvs(self):
