@@ -1,3 +1,7 @@
+import json
+import os
+import struct
+
 import numpy as np
 import pytest
 from cellmap_analyze.util.image_data_interface import (
@@ -435,3 +439,120 @@ class TestCrossDatasetAlignment:
         assert result_A.shape == expected_shape, (
             f"Expected shape {expected_shape}, got {result_A.shape}"
         )
+
+
+def _create_n5_dataset(base_path, shape, block_size, voxel_size_xyz, data):
+    """Create a minimal N5 dataset with raw chunks that tensorstore can read."""
+    os.makedirs(base_path, exist_ok=True)
+
+    attrs = {
+        "dimensions": list(shape),
+        "blockSize": list(block_size),
+        "dataType": "uint8",
+        "compression": {"type": "raw"},
+        "pixelResolution": {"dimensions": voxel_size_xyz, "unit": "nm"},
+    }
+    with open(os.path.join(base_path, "attributes.json"), "w") as f:
+        json.dump(attrs, f)
+
+    bs = block_size
+    for xi in range(0, shape[0], bs[0]):
+        for yi in range(0, shape[1], bs[1]):
+            for zi in range(0, shape[2], bs[2]):
+                chunk_data = data[xi : xi + bs[0], yi : yi + bs[1], zi : zi + bs[2]]
+                chunk_path = os.path.join(
+                    base_path,
+                    str(xi // bs[0]),
+                    str(yi // bs[1]),
+                    str(zi // bs[2]),
+                )
+                os.makedirs(os.path.dirname(chunk_path), exist_ok=True)
+                # N5 raw chunk: mode(2B) + ndim(2B) + dim_sizes(4B each) + data
+                header = struct.pack(">HH", 0, 3)
+                for d in chunk_data.shape:
+                    header += struct.pack(">I", d)
+                with open(chunk_path, "wb") as f:
+                    f.write(header)
+                    f.write(chunk_data.tobytes())
+
+
+@pytest.fixture
+def tmp_n5(tmp_path):
+    """Create an N5 dataset with anisotropic non-integer voxel sizes (4, 4, 5.24)."""
+    n5_path = str(tmp_path / "test.n5")
+    os.makedirs(n5_path)
+    with open(os.path.join(n5_path, "attributes.json"), "w") as f:
+        json.dump({"n5": "2.0.0"}, f)
+
+    labels_path = os.path.join(n5_path, "labels")
+    os.makedirs(labels_path)
+    with open(os.path.join(labels_path, "attributes.json"), "w") as f:
+        json.dump({}, f)
+
+    # N5 dimensions/pixelResolution are in x,y,z order
+    data = np.random.randint(1, 10, (20, 25, 10), dtype=np.uint8)
+    _create_n5_dataset(
+        os.path.join(n5_path, "labels", "s0"),
+        shape=[20, 25, 10],
+        block_size=[10, 10, 10],
+        voxel_size_xyz=[4.0, 4.0, 5.24],
+        data=data,
+    )
+    return os.path.join(n5_path, "labels/s0")
+
+
+class TestN5AnisotropicSwapAxes:
+    """Test that N5 datasets with anisotropic voxel sizes read correct shapes.
+
+    N5 format requires axis swapping (swap_axes=True). When voxel sizes are
+    anisotropic, the swap must also apply to voxel_size so that snap_to_grid
+    uses the correct component per axis.
+    """
+
+    def test_single_voxel_roi_z_axis(self, tmp_n5):
+        """A 1-voxel-thick ROI in z should return shape 1 in that dimension."""
+        idi = ImageDataInterface(tmp_n5)
+        # IDI voxel_size is now (131, 100, 100) in z,y,x; z-voxel = 131
+        roi = Roi(Coordinate(0, 0, 0), Coordinate(131, 1000, 1000))
+        result = idi.to_ndarray_ts(roi)
+        assert result.shape[0] == 1, (
+            f"Expected 1 voxel in z, got {result.shape[0]} (shape={result.shape})"
+        )
+
+    def test_single_voxel_roi_x_axis(self, tmp_n5):
+        """A 1-voxel-thick ROI in x should return shape 1 in that dimension."""
+        idi = ImageDataInterface(tmp_n5)
+        # x-voxel = 100
+        roi = Roi(Coordinate(0, 0, 0), Coordinate(1310, 1000, 100))
+        result = idi.to_ndarray_ts(roi)
+        assert result.shape[2] == 1, (
+            f"Expected 1 voxel in x, got {result.shape[2]} (shape={result.shape})"
+        )
+
+    def test_roi_beyond_dataset_returns_correct_axes(self, tmp_n5):
+        """A ROI fully outside the dataset should return zeros in z,y,x order."""
+        idi = ImageDataInterface(tmp_n5)
+        # ROI completely past the dataset end in z; should be 1 voxel in z
+        roi = Roi(
+            Coordinate(idi.roi.end[0], 0, 0),
+            Coordinate(131, 1000, 1000),
+        )
+        result = idi.to_ndarray_ts(roi)
+        assert result.shape[0] == 1, (
+            f"Expected 1 voxel in z (no-overlap path), got shape {result.shape}"
+        )
+        assert np.all(result == 0)
+
+    def test_full_dataset_no_roi(self, tmp_n5):
+        """Reading full dataset (roi=None) should return correct axis order."""
+        idi = ImageDataInterface(tmp_n5)
+        result = idi.to_ndarray_ts()
+        # N5 on-disk shape is (20,25,10) in x,y,z; IDI presents as (10,25,20) in z,y,x
+        assert result.shape == (10, 25, 20)
+
+    def test_full_roi_shape(self, tmp_n5):
+        """Full dataset ROI should return the correct array shape."""
+        idi = ImageDataInterface(tmp_n5)
+        result = idi.to_ndarray_ts(idi.roi)
+        # N5 on-disk shape is (20,25,10) in x,y,z; IDI presents as (10,25,20) in z,y,x
+        assert result.shape == (10, 25, 20)
