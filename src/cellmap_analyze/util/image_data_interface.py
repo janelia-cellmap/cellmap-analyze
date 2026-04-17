@@ -179,6 +179,15 @@ def to_ndarray_tensorstore(
     if output_voxel_size is None:
         output_voxel_size = voxel_size
 
+    if swap_axes:
+        print("Swapping axes")
+        if roi:
+            roi = Roi(roi.begin[::-1], roi.shape[::-1])
+        if offset:
+            offset = Coordinate(offset[::-1])
+        voxel_size = Coordinate(voxel_size[::-1])
+        output_voxel_size = Coordinate(output_voxel_size[::-1])
+
     # Calculate per-axis rescale factors for anisotropic data
     rescale_factors = tuple(vs / ovs for vs, ovs in zip(voxel_size, output_voxel_size))
 
@@ -186,13 +195,6 @@ def to_ndarray_tensorstore(
     needs_rescaling = any(rf != 1 for rf in rescale_factors)
     # For fast-path direction (up vs down), use first axis as representative
     rescale_factor = rescale_factors[0]
-
-    if swap_axes:
-        print("Swapping axes")
-        if roi:
-            roi = Roi(roi.begin[::-1], roi.shape[::-1])
-        if offset:
-            offset = Coordinate(offset[::-1])
 
     channel_offset = 0
     domain = dataset.domain
@@ -235,6 +237,8 @@ def to_ndarray_tensorstore(
                     # Mixed up/down per axis — use zoom for correctness
                     zoom_factors = (1,) * channel_offset + rescale_factors
                     data = zoom(data, zoom=zoom_factors, order=interpolation_order)
+        if swap_axes:
+            data = np.swapaxes(data, 0 + channel_offset, 2 + channel_offset)
         return data
 
     if offset is None:
@@ -301,7 +305,10 @@ def to_ndarray_tensorstore(
                 + [s.stop - s.start for s in roi_slices]
             )
         fv = 0 if fill_value == "edge" else fill_value
-        return np.full(output_shape, fv, dtype=dataset.dtype.numpy_dtype)
+        data = np.full(output_shape, fv, dtype=dataset.dtype.numpy_dtype)
+        if swap_axes:
+            data = np.swapaxes(data, 0 + channel_offset, 2 + channel_offset)
+        return data
 
     # with ts.Transaction() as txn:
     try:
@@ -462,6 +469,8 @@ class ImageDataInterface:
         self.ts = None
         self.dtype = self.ds.dtype
         self.chunk_shape = self.ds.chunk_shape
+        if self.swap_axes:
+            self.chunk_shape = Coordinate(self.chunk_shape[::-1])
         if chunk_shape is not None:
             if type(chunk_shape) != Coordinate:
                 chunk_shape = Coordinate(chunk_shape)
@@ -479,6 +488,13 @@ class ImageDataInterface:
             raw_voxel_size = raw_voxel_size[n_extra:]
             raw_offset = raw_offset[n_extra:]
 
+        # For N5, metadata (pixelResolution, dimensions) is in X,Y,Z order.
+        # Reverse to Z,Y,X so the IDI presents a consistent convention
+        # matching zarr and the rest of the codebase (COMs, ROIs, etc.).
+        if self.swap_axes:
+            raw_voxel_size = raw_voxel_size[::-1]
+            raw_offset = raw_offset[::-1]
+
         # Scale float voxel sizes to integers for funlib compatibility
         scaled_vs, scale_factor = scale_voxel_size_to_integers(raw_voxel_size)
         self.original_voxel_size = raw_voxel_size
@@ -488,6 +504,8 @@ class ImageDataInterface:
 
         # Recompute ROI in scaled physical coordinates from the array shape
         array_shape = self.ds.data.shape[-n_spatial:]
+        if self.swap_axes:
+            array_shape = array_shape[::-1]
         scaled_offset = Coordinate(
             int(round(o * scale_factor)) for o in raw_offset
         )
@@ -529,6 +547,8 @@ class ImageDataInterface:
         self.voxel_size = Coordinate(scaled_vs)
 
         array_shape = self.ds.data.shape[-3:]
+        if self.swap_axes:
+            array_shape = array_shape[::-1]
         scaled_offset = Coordinate(
             int(round(o * new_scale_factor)) for o in self._raw_offset
         )

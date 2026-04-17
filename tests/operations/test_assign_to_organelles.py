@@ -36,7 +36,7 @@ def gt_assignments(organelle_csv, target_organelle_ds_path, n):
     df_com = pd.read_csv(organelle_csv)
     # Extract COM coordinates in (Z, Y, X) order to match organelle_coords.
     coms = df_com[["COM Z (nm)", "COM Y (nm)", "COM X (nm)"]].to_numpy()
-    com_coords = np.array(coms // organelle_idi.voxel_size, dtype=int)
+    com_coords = np.array(coms // np.array(organelle_idi.original_voxel_size), dtype=int)
 
     # Prepare lists to store the assignments for each object.
     assignment_ids = []
@@ -53,7 +53,7 @@ def gt_assignments(organelle_csv, target_organelle_ds_path, n):
     organelle_indices = np.argwhere(organelle_data)
 
     # Compute the physical coordinates by scaling indices with voxel size.
-    organelle_coords = (organelle_indices + 0.5) * organelle_idi.voxel_size
+    organelle_coords = (organelle_indices + 0.5) * np.array(organelle_idi.original_voxel_size)
 
     # Extract the corresponding organelle IDs from the organelle_data array.
     organelle_ids = organelle_data[tuple(organelle_indices.T)]

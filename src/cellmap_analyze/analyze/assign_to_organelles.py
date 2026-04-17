@@ -301,10 +301,12 @@ class AssignToOrganelles(ComputeConfigMixin):
 
     def assign_to_containing_organelle(self, df, organelle_name):
         coms = df[["COM Z (nm)", "COM Y (nm)", "COM X (nm)"]].to_numpy()
-        coms_path = self._save_coms_to_tmp(coms)
+        sf = self.organelle_idi.voxel_size_scale_factor
+        coms_scaled = coms * sf
+        coms_path = self._save_coms_to_tmp(coms_scaled)
 
         block_to_com_rows, _ = self._group_coms_by_block(
-            coms, self.organelle_idi
+            coms_scaled, self.organelle_idi
         )
         block_indices = sorted(block_to_com_rows.keys())
 
@@ -335,7 +337,9 @@ class AssignToOrganelles(ComputeConfigMixin):
 
     def assign_to_n_nearest_organelles(self, df, n, organelle_name):
         coms = df[["COM Z (nm)", "COM Y (nm)", "COM X (nm)"]].to_numpy()
-        coms_path = self._save_coms_to_tmp(coms)
+        sf = self.organelle_idi.voxel_size_scale_factor
+        coms_scaled = coms * sf
+        coms_path = self._save_coms_to_tmp(coms_scaled)
 
         voxel_size = np.array(self.organelle_idi.voxel_size)
         chunk_shape = np.array(self.organelle_idi.chunk_shape)
@@ -350,7 +354,7 @@ class AssignToOrganelles(ComputeConfigMixin):
         )
 
         block_to_com_rows, _ = self._group_coms_by_block(
-            coms, self.organelle_idi
+            coms_scaled, self.organelle_idi
         )
         block_indices = sorted(block_to_com_rows.keys())
 
@@ -386,11 +390,11 @@ class AssignToOrganelles(ComputeConfigMixin):
             df[dist_col] = [[] for _ in range(len(df))]
             for row_idx, result in results.items():
                 df.at[row_idx, id_col] = result["ids"].tolist()
-                df.at[row_idx, dist_col] = result["distances"].tolist()
+                df.at[row_idx, dist_col] = (result["distances"] / sf).tolist()
         else:
             for row_idx, result in results.items():
                 df.at[row_idx, id_col] = int(result["ids"][0])
-                df.at[row_idx, dist_col] = float(result["distances"][0])
+                df.at[row_idx, dist_col] = float(result["distances"][0] / sf)
 
     def assign_to_organelles(self):
         with io_util.TimingMessager("Assigning objects to organelles", logger):
