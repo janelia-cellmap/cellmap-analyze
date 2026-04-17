@@ -407,7 +407,7 @@ class AssignToOrganelles(ComputeConfigMixin):
                     )
                     continue
                 dist_col = f"{self.organelle_name} Distance (nm)"
-                df[dist_col] = 0
+                df[dist_col] = 0.0
                 self.assign_to_n_nearest_organelles(
                     df, self.assignment_type, self.organelle_name
                 )
