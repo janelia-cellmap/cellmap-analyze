@@ -114,7 +114,7 @@ jobqueue:
     cores: 12      # threads per process (1 thread each)
     memory: 120GB  # 15 GB per slot
     walltime: 08:00
-    mem: 12000000000
+    mem: 120000000000
     use-stdin: true
     log-directory: job-logs
     name: cellmap-analyze
