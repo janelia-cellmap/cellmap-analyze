@@ -110,8 +110,8 @@ distributed:
 jobqueue:
   lsf:
     ncpus: 8        # cores per job chunk
-    processes: 12  # worker processes per chunk
-    cores: 12      # threads per process (1 thread each)
+    processes: 8  # worker processes per chunk
+    cores: 8      # threads per process (1 thread each)
     memory: 120GB  # 15 GB per slot
     walltime: 08:00
     mem: 120000000000
