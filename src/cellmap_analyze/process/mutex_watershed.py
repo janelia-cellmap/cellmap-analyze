@@ -63,6 +63,7 @@ class MutexWatershed(ComputeConfigMixin):
         connectivity=2,
         padding_voxels=None,
         do_opening=False,
+        fill_holes=False,
         delete_tmp=False,
         chunk_shape=None,
     ):
@@ -92,6 +93,7 @@ class MutexWatershed(ComputeConfigMixin):
         self.filter_val = filter_val
         self.padding_voxels = padding_voxels
         self.do_opening = do_opening
+        self.fill_holes = fill_holes
 
         if roi is None:
             self.roi = self.affinities_idi.roi
@@ -383,6 +385,7 @@ class MutexWatershed(ComputeConfigMixin):
             delete_tmp=self.delete_tmp,
             connectivity=self.connectivity,
             mask_config=self.mask_config,
+            fill_holes=False if self.do_opening else self.fill_holes,
         )
         cc.merge_connected_components_across_blocks()
 
@@ -412,6 +415,7 @@ class MutexWatershed(ComputeConfigMixin):
                 connectivity=self.connectivity,
                 delete_tmp=self.delete_tmp,
                 mask_config=self.mask_config,
+                fill_holes=self.fill_holes,
             )
             ccc.clean_connected_components()
             if self.delete_tmp:
