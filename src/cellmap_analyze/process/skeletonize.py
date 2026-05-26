@@ -160,6 +160,8 @@ class Skeletonize(ComputeConfigMixin):
         sharded=True,
         shard_bits=1,
         minishard_bits=6,
+        retry_on_oom=True,
+        memory_retry_max=3,
     ):
         """
         Skeletonize a segmentation, parallelized over IDs.
@@ -186,6 +188,8 @@ class Skeletonize(ComputeConfigMixin):
             shard_bits, minishard_bits: Sharding spec parameters; defaults give
                      2 shard files × 64 minishards. Identity hash with
                      preshift_bits=0 (good fit for densely-numbered MWS IDs).
+            retry_on_oom: Halve processes-per-slot and retry on worker OOM.
+            memory_retry_max: Max OOM-driven retries before raising.
         """
         super().__init__(num_workers)
         self.segmentation_idi = ImageDataInterface(segmentation_path, timeout=timeout)
@@ -211,6 +215,8 @@ class Skeletonize(ComputeConfigMixin):
         self.sharded = sharded
         self.shard_bits = shard_bits
         self.minishard_bits = minishard_bits
+        self.retry_on_oom = retry_on_oom
+        self.memory_retry_max = memory_retry_max
 
         # Load CSV with bounding box info
         self.bbox_df = pd.read_csv(csv_path, index_col=0)
@@ -559,18 +565,30 @@ class Skeletonize(ComputeConfigMixin):
         # First write the info files (only once)
         self.write_neuroglancer_info_files()
 
-        # Parallelize over IDs using dask
+        # Parallelize over IDs using dask, with OOM-driven backoff.
         num_ids = len(self.ids)
         tmp_merge_dir = f"{self.output_path}/_tmp_skeleton_metrics_to_merge"
+        msg = f"skeletonizing {num_ids} IDs from {self.segmentation_idi.path}"
 
-        skeleton_metrics = dask_util.compute_blockwise_partitions(
-            num_ids,
+        def _phase(workers, config):
+            return dask_util.compute_blockwise_partitions(
+                num_ids,
+                workers,
+                self.compute_args,
+                logger,
+                msg,
+                self._skeletonize_id_wrapper,
+                merge_info=(Skeletonize._merge_skeleton_metrics, tmp_merge_dir),
+                config=config,
+            )
+
+        skeleton_metrics = dask_util.run_with_oom_retry(
+            _phase,
             self.num_workers,
-            self.compute_args,
+            "skeletonize",
             logger,
-            f"skeletonizing {num_ids} IDs from {self.segmentation_idi.path}",
-            self._skeletonize_id_wrapper,
-            merge_info=(Skeletonize._merge_skeleton_metrics, tmp_merge_dir),
+            max_retries=self.memory_retry_max,
+            retry_on_oom=self.retry_on_oom,
         )
 
         # When sharded, workers piggybacked encoded skeleton bytes onto each
