@@ -673,19 +673,23 @@ def delete_tmp_dir_blockwise(
     is_zarr=True,
     num_blocks=None,
 ):
-    if is_zarr:
-        if type(idi_or_location) is str:
-            idi = ImageDataInterface(idi_or_location)
-        else:
-            idi = idi_or_location
-        get_delete_path_fn = get_zarr_chunk_path_from_block_index
-        num_blocks = get_num_blocks(idi, idi.roi)
-        idi_or_location = idi
-        basepath, _ = split_dataset_path(idi.path)
-        top_level_dir = f"{basepath}/{get_name_from_path(idi.path)}"
+    # Pickle-merge tmp dirs are small (hundreds to a few thousand tiny
+    # files in a 3-level tree); a direct rmtree finishes in <1s and avoids
+    # spinning up 3 successive dask clusters per cleanup. That overhead
+    # was visible between every wave in the wave-scheduling path.
+    if not is_zarr:
+        shutil.rmtree(idi_or_location, ignore_errors=True)
+        return
+
+    if type(idi_or_location) is str:
+        idi = ImageDataInterface(idi_or_location)
     else:
-        get_delete_path_fn = get_merge_file_path_from_block_index
-        top_level_dir = idi_or_location
+        idi = idi_or_location
+    get_delete_path_fn = get_zarr_chunk_path_from_block_index
+    num_blocks = get_num_blocks(idi, idi.roi)
+    idi_or_location = idi
+    basepath, _ = split_dataset_path(idi.path)
+    top_level_dir = f"{basepath}/{get_name_from_path(idi.path)}"
 
     for depth in range(3, 0, -1):
         compute_blockwise_partitions(
