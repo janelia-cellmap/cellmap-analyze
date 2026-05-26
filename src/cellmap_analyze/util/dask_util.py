@@ -354,6 +354,12 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
         client.close()
 
 
+def _load_dask_config():
+    """Read ``dask-config.yaml`` from the cwd into a plain dict."""
+    with open("dask-config.yaml") as f:
+        return yaml.load(f, Loader=SafeLoader)
+
+
 def run_with_oom_retry(
     work_fn,
     num_workers,
@@ -361,6 +367,7 @@ def run_with_oom_retry(
     logger,
     max_retries=3,
     retry_on_oom=True,
+    config=None,
 ):
     """Run a dask phase, halving processes-per-slot and retrying on worker OOM.
 
@@ -371,20 +378,25 @@ def run_with_oom_retry(
     the in-memory dask config and halve ``num_workers`` to match — doubling the
     memory per worker while keeping total slot/CPU budget constant — then retry.
 
+    ``config`` is an optional pre-loaded dask config (e.g. from
+    :func:`plan_memory_waves`); when omitted, we read ``dask-config.yaml``
+    from cwd. Pass the wave's tuned config when running per-wave so retries
+    halve from the wave's processes count rather than the disk default.
+
     No-ops (passes through) for synchronous (num_workers <= 1) runs, when
     ``retry_on_oom=False``, when ``max_retries < 1``, or for cluster types that
     don't expose a processes-per-slot lever (e.g. local).
     """
     if not retry_on_oom or max_retries < 1 or num_workers <= 1:
-        return work_fn(num_workers, None)
+        return work_fn(num_workers, config)
 
     try:
         from distributed.scheduler import KilledWorker
     except ImportError:
-        return work_fn(num_workers, None)
+        return work_fn(num_workers, config)
 
-    with open("dask-config.yaml") as f:
-        config = yaml.load(f, Loader=SafeLoader)
+    if config is None:
+        config = _load_dask_config()
 
     cluster_type = next(iter(config.get("jobqueue", {})), None)
     if cluster_type not in ("lsf", "slurm", "sge"):
@@ -424,6 +436,177 @@ def run_with_oom_retry(
             )
             config["jobqueue"][cluster_type]["processes"] = new_processes
             workers = new_workers
+
+
+# ---------------------------------------------------------------------------
+# Memory-aware wave scheduling (ported from mesh-n-bone).
+#
+# Group variable-cost work items into "waves" whose per-worker memory class
+# differs. Each wave runs as its own dask cluster with processes/slot tuned
+# to fit one item per worker. Total slot/CPU budget stays constant across
+# waves; what changes is how the per-slot memory is sliced.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class WavePlan:
+    processes: int
+    workers: int
+    item_ids: list  # opaque to dask_util; whatever the caller passed in
+    max_estimated_peak_bytes: int
+    config: dict | None
+
+
+def _jobqueue_settings(config):
+    """Return ``(cluster_type, settings)`` for a dask-jobqueue config."""
+    if not config:
+        return None, None
+    jobqueue = config.get("jobqueue", {}) or {}
+    if not jobqueue:
+        return None, None
+    cluster_type, settings = next(iter(jobqueue.items()))
+    return cluster_type, settings
+
+
+def _job_memory_bytes(settings):
+    """Parse job memory bytes from a dask-jobqueue settings dict."""
+    if not settings or "memory" not in settings:
+        return None
+    from dask.utils import parse_bytes
+    return int(parse_bytes(str(settings["memory"])))
+
+
+def set_jobqueue_processes(config, cluster_type, processes):
+    """Set worker processes in a jobqueue config, keeping one thread/process."""
+    processes = max(1, int(processes))
+    settings = config["jobqueue"][cluster_type]
+    settings["processes"] = processes
+    if "cores" in settings:
+        # dask-jobqueue derives threads per worker from cores/processes.
+        # Hold the ratio at 1 so a memory-heavy worker doesn't run multiple
+        # items concurrently in-process.
+        settings["cores"] = processes
+
+
+def _recommended_processes(
+    estimated_peak_bytes,
+    job_memory_bytes,
+    base_processes,
+    memory_fraction=0.60,
+):
+    """Pick processes/job so one item fits per process worker."""
+    base_processes = max(1, int(base_processes))
+    if not job_memory_bytes or estimated_peak_bytes <= 0:
+        return base_processes
+    usable_job_bytes = int(job_memory_bytes * memory_fraction)
+    processes = usable_job_bytes // int(estimated_peak_bytes)
+    return max(1, min(base_processes, int(processes)))
+
+
+def balanced_batches(items, max_batches):
+    """Greedy heaviest-first bin-packing of ``items`` into at most
+    ``max_batches`` batches, balanced by ``estimated_peak_bytes``.
+
+    ``items`` is an iterable of ``(item_id, estimated_peak_bytes)`` tuples.
+    Returns a list of lists of ``item_id`` (heaviest batch first).
+    """
+    import heapq
+
+    items = list(items)
+    if not items:
+        return []
+    max_batches = max(1, min(int(max_batches), len(items)))
+    heap = [(0, i, []) for i in range(max_batches)]
+    for item_id, weight in sorted(items, key=lambda p: p[1], reverse=True):
+        bin_weight, index, bin_items = heapq.heappop(heap)
+        bin_items = bin_items + [item_id]
+        heapq.heappush(heap, (bin_weight + max(int(weight), 1), index, bin_items))
+
+    batches = [(weight, bin_items) for weight, _, bin_items in heap if bin_items]
+    batches.sort(key=lambda p: p[0], reverse=True)
+    return [bin_items for _, bin_items in batches]
+
+
+def plan_memory_waves(
+    items,
+    requested_workers,
+    config=None,
+    batches_per_worker=4,
+    memory_fraction=0.60,
+):
+    """Group ``items`` into waves with memory-aware dask configs.
+
+    Parameters
+    ----------
+    items : iterable of ``(item_id, estimated_peak_bytes)``
+    requested_workers : int
+        Initial worker count from the caller (``num_workers``).
+    config : dict, optional
+        Loaded ``dask-config.yaml``. When omitted (or no jobqueue section),
+        a single all-items wave with ``processes=base_processes`` is returned.
+    batches_per_worker : int
+        Target ratio of bag partitions to workers within a wave.
+    memory_fraction : float
+        Fraction of per-slot memory considered usable (the rest is dask
+        overhead, OS, libraries).
+
+    Returns
+    -------
+    list of WavePlan, sorted by ``processes`` ascending (high-memory waves first).
+    """
+    items = list(items)
+    if not items:
+        return []
+
+    cluster_type, settings = _jobqueue_settings(config)
+    base_processes = int((settings or {}).get("processes", 1) or 1)
+    job_memory = _job_memory_bytes(settings)
+
+    by_processes = {}
+    for item_id, peak_bytes in items:
+        procs = _recommended_processes(
+            peak_bytes, job_memory, base_processes,
+            memory_fraction=memory_fraction,
+        )
+        by_processes.setdefault(procs, []).append((item_id, peak_bytes))
+
+    waves = []
+    requested_workers = max(1, int(requested_workers))
+    for procs in sorted(by_processes):
+        wave_items = by_processes[procs]
+        # Scale worker count inversely to processes/slot: fewer processes
+        # per slot ⇒ each item gets more memory ⇒ we want more slots to
+        # keep total parallelism roughly stable. Cap by item count + procs.
+        nominal_workers = max(
+            1, requested_workers * int(procs) // max(1, base_processes)
+        )
+        max_batches = max(1, nominal_workers * int(batches_per_worker))
+        batches = balanced_batches(wave_items, max_batches)
+        # Flatten batches back to a single ordered list — cellmap-analyze's
+        # compute_blockwise_partitions doesn't take pre-batched input;
+        # ordering items by their batch keeps heaviest-first within the wave.
+        item_ids = [item_id for batch in batches for item_id in batch]
+        workers = min(nominal_workers, max(len(batches), int(procs)))
+        if config is not None and cluster_type is not None:
+            wave_config = _deepcopy_config(config)
+            set_jobqueue_processes(wave_config, cluster_type, procs)
+        else:
+            wave_config = None
+        waves.append(
+            WavePlan(
+                processes=int(procs),
+                workers=int(max(1, workers)),
+                item_ids=item_ids,
+                max_estimated_peak_bytes=max(p for _, p in wave_items),
+                config=wave_config,
+            )
+        )
+    return waves
+
+
+def _deepcopy_config(config):
+    import copy
+    return copy.deepcopy(config)
 
 
 def setup_execution_directory(config_path, logger):
