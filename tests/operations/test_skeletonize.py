@@ -816,6 +816,86 @@ def test_skeletonize_backward_compat_erosion_true(tmp_zarr, tmp_skeletonize_csv)
         assert os.path.exists(f"{output_path}/full/{id_val}")
 
 
+def test_skeletonize_seed_voxel_fallback(shared_tmpdir):
+    """A 4x4x4 cube is wiped to zero voxels by Lee's algorithm. The
+    seed-voxel fallback should emit a single-vertex skeleton at the EDT
+    peak with a positive radius, instead of writing an empty skeleton."""
+    from cellmap_analyze.util.zarr_util import create_multiscale_dataset
+    from funlib.geometry import Coordinate, Roi
+
+    # Build a tiny zarr with one 4x4x4 cube (ID=1) inside a 12x12x12 volume.
+    # Use isotropic 1nm voxels so we don't trigger resampling.
+    vs = (1, 1, 1)
+    seg = np.zeros((12, 12, 12), dtype=np.uint8)
+    seg[4:8, 4:8, 4:8] = 1
+
+    zarr_path = shared_tmpdir + "/seed_voxel_test.zarr"
+    os.makedirs(zarr_path, exist_ok=True)
+    data_path = f"{zarr_path}/seg_cube"
+    total_roi = Roi((0, 0, 0), Coordinate(seg.shape) * Coordinate(vs))
+    ds = create_multiscale_dataset(
+        data_path,
+        dtype=seg.dtype,
+        voxel_size=vs,
+        total_roi=total_roi,
+        write_size=Coordinate(seg.shape) * Coordinate(vs),
+        original_voxel_size=vs,
+    )
+    ds.data[:] = seg
+
+    # CSV with the one cube's bbox.
+    csv_path = shared_tmpdir + "/seed_voxel_bboxes.csv"
+    pd.DataFrame(
+        [{
+            "Object ID": 1,
+            "MIN X (nm)": 4.5,
+            "MIN Y (nm)": 4.5,
+            "MIN Z (nm)": 4.5,
+            "MAX X (nm)": 7.5,
+            "MAX Y (nm)": 7.5,
+            "MAX Z (nm)": 7.5,
+        }]
+    ).set_index("Object ID").to_csv(csv_path)
+
+    output_path = shared_tmpdir + "/seed_voxel_output"
+
+    Skeletonize(
+        segmentation_path=f"{data_path}/s0",
+        output_path=output_path,
+        csv_path=csv_path,
+        erosion=False,
+        min_branch_length_nm=0,
+        tolerance_nm=0,
+        num_workers=1,
+        sharded=False,
+    ).skeletonize()
+
+    # The fallback should have written a 1-vertex skeleton (not empty).
+    verts, edges = CustomSkeleton.read_neuroglancer_skeleton(f"{output_path}/full/1")
+    assert len(verts) == 1, f"expected 1 seed vertex, got {len(verts)}"
+    assert len(edges) == 0, f"expected 0 edges for single-vertex skeleton, got {len(edges)}"
+
+    # Seed should sit at the cube interior (somewhere in [4, 8] on every axis).
+    x, y, z = verts[0]
+    assert 4.0 <= x <= 8.0, f"seed x={x} outside cube"
+    assert 4.0 <= y <= 8.0, f"seed y={y} outside cube"
+    assert 4.0 <= z <= 8.0, f"seed z={z} outside cube"
+
+    # CSV: 0 length, 0 branches, but Radius Mean should be positive (~half-thickness).
+    csv_basename = os.path.splitext(os.path.basename(csv_path))[0]
+    metrics_csv = os.path.join(
+        os.path.dirname(csv_path), f"{csv_basename}_with_skeletons.csv"
+    )
+    df = pd.read_csv(metrics_csv, index_col=0)
+    assert df.loc[1, "Number of Branches"] == 0
+    assert df.loc[1, "Longest Shortest Path (nm)"] == 0.0
+    assert df.loc[1, "Radius Mean (nm)"] > 0, (
+        f"seed-voxel fallback should populate radius, got "
+        f"{df.loc[1, 'Radius Mean (nm)']!r}"
+    )
+    assert df.loc[1, "Radius Std (nm)"] == 0.0
+
+
 def test_skeletonize_sharded_default(tmp_zarr, tmp_skeletonize_csv):
     """With sharded=True default, per-ID files are repacked into shard files
     and the info file picks up the sharding spec; one chunk should round-trip

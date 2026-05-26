@@ -350,6 +350,39 @@ class Skeletonize(ComputeConfigMixin):
             skel = skeletonize(data)
 
             if not np.any(skel):
+                # Lee's 3D thinning algorithm peels mirror-symmetrically and
+                # can wipe out compact/spherical/cuboidal objects entirely.
+                # When that happens but the (pre-erosion) EDT still has signal,
+                # fall back to a single seed vertex at the EDT peak (the
+                # most-interior voxel). The object then gets a meaningful
+                # position and a radius equal to the local half-thickness,
+                # even though longest_shortest_path stays 0 (single point).
+                peak_idx = np.unravel_index(
+                    int(np.argmax(distance_transform)), distance_transform.shape
+                )
+                peak_radius_nm = float(distance_transform[peak_idx])
+                if peak_radius_nm > 0:
+                    logger.warning(
+                        f"Skeletonization produced no voxels for ID {id_value}, "
+                        f"emitting single seed vertex at EDT peak (radius={peak_radius_nm:.1f} nm)"
+                    )
+                    local_zyx_nm = np.array(peak_idx) * isotropic_voxel_size
+                    start_point_nm = np.array(start_point) / sf
+                    seed_vertex = (
+                        float(local_zyx_nm[2] + start_point_nm[2]),
+                        float(local_zyx_nm[1] + start_point_nm[1]),
+                        float(local_zyx_nm[0] + start_point_nm[0]),
+                    )
+                    seed_skel = CustomSkeleton(
+                        vertices=[seed_vertex],
+                        edges=np.zeros((0, 2), dtype=np.uint32),
+                    )
+                    emit("full", seed_skel)
+                    emit("simplified", seed_skel)
+                    result["radius_mean_nm"] = peak_radius_nm
+                    result["radius_std_nm"] = 0.0
+                    return result
+
                 logger.warning(
                     f"Skeletonization produced no voxels for ID {id_value}, emitting empty skeleton"
                 )
