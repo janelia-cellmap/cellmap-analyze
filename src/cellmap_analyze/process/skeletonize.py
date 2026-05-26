@@ -11,6 +11,7 @@ from cellmap_analyze.util.skeleton_util import (
 )
 from scipy.ndimage import zoom
 from skimage.morphology import skeletonize, binary_erosion
+from tqdm import tqdm
 import logging
 import os
 import json
@@ -156,6 +157,11 @@ class Skeletonize(ComputeConfigMixin):
         tolerance_nm=50,
         num_workers=10,
         timeout=5,
+        sharded=True,
+        shard_bits=1,
+        minishard_bits=6,
+        retry_on_oom=True,
+        memory_retry_max=3,
     ):
         """
         Skeletonize a segmentation, parallelized over IDs.
@@ -175,6 +181,15 @@ class Skeletonize(ComputeConfigMixin):
             tolerance_nm: Tolerance for simplification (in nm)
             num_workers: Number of parallel workers
             timeout: Timeout for ImageDataInterface reads
+            sharded: Write outputs as neuroglancer_uint64_sharded_v1 instead of
+                     one file per ID. Workers still write per-ID files during
+                     the dask phase; the driver repacks them into shards at the
+                     end and deletes the originals.
+            shard_bits, minishard_bits: Sharding spec parameters; defaults give
+                     2 shard files × 64 minishards. Identity hash with
+                     preshift_bits=0 (good fit for densely-numbered MWS IDs).
+            retry_on_oom: Halve processes-per-slot and retry on worker OOM.
+            memory_retry_max: Max OOM-driven retries before raising.
         """
         super().__init__(num_workers)
         self.segmentation_idi = ImageDataInterface(segmentation_path, timeout=timeout)
@@ -197,6 +212,11 @@ class Skeletonize(ComputeConfigMixin):
         self.min_branch_length_nm = min_branch_length_nm
         self.tolerance_nm = tolerance_nm
         self.num_workers = num_workers
+        self.sharded = sharded
+        self.shard_bits = shard_bits
+        self.minishard_bits = minishard_bits
+        self.retry_on_oom = retry_on_oom
+        self.memory_retry_max = memory_retry_max
 
         # Load CSV with bounding box info
         self.bbox_df = pd.read_csv(csv_path, index_col=0)
@@ -230,20 +250,35 @@ class Skeletonize(ComputeConfigMixin):
         erosion: str,
         min_branch_length_nm: float,
         tolerance_nm: float,
+        sharded: bool = False,
     ):
         """
-        Process a single ID: extract, skeletonize, prune, simplify, and save.
+        Process a single ID: extract, skeletonize, prune, simplify, and emit.
 
-        Args:
-            id_value: The ID to process
-            segmentation_idi: ImageDataInterface for the segmentation
-            bbox_df: DataFrame with bounding box information
-            output_path: Base output path
-            erosion: Erosion mode ("full", "6", "18", or None)
-            min_branch_length_nm: Minimum branch length for pruning
-            tolerance_nm: Tolerance for simplification
+        When ``sharded=True``, encoded skeleton bytes are returned in the
+        result dict under ``"full_bytes"``/``"simplified_bytes"`` so the
+        driver can pack them into shard files via the existing pickle merge
+        path — no per-ID NRS write happens. When ``sharded=False``, per-ID
+        files are written under ``{output_path}/{full,simplified}/{id}``.
         """
         from funlib.geometry import Roi
+
+        result: dict = dict(Skeletonize._empty_metrics())
+
+        def emit(subdir: str, skel_obj: CustomSkeleton):
+            encoded = skel_obj.encode_neuroglancer_bytes()
+            if sharded:
+                result[f"{subdir}_bytes"] = encoded
+            else:
+                path = f"{output_path}/{subdir}/{id_value}"
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "wb") as f:
+                    f.write(encoded)
+
+        def emit_empty():
+            empty = CustomSkeleton(vertices=[], edges=[])
+            emit("full", empty)
+            emit("simplified", empty)
 
         try:
             # Get bounding box for this ID
@@ -272,8 +307,9 @@ class Skeletonize(ComputeConfigMixin):
 
             # Check if there's any data
             if not np.any(data):
-                logger.warning(f"No voxels found for ID {id_value}, skipping")
-                return Skeletonize._empty_metrics()
+                logger.warning(f"No voxels found for ID {id_value}, emitting empty skeleton")
+                emit_empty()
+                return result
 
             # Resample to isotropic if needed so skeletonize thins uniformly
             # Use original (true nm) voxel_size for physical operations
@@ -307,39 +343,57 @@ class Skeletonize(ComputeConfigMixin):
             elif erosion == "18":
                 data = remove_unbridged_adjacencies(data, connectivity=18)
 
-            if erosion is not None:
-                # Check if erosion removed everything
-                if not np.any(data):
-                    logger.warning(
-                        f"Erosion removed all voxels for ID {id_value}, writing empty skeleton"
-                    )
-                    # Write empty skeleton files
-                    empty_skeleton = CustomSkeleton(vertices=[], edges=[])
-                    full_path = f"{output_path}/full/{id_value}"
-                    empty_skeleton.write_neuroglancer_skeleton(full_path)
-                    simplified_path = f"{output_path}/simplified/{id_value}"
-                    empty_skeleton.write_neuroglancer_skeleton(simplified_path)
-                    logger.info(f"Wrote empty skeleton for ID {id_value}")
-                    return Skeletonize._empty_metrics()
+            if erosion is not None and not np.any(data):
+                logger.warning(
+                    f"Erosion removed all voxels for ID {id_value}, emitting empty skeleton"
+                )
+                emit_empty()
+                return result
 
             # Skeletonize using Lee's algorithm (skimage default). It has
             # known limitations (e.g. thin structures may lose branches) but
             # is sufficient for now.
             skel = skeletonize(data)
 
-            # Check if skeletonization produced anything
             if not np.any(skel):
-                logger.warning(
-                    f"Skeletonization produced no voxels for ID {id_value}, writing empty skeleton"
+                # Lee's 3D thinning algorithm peels mirror-symmetrically and
+                # can wipe out compact/spherical/cuboidal objects entirely.
+                # When that happens but the (pre-erosion) EDT still has signal,
+                # fall back to a single seed vertex at the EDT peak (the
+                # most-interior voxel). The object then gets a meaningful
+                # position and a radius equal to the local half-thickness,
+                # even though longest_shortest_path stays 0 (single point).
+                peak_idx = np.unravel_index(
+                    int(np.argmax(distance_transform)), distance_transform.shape
                 )
-                # Write empty skeleton files
-                empty_skeleton = CustomSkeleton(vertices=[], edges=[])
-                full_path = f"{output_path}/full/{id_value}"
-                empty_skeleton.write_neuroglancer_skeleton(full_path)
-                simplified_path = f"{output_path}/simplified/{id_value}"
-                empty_skeleton.write_neuroglancer_skeleton(simplified_path)
-                logger.info(f"Wrote empty skeleton for ID {id_value}")
-                return Skeletonize._empty_metrics()
+                peak_radius_nm = float(distance_transform[peak_idx])
+                if peak_radius_nm > 0:
+                    logger.warning(
+                        f"Skeletonization produced no voxels for ID {id_value}, "
+                        f"emitting single seed vertex at EDT peak (radius={peak_radius_nm:.1f} nm)"
+                    )
+                    local_zyx_nm = np.array(peak_idx) * isotropic_voxel_size
+                    start_point_nm = np.array(start_point) / sf
+                    seed_vertex = (
+                        float(local_zyx_nm[2] + start_point_nm[2]),
+                        float(local_zyx_nm[1] + start_point_nm[1]),
+                        float(local_zyx_nm[0] + start_point_nm[0]),
+                    )
+                    seed_skel = CustomSkeleton(
+                        vertices=[seed_vertex],
+                        edges=np.zeros((0, 2), dtype=np.uint32),
+                    )
+                    emit("full", seed_skel)
+                    emit("simplified", seed_skel)
+                    result["radius_mean_nm"] = peak_radius_nm
+                    result["radius_std_nm"] = 0.0
+                    return result
+
+                logger.warning(
+                    f"Skeletonization produced no voxels for ID {id_value}, emitting empty skeleton"
+                )
+                emit_empty()
+                return result
 
             # Sample radii at skeleton voxel positions
             skel_coords = np.argwhere(skel)
@@ -402,12 +456,10 @@ class Skeletonize(ComputeConfigMixin):
                         longest_shortest_path, component_diameter
                     )
 
-            skeleton_metrics = {
-                "longest_shortest_path_nm": longest_shortest_path,
-                "num_branches": num_branches,
-                "radius_mean_nm": float(np.mean(radii)),
-                "radius_std_nm": float(np.std(radii)),
-            }
+            result["longest_shortest_path_nm"] = longest_shortest_path
+            result["num_branches"] = num_branches
+            result["radius_mean_nm"] = float(np.mean(radii))
+            result["radius_std_nm"] = float(np.std(radii))
 
             # Simplify
             if tolerance_nm > 0:
@@ -415,22 +467,15 @@ class Skeletonize(ComputeConfigMixin):
             else:
                 simplified = pruned
 
-            # Check if pruning/simplification removed all vertices
             if len(simplified.vertices) == 0:
                 logger.warning(
-                    f"Pruning/simplification removed all vertices for ID {id_value}, writing empty skeleton"
+                    f"Pruning/simplification removed all vertices for ID {id_value}, emitting empty skeleton"
                 )
-                # Write empty skeleton files
-                empty_skeleton = CustomSkeleton(vertices=[], edges=[])
-                full_path = f"{output_path}/full/{id_value}"
-                empty_skeleton.write_neuroglancer_skeleton(full_path)
-                simplified_path = f"{output_path}/simplified/{id_value}"
-                empty_skeleton.write_neuroglancer_skeleton(simplified_path)
-                logger.info(f"Wrote empty skeleton for ID {id_value}")
-                return Skeletonize._empty_metrics()
+                emit_empty()
+                return result
 
-            # Ensure edges are properly shaped numpy arrays before writing
-            # Handle case where there are no edges (single vertex)
+            # Ensure edges are properly shaped numpy arrays before encoding
+            # (single vertex / empty edges case).
             if len(skeleton.edges) == 0:
                 skeleton.edges = np.zeros((0, 2), dtype=np.uint32)
             else:
@@ -441,21 +486,9 @@ class Skeletonize(ComputeConfigMixin):
             else:
                 simplified.edges = np.array(simplified.edges, dtype=np.uint32)
 
-            # Write full skeleton
-            full_path = f"{output_path}/full/{id_value}"
-            skeleton.write_neuroglancer_skeleton(full_path)
-            logger.info(
-                f"Wrote full skeleton for ID {id_value}: {len(skeleton.vertices)} vertices"
-            )
-
-            # Write simplified skeleton
-            simplified_path = f"{output_path}/simplified/{id_value}"
-            simplified.write_neuroglancer_skeleton(simplified_path)
-            logger.info(
-                f"Wrote simplified skeleton for ID {id_value}: {len(simplified.vertices)} vertices"
-            )
-
-            return skeleton_metrics
+            emit("full", skeleton)
+            emit("simplified", simplified)
+            return result
 
         except Exception as e:
             logger.error(f"Error processing ID {id_value}: {e}", exc_info=True)
@@ -486,6 +519,12 @@ class Skeletonize(ComputeConfigMixin):
                 ],  # Identity transform since we're using physical coordinates
                 "segment_properties": "segment_properties",
             }
+
+            if self.sharded:
+                from cellmap_analyze.util.sharded_skeleton import make_sharding_spec
+                info["sharding"] = make_sharding_spec(
+                    shard_bits=self.shard_bits, minishard_bits=self.minishard_bits
+                )
 
             info_path = f"{self.output_path}/{subdir}/info"
             with open(info_path, "w") as f:
@@ -526,23 +565,92 @@ class Skeletonize(ComputeConfigMixin):
         # First write the info files (only once)
         self.write_neuroglancer_info_files()
 
-        # Parallelize over IDs using dask
+        # Parallelize over IDs using dask, with OOM-driven backoff.
         num_ids = len(self.ids)
         tmp_merge_dir = f"{self.output_path}/_tmp_skeleton_metrics_to_merge"
+        msg = f"skeletonizing {num_ids} IDs from {self.segmentation_idi.path}"
 
-        skeleton_metrics = dask_util.compute_blockwise_partitions(
-            num_ids,
+        def _phase(workers, config):
+            return dask_util.compute_blockwise_partitions(
+                num_ids,
+                workers,
+                self.compute_args,
+                logger,
+                msg,
+                self._skeletonize_id_wrapper,
+                merge_info=(Skeletonize._merge_skeleton_metrics, tmp_merge_dir),
+                config=config,
+            )
+
+        skeleton_metrics = dask_util.run_with_oom_retry(
+            _phase,
             self.num_workers,
-            self.compute_args,
+            "skeletonize",
             logger,
-            f"skeletonizing {num_ids} IDs from {self.segmentation_idi.path}",
-            self._skeletonize_id_wrapper,
-            merge_info=(Skeletonize._merge_skeleton_metrics, tmp_merge_dir),
+            max_retries=self.memory_retry_max,
+            retry_on_oom=self.retry_on_oom,
         )
+
+        # When sharded, workers piggybacked encoded skeleton bytes onto each
+        # metrics dict via the pickle merge — no per-ID files were written.
+        # Pop the bytes out (so they don't end up in the CSV) and write shards.
+        if self.sharded:
+            self._pack_shards_from_metrics(skeleton_metrics)
 
         self._write_skeleton_csv(skeleton_metrics)
 
         logger.info("Skeletonization complete")
+
+    def _pack_shards_from_metrics(self, metrics_list):
+        """Pack encoded skeleton bytes (already in memory via pickle merge)
+        into precomputed sharded shard files.
+
+        Pops ``full_bytes``/``simplified_bytes`` from each metric dict in
+        ``metrics_list`` so subsequent CSV writing sees only metric columns.
+        No NRS read/unlink work — the bytes were carried back on the dask
+        merge path that runs for every job regardless.
+        """
+        import time
+        from cellmap_analyze.util.sharded_skeleton import pack_sharded_skeletons
+
+        for subdir, bytes_key in [("full", "full_bytes"), ("simplified", "simplified_bytes")]:
+            dir_path = f"{self.output_path}/{subdir}"
+
+            t0 = time.time()
+            id_to_bytes: dict[int, bytes] = {}
+            iterator = tqdm(
+                metrics_list,
+                desc=f"Gathering {subdir} skeleton bytes",
+                unit="id",
+            )
+            for m in iterator:
+                data = m.pop(bytes_key, None)
+                if data is None:
+                    continue
+                id_to_bytes[int(m["id"])] = data
+            logger.info(
+                f"Gathered {len(id_to_bytes)} {subdir} skeletons in "
+                f"{time.time() - t0:.1f}s"
+            )
+
+            if not id_to_bytes:
+                logger.warning(
+                    f"No {subdir} skeleton bytes found in metrics; skipping shard pack"
+                )
+                continue
+
+            t0 = time.time()
+            pack_sharded_skeletons(
+                id_to_bytes,
+                dir_path,
+                shard_bits=self.shard_bits,
+                minishard_bits=self.minishard_bits,
+            )
+            logger.info(
+                f"Packed {len(id_to_bytes)} {subdir} skeletons into shards under "
+                f"{dir_path} in {time.time() - t0:.1f}s"
+            )
+            del id_to_bytes
 
     @staticmethod
     def _merge_skeleton_metrics(list_of_results):
@@ -586,6 +694,7 @@ class Skeletonize(ComputeConfigMixin):
             self.erosion,
             self.min_branch_length_nm,
             self.tolerance_nm,
+            sharded=self.sharded,
         )
         if result is None:
             result = Skeletonize._empty_metrics()

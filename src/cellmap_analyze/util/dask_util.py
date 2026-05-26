@@ -354,6 +354,78 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
         client.close()
 
 
+def run_with_oom_retry(
+    work_fn,
+    num_workers,
+    phase_name,
+    logger,
+    max_retries=3,
+    retry_on_oom=True,
+):
+    """Run a dask phase, halving processes-per-slot and retrying on worker OOM.
+
+    Ported from mesh-n-bone. ``work_fn`` is called as ``work_fn(workers, config)``
+    and must start its own cluster via ``start_dask(workers, ..., config=config)``.
+    On ``distributed.scheduler.KilledWorker`` (the typical symptom of a SIGKILL
+    from the OS OOM-killer or LSF mem limit), we halve ``processes`` per slot in
+    the in-memory dask config and halve ``num_workers`` to match — doubling the
+    memory per worker while keeping total slot/CPU budget constant — then retry.
+
+    No-ops (passes through) for synchronous (num_workers <= 1) runs, when
+    ``retry_on_oom=False``, when ``max_retries < 1``, or for cluster types that
+    don't expose a processes-per-slot lever (e.g. local).
+    """
+    if not retry_on_oom or max_retries < 1 or num_workers <= 1:
+        return work_fn(num_workers, None)
+
+    try:
+        from distributed.scheduler import KilledWorker
+    except ImportError:
+        return work_fn(num_workers, None)
+
+    with open("dask-config.yaml") as f:
+        config = yaml.load(f, Loader=SafeLoader)
+
+    cluster_type = next(iter(config.get("jobqueue", {})), None)
+    if cluster_type not in ("lsf", "slurm", "sge"):
+        return work_fn(num_workers, config)
+
+    workers = num_workers
+    for attempt in range(max_retries + 1):
+        try:
+            return work_fn(workers, config)
+        except KilledWorker as e:
+            processes = int(config["jobqueue"][cluster_type].get("processes", 1) or 1)
+            if attempt >= max_retries:
+                logger.error(
+                    "Phase '%s' hit worker OOM and exhausted %d retries "
+                    "(processes/slot=%d). Increase per-slot memory in "
+                    "dask-config.yaml.",
+                    phase_name, max_retries, processes,
+                )
+                raise
+            if processes <= 1:
+                logger.error(
+                    "Phase '%s' hit worker OOM with processes/slot already at "
+                    "1 — cannot halve further. Increase memory per slot directly.",
+                    phase_name,
+                )
+                raise
+            new_processes = max(1, processes // 2)
+            new_workers = max(1, workers // 2)
+            last_worker = getattr(e, "last_worker", None)
+            logger.warning(
+                "Phase '%s' worker OOM (retry %d/%d). Halving processes/slot "
+                "%d→%d and workers %d→%d to double memory per worker. "
+                "Last worker: %s",
+                phase_name, attempt + 1, max_retries,
+                processes, new_processes, workers, new_workers,
+                last_worker or "(unknown)",
+            )
+            config["jobqueue"][cluster_type]["processes"] = new_processes
+            workers = new_workers
+
+
 def setup_execution_directory(config_path, logger):
     """Sets up the excecution directory which is the config dir appended with
     the date and time.
@@ -531,6 +603,7 @@ def compute_blockwise_partitions(
     *fn_args,
     randomize: bool = False,
     merge_info=None,
+    config: dict | None = None,
     **fn_kwargs,
 ):
     """
@@ -560,7 +633,7 @@ def compute_blockwise_partitions(
         )
 
     # STEP 3) Spin up Dask, run
-    with start_dask(num_workers, msg, logger):
+    with start_dask(num_workers, msg, logger, config=config):
         with TimingMessager(msg.capitalize(), logger):
             try:
                 bag.compute(**compute_args)
