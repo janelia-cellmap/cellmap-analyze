@@ -16,6 +16,7 @@ import logging
 import pandas as pd
 import numpy as np
 import os
+import shutil
 from scipy import spatial
 import fastremap
 import fastmorph
@@ -333,7 +334,7 @@ class AssignToOrganelles(ComputeConfigMixin):
             df.at[row_idx, id_col] = org_id
         df[id_col] = df[id_col].astype(int)
 
-        os.remove(coms_path)
+        shutil.rmtree(os.path.dirname(coms_path), ignore_errors=True)
 
     def assign_to_n_nearest_organelles(self, df, n, organelle_name):
         coms = df[["COM Z (nm)", "COM Y (nm)", "COM X (nm)"]].to_numpy()
@@ -379,7 +380,7 @@ class AssignToOrganelles(ComputeConfigMixin):
             merge_info=(AssignToOrganelles._merge_dicts, output_dir),
         )
 
-        os.remove(coms_path)
+        shutil.rmtree(os.path.dirname(coms_path), ignore_errors=True)
 
         # Apply results to DataFrame
         id_col = f"{organelle_name} ID"
