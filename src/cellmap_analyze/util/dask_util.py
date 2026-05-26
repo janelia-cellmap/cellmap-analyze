@@ -488,19 +488,36 @@ def set_jobqueue_processes(config, cluster_type, processes):
         settings["cores"] = processes
 
 
+def _round_down_pow2(n, cap):
+    """Round ``n`` down to the nearest power of 2, capped at ``cap``."""
+    n = max(1, min(int(n), int(cap)))
+    bucket = 1
+    while bucket * 2 <= n:
+        bucket *= 2
+    return bucket
+
+
 def _recommended_processes(
     estimated_peak_bytes,
     job_memory_bytes,
     base_processes,
     memory_fraction=0.60,
 ):
-    """Pick processes/job so one item fits per process worker."""
+    """Pick processes/job so one item fits per process worker, bucketed
+    to a power of 2 so similar-sized items merge into one wave instead of
+    spawning a separate cluster per distinct integer process count.
+
+    Rounding down to the nearest power of 2 means each worker gets at
+    least as much memory as the raw fit would give, never less — strictly
+    safer. The trade-off is slightly fewer workers per slot, which is
+    dwarfed by the cluster startup overhead of an extra wave.
+    """
     base_processes = max(1, int(base_processes))
     if not job_memory_bytes or estimated_peak_bytes <= 0:
-        return base_processes
+        return _round_down_pow2(base_processes, base_processes)
     usable_job_bytes = int(job_memory_bytes * memory_fraction)
     processes = usable_job_bytes // int(estimated_peak_bytes)
-    return max(1, min(base_processes, int(processes)))
+    return _round_down_pow2(processes, base_processes)
 
 
 def balanced_batches(items, max_batches):

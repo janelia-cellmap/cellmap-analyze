@@ -84,6 +84,31 @@ def test_plan_memory_waves_groups_by_memory_class():
         assert wave.config["jobqueue"]["lsf"]["cores"] == wave.processes
 
 
+def test_plan_memory_waves_buckets_procs_to_powers_of_2():
+    # 12 items with peaks that would naively land in 12 distinct integer
+    # process counts; bucketed planner should collapse to {1,2,4,8,16}.
+    config = {"jobqueue": {"lsf": {"processes": 16, "cores": 16, "memory": "240GB"}}}
+    # usable = 144 GB. Pick peaks that fall in many narrow integer slots
+    # without rounding (10.5 → 13 procs, 11 → 13, 12 → 12, etc.).
+    items = [
+        ("a", int(120e9)),   # 144/120 = 1.2 → bucket 1
+        ("b", int(60e9)),    # 144/60  = 2.4 → bucket 2
+        ("c", int(48e9)),    # 144/48  = 3   → bucket 2
+        ("d", int(36e9)),    # 144/36  = 4   → bucket 4
+        ("e", int(24e9)),    # 144/24  = 6   → bucket 4
+        ("f", int(18e9)),    # 144/18  = 8   → bucket 8
+        ("g", int(16e9)),    # 144/16  = 9   → bucket 8
+        ("h", int(14e9)),    # 144/14  = 10  → bucket 8
+        ("i", int(12e9)),    # 144/12  = 12  → bucket 8
+        ("j", int(10e9)),    # 144/10  = 14  → bucket 8
+        ("k", int(9e9)),     # 144/9   = 16  → bucket 16
+        ("l", int(5e9)),     # well-fit at base → bucket 16
+    ]
+    waves = dask_util.plan_memory_waves(items, requested_workers=10, config=config)
+    procs_seen = sorted(w.processes for w in waves)
+    assert procs_seen == [1, 2, 4, 8, 16], procs_seen
+
+
 def test_plan_memory_waves_all_items_distributed():
     # Pathological case: many small items + one giant. All items must end
     # up in some wave, none dropped or duplicated.
