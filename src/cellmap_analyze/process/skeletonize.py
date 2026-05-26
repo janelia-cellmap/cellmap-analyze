@@ -163,7 +163,8 @@ class Skeletonize(ComputeConfigMixin):
         retry_on_oom=True,
         memory_retry_max=3,
         peak_bytes_baseline=250_000_000,
-        peak_bytes_per_voxel=20.0,
+        peak_bytes_per_voxel=6.63,
+        memory_safety_multiplier=2.0,
         memory_fraction=0.60,
     ):
         """
@@ -194,18 +195,23 @@ class Skeletonize(ComputeConfigMixin):
             retry_on_oom: Halve processes-per-slot and retry on worker OOM.
             memory_retry_max: Max OOM-driven retries before raising.
             peak_bytes_baseline, peak_bytes_per_voxel: Estimator constants for
-                     per-ID peak RSS, used to plan memory-aware dask waves.
-                     Defaults (250 MB + 20 B/iso-voxel) are intentionally
-                     conservative — c-elegans-bw-1 fit a tight 6.63 B/voxel
-                     line, but a second c-elegans dataset (dlon-1) showed
-                     amplification climbing toward 25 B/voxel at billion-voxel
-                     scales (likely from graph / polyline / simplification
-                     overhead that's not visible at the smaller IDs we
-                     can profile cheaply). The default trades minor
-                     over-allocation for small IDs against avoiding cascading
-                     OOM retries on giants. For very different segmentation
-                     types, re-profile with scripts/skeletonize_memory_profile.py
-                     and override.
+                     per-ID peak RSS. The per-voxel cost is automatically
+                     bumped to ``max(dtype.itemsize + 1, peak_bytes_per_voxel)``
+                     based on the segmentation's dtype, because the brief
+                     read-time peak (``raw_data + bool_mask``) becomes the
+                     binding constraint for uint64-stored datasets — observed
+                     amplification on uint64 c-elegans data is ~10 B/voxel
+                     versus ~6.6 B/voxel on uint16 data. The default of 6.63
+                     B/voxel is the "honest" fit on a heavily-proofread
+                     uint16 dataset; with the dtype bump it becomes ~9 B/voxel
+                     on uint64 datasets automatically.
+            memory_safety_multiplier: Multiplier applied to the per-ID peak
+                     estimate before wave planning. Default 2.0 covers the
+                     variance we've seen across c-elegans datasets (compact
+                     proofread vs sparse single-pass-cleanup). Bump higher
+                     (e.g. 3-4) for datasets where the giants OOM repeatedly,
+                     or lower (e.g. 1.0-1.5) for tightly-profiled datasets
+                     where you want maximum throughput.
             memory_fraction: Fraction of per-slot memory considered usable
                      when planning waves (rest is dask/OS/library overhead).
         """
@@ -237,6 +243,7 @@ class Skeletonize(ComputeConfigMixin):
         self.memory_retry_max = memory_retry_max
         self.peak_bytes_baseline = float(peak_bytes_baseline)
         self.peak_bytes_per_voxel = float(peak_bytes_per_voxel)
+        self.memory_safety_multiplier = float(memory_safety_multiplier)
         self.memory_fraction = float(memory_fraction)
 
         # Load CSV with bounding box info
@@ -580,22 +587,28 @@ class Skeletonize(ComputeConfigMixin):
     def _estimate_peak_bytes(self, id_value):
         """Estimate per-ID peak RSS from the cached bbox row.
 
-        Uses the isotropic voxel count of the (padded) bbox, which is what
-        ``_skeletonize_id`` actually operates on after the optional zoom
-        step. For isotropic datasets this equals the native voxel count.
+        Uses the isotropic voxel count of the (padded) bbox times a
+        per-voxel cost that accounts for the segmentation's dtype. The
+        read-time transient ``raw_data + bool_mask`` peaks at roughly
+        ``dtype.itemsize + 1`` bytes per voxel; the later EDT/skel phase
+        peaks at roughly ``peak_bytes_per_voxel``. Whichever is larger
+        sets the per-voxel cost (max, not sum, because they occur at
+        different points in time). ``memory_safety_multiplier`` then
+        absorbs cross-dataset variance from morphology/cleanup level.
         """
         row = self.bbox_df.loc[id_value]
         vs_nm = self.segmentation_idi.voxel_size
         original_vs = self.segmentation_idi.original_voxel_size
-        # +2 voxels of padding matches _skeletonize_id's 1-voxel pad each side.
         dx = (row["MAX X (nm)"] - row["MIN X (nm)"]) + 2 * vs_nm[0]
         dy = (row["MAX Y (nm)"] - row["MIN Y (nm)"]) + 2 * vs_nm[1]
         dz = (row["MAX Z (nm)"] - row["MIN Z (nm)"]) + 2 * vs_nm[2]
-        # If anisotropic, _skeletonize_id resamples to min(original_vs)
-        # before EDT/skeletonize. That's the working voxel grid.
         min_vs = min(original_vs)
         iso_voxels = (dx * dy * dz) / (min_vs ** 3)
-        return int(self.peak_bytes_baseline + self.peak_bytes_per_voxel * iso_voxels)
+
+        dtype_bytes = self.segmentation_idi.ds.data.dtype.itemsize
+        bytes_per_voxel = max(dtype_bytes + 1, self.peak_bytes_per_voxel)
+        peak = self.peak_bytes_baseline + bytes_per_voxel * iso_voxels
+        return int(peak * self.memory_safety_multiplier)
 
     def skeletonize(self):
         """
