@@ -163,7 +163,7 @@ class Skeletonize(ComputeConfigMixin):
         retry_on_oom=True,
         memory_retry_max=3,
         peak_bytes_baseline=250_000_000,
-        peak_bytes_per_voxel=6.63,
+        peak_bytes_per_voxel=20.0,
         memory_fraction=0.60,
     ):
         """
@@ -195,11 +195,17 @@ class Skeletonize(ComputeConfigMixin):
             memory_retry_max: Max OOM-driven retries before raising.
             peak_bytes_baseline, peak_bytes_per_voxel: Estimator constants for
                      per-ID peak RSS, used to plan memory-aware dask waves.
-                     Defaults fit on a c-elegans dataset (16nm isotropic
-                     segmentation, ~16 B/voxel amplification not observed —
-                     actual ~6.63 B/iso-voxel with a 250 MB library baseline).
-                     For very different segmentation types or anisotropies,
-                     re-profile and override.
+                     Defaults (250 MB + 20 B/iso-voxel) are intentionally
+                     conservative — c-elegans-bw-1 fit a tight 6.63 B/voxel
+                     line, but a second c-elegans dataset (dlon-1) showed
+                     amplification climbing toward 25 B/voxel at billion-voxel
+                     scales (likely from graph / polyline / simplification
+                     overhead that's not visible at the smaller IDs we
+                     can profile cheaply). The default trades minor
+                     over-allocation for small IDs against avoiding cascading
+                     OOM retries on giants. For very different segmentation
+                     types, re-profile with scripts/skeletonize_memory_profile.py
+                     and override.
             memory_fraction: Fraction of per-slot memory considered usable
                      when planning waves (rest is dask/OS/library overhead).
         """
@@ -628,10 +634,11 @@ class Skeletonize(ComputeConfigMixin):
         all_metrics = []
 
         for wave_index, wave in enumerate(waves, start=1):
-            phase_label = (
-                f"skeletonize wave {wave_index}/{len(waves)} "
-                f"({len(wave.item_ids)} IDs, procs/slot={wave.processes})"
-            )
+            # The outer phase_name (used by the OOM-retry log line) keeps
+            # the wave's identity stable across retries. The inner msg
+            # built inside _phase reflects the *current* procs/slot so the
+            # "Started skeletonize..." log line is accurate after a halving.
+            wave_label = f"skeletonize wave {wave_index}/{len(waves)} ({len(wave.item_ids)} IDs)"
             wave_ids = wave.item_ids
             wave_merge_dir = f"{tmp_merge_root}_wave{wave_index}"
 
@@ -639,16 +646,21 @@ class Skeletonize(ComputeConfigMixin):
                 return self._skeletonize_id_by_value(_wave_ids[idx])
 
             def _phase(workers, config, _wrapper=_wrapper, _ids=wave_ids,
-                       _merge=wave_merge_dir, _label=phase_label):
+                       _merge=wave_merge_dir, _label=wave_label):
+                current_procs = (
+                    config["jobqueue"][next(iter(config["jobqueue"]))]["processes"]
+                    if config and config.get("jobqueue") else 1
+                )
+                msg = f"{_label}, procs/slot={current_procs}"
                 return dask_util.compute_blockwise_partitions(
-                    len(_ids), workers, self.compute_args, logger, _label,
+                    len(_ids), workers, self.compute_args, logger, msg,
                     _wrapper,
                     merge_info=(Skeletonize._merge_skeleton_metrics, _merge),
                     config=config,
                 )
 
             wave_metrics = dask_util.run_with_oom_retry(
-                _phase, wave.workers, phase_label, logger,
+                _phase, wave.workers, wave_label, logger,
                 max_retries=self.memory_retry_max,
                 retry_on_oom=self.retry_on_oom,
                 config=wave.config,
