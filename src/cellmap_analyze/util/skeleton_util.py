@@ -879,43 +879,37 @@ class CustomSkeleton:
         # use hypot for Pythagoras to improve accuracy
         return np.hypot(h, c)
 
-    def write_neuroglancer_skeleton(self, path):
-        start_time = time.time()
-        logger.info(f"Writing Neuroglancer skeleton to {path}")
+    def encode_neuroglancer_bytes(self) -> bytes:
+        """Return the bytes that would be written to disk by
+        write_neuroglancer_skeleton, without touching the filesystem.
 
-        makedirs_start = time.time()
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        logger.info(f"Created directory in {time.time() - makedirs_start:.4f}s")
+        Empty skeletons are encoded as 8 bytes (two zero uint32s), matching
+        the on-disk format used by neuroglancer for an empty chunk.
+        """
+        import struct
 
-        # Handle empty skeleton specially (neuroglancer library doesn't support empty arrays)
         if len(self.vertices) == 0:
-            import struct
-            with open(path, "wb") as f:
-                # Write num_vertices (uint32) and num_edges (uint32), both 0
-                f.write(struct.pack('<II', 0, 0))
-            logger.info(f"Wrote empty skeleton (8 bytes)")
-            logger.info(
-                f"Total write_neuroglancer_skeleton time: {time.time() - start_time:.4f}s"
-            )
-            return
+            return struct.pack("<II", 0, 0)
 
-        encode_start = time.time()
-        with open(path, "wb") as f:
-            skel = NeuroglancerSkeleton(
-                self.vertices, self.edges, vertex_attributes=None
-            )
-            encoded = skel.encode(Source())
-            logger.info(f"Encoded skeleton in {time.time() - encode_start:.4f}s")
+        # neuroglancer requires edges as an ndarray of shape (N, 2).
+        # CustomSkeleton.add_edges() turns the input into a Python list, so
+        # coerce here to protect single-vertex / zero-edge cases (seed-voxel
+        # fallback, etc.).
+        if len(self.edges) == 0:
+            edges = np.zeros((0, 2), dtype=np.uint32)
+        else:
+            edges = np.asarray(self.edges, dtype=np.uint32)
 
-            write_start = time.time()
-            f.write(encoded)
-            logger.info(
-                f"Wrote {len(encoded)} bytes in {time.time() - write_start:.4f}s"
-            )
-
-        logger.info(
-            f"Total write_neuroglancer_skeleton time: {time.time() - start_time:.4f}s"
+        skel = NeuroglancerSkeleton(
+            self.vertices, edges, vertex_attributes=None
         )
+        return skel.encode(Source())
+
+    def write_neuroglancer_skeleton(self, path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        encoded = self.encode_neuroglancer_bytes()
+        with open(path, "wb") as f:
+            f.write(encoded)
 
     @staticmethod
     def read_neuroglancer_skeleton(path):

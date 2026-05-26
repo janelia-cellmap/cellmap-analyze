@@ -154,6 +154,7 @@ def test_skeletonize_single_worker(tmp_zarr, tmp_skeletonize_csv):
         min_branch_length_nm=0,  # No pruning for basic test
         tolerance_nm=0,  # No simplification for basic test
         num_workers=1,
+        sharded=False,
     )
 
     skeletonizer.skeletonize()
@@ -208,6 +209,7 @@ def test_skeletonize_produces_reasonable_skeletons(
         min_branch_length_nm=0,
         tolerance_nm=0,
         num_workers=1,
+        sharded=False,
     )
 
     skeletonizer.skeletonize()
@@ -286,6 +288,7 @@ def test_skeletonize_without_erosion(tmp_zarr, tmp_skeletonize_csv, voxel_size):
         min_branch_length_nm=0,
         tolerance_nm=0,
         num_workers=1,
+        sharded=False,
     )
 
     skeletonizer.skeletonize()
@@ -370,6 +373,7 @@ def test_skeletonize_with_pruning_and_simplification(tmp_zarr, tmp_skeletonize_c
         min_branch_length_nm=0,
         tolerance_nm=0,
         num_workers=1,
+        sharded=False,
     )
     skeletonizer_full.skeletonize()
 
@@ -382,6 +386,7 @@ def test_skeletonize_with_pruning_and_simplification(tmp_zarr, tmp_skeletonize_c
         min_branch_length_nm=min_branch_length_nm,
         tolerance_nm=tolerance_nm,
         num_workers=1,
+        sharded=False,
     )
     skeletonizer_simplified.skeletonize()
 
@@ -421,6 +426,7 @@ def test_skeletonize_with_roi_padding(tmp_zarr, tmp_skeletonize_csv, voxel_size)
         min_branch_length_nm=0,
         tolerance_nm=0,
         num_workers=1,
+        sharded=False,
     )
 
     skeletonizer.skeletonize()
@@ -492,6 +498,7 @@ def test_skeletonize_complex_shapes(tmp_zarr, tmp_skeletonize_csv, voxel_size):
         min_branch_length_nm=0,
         tolerance_nm=0,
         num_workers=1,
+        sharded=False,
     )
 
     skeletonizer.skeletonize()
@@ -561,6 +568,7 @@ def test_skeletonize_preserves_loops(tmp_zarr, tmp_skeletonize_csv, voxel_size):
         min_branch_length_nm=0,
         tolerance_nm=5,
         num_workers=1,
+        sharded=False,
     )
 
     skeletonizer.skeletonize()
@@ -748,6 +756,7 @@ def test_skeletonize_diagonal_6_erosion(tmp_zarr, tmp_skeletonize_csv):
         min_branch_length_nm=0,
         tolerance_nm=0,
         num_workers=1,
+        sharded=False,
     )
 
     skeletonizer.skeletonize()
@@ -772,6 +781,7 @@ def test_skeletonize_diagonal_18_erosion(tmp_zarr, tmp_skeletonize_csv):
         min_branch_length_nm=0,
         tolerance_nm=0,
         num_workers=1,
+        sharded=False,
     )
 
     skeletonizer.skeletonize()
@@ -796,6 +806,7 @@ def test_skeletonize_backward_compat_erosion_true(tmp_zarr, tmp_skeletonize_csv)
         min_branch_length_nm=0,
         tolerance_nm=0,
         num_workers=1,
+        sharded=False,
     )
 
     assert skeletonizer.erosion == "full"
@@ -803,6 +814,53 @@ def test_skeletonize_backward_compat_erosion_true(tmp_zarr, tmp_skeletonize_csv)
 
     for id_val in [1, 2, 3, 4, 5, 6, 7, 8]:
         assert os.path.exists(f"{output_path}/full/{id_val}")
+
+
+def test_skeletonize_sharded_default(tmp_zarr, tmp_skeletonize_csv):
+    """With sharded=True default, per-ID files are repacked into shard files
+    and the info file picks up the sharding spec; one chunk should round-trip
+    via the read helper."""
+    from cellmap_analyze.util.sharded_skeleton import read_chunk_from_shard
+
+    output_path = tmp_zarr + "/test_skeletonize_sharded"
+
+    skeletonizer = Skeletonize(
+        segmentation_path=f"{tmp_zarr}/segmentation_for_skeleton/s0",
+        output_path=output_path,
+        csv_path=tmp_skeletonize_csv,
+        erosion=False,
+        min_branch_length_nm=0,
+        tolerance_nm=0,
+        num_workers=1,
+    )
+    skeletonizer.skeletonize()
+
+    for subdir in ["full", "simplified"]:
+        info_path = f"{output_path}/{subdir}/info"
+        with open(info_path) as f:
+            info = json.load(f)
+        assert "sharding" in info, f"Sharding spec missing from {info_path}"
+        assert info["sharding"]["@type"] == "neuroglancer_uint64_sharded_v1"
+
+        shard_files = [
+            n for n in os.listdir(f"{output_path}/{subdir}") if n.endswith(".shard")
+        ]
+        assert shard_files, f"No .shard files written under {subdir}/"
+
+        # Per-ID files should be gone.
+        for id_val in [1, 2, 3, 4, 5, 6, 7, 8]:
+            assert not os.path.exists(f"{output_path}/{subdir}/{id_val}")
+
+        # At least one non-empty chunk should round-trip out of the shards.
+        found_any = False
+        for id_val in [1, 2, 3, 4, 5, 6, 7, 8]:
+            chunk = read_chunk_from_shard(
+                f"{output_path}/{subdir}", id_val, info["sharding"]
+            )
+            if chunk:
+                found_any = True
+                break
+        assert found_any, f"No skeleton chunks readable from shards in {subdir}/"
 
 
 def test_skeletonize_backward_compat_erosion_false(tmp_zarr, tmp_skeletonize_csv):
@@ -817,6 +875,7 @@ def test_skeletonize_backward_compat_erosion_false(tmp_zarr, tmp_skeletonize_csv
         min_branch_length_nm=0,
         tolerance_nm=0,
         num_workers=1,
+        sharded=False,
     )
 
     assert skeletonizer.erosion is None
