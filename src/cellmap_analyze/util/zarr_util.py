@@ -144,9 +144,18 @@ def create_multiscale_dataset(
         ["z", "y", "x"],
     )
 
-    # Also store original_voxel_size directly on the array for reliable round-tripping
+    # Persist the TRUE physical voxel_size and offset on the array attrs.
+    # prepare_ds wrote the funlib-scaled integer (needed to compute the array
+    # shape in integer world coords), but that value is internal-only — every
+    # external reader (neuroglancer, OME tools, anything reading voxel_size
+    # literally) expects physical units. cellmap-analyze re-derives the integer
+    # scaling in memory on read (ImageDataInterface + _read_voxel_size_offset),
+    # so overwriting the persisted attrs with the true values is safe for our
+    # own pipeline. original_voxel_size is kept too for back-compat.
     if original_voxel_size is not None:
         ds.data.attrs["original_voxel_size"] = list(original_voxel_size)
+        ds.data.attrs["voxel_size"] = list(original_voxel_size)
+        ds.data.attrs["offset"] = list(metadata_translation)
 
     return ds
 

@@ -198,6 +198,39 @@ class TestOutputMetadata:
         for s, e in zip(stored, original_vs):
             assert abs(s - e) < 1e-10
 
+    def test_voxel_size_attr_is_true_physical_value(self, tmp_path):
+        """The persisted voxel_size attr must hold the TRUE physical voxel
+        size, not the funlib-scaled integer — so external tools reading
+        voxel_size literally get correct units. cellmap-analyze must still
+        re-derive the scaled integer in memory."""
+        output_path = str(tmp_path / "true_vs.zarr" / "test_ds")
+        original_vs = (72.96, 64.0, 64.0)
+        scaled_vs, scale_factor = scale_voxel_size_to_integers(original_vs)
+        assert scale_factor != 1  # ensure we're exercising the fractional path
+
+        total_roi = Roi(
+            Coordinate(0, 0, 0), Coordinate(5, 5, 5) * Coordinate(scaled_vs)
+        )
+        create_multiscale_dataset(
+            output_path,
+            dtype=np.uint8,
+            voxel_size=Coordinate(scaled_vs),
+            total_roi=total_roi,
+            write_size=Coordinate(5, 5, 5) * Coordinate(scaled_vs),
+            original_voxel_size=original_vs,
+        )
+
+        # Raw attr (what an external/OME-naive reader sees) is the true value.
+        arr = zarr.open_array(output_path + "/s0", mode="r")
+        for s, e in zip(arr.attrs["voxel_size"], original_vs):
+            assert abs(float(s) - e) < 1e-10, "voxel_size attr should be physical"
+
+        # cellmap-analyze still reconstructs the scaled-integer convention.
+        idi = ImageDataInterface(output_path + "/s0")
+        assert tuple(idi.original_voxel_size) == original_vs
+        assert tuple(idi.voxel_size) == tuple(scaled_vs)
+        assert idi.voxel_size_scale_factor == scale_factor
+
 
 class TestMultiDatasetConsistency:
     def test_rescale_to_common_factor(self, tmp_path):

@@ -169,7 +169,17 @@ def prepare_ds(
 
 
 def _read_voxel_size_offset(ds):
-    """Read voxel_size and offset from a zarr array's attributes.
+    """Read voxel_size and offset from a zarr array's attributes, returning
+    them in the funlib-internal integer-scaled convention.
+
+    funlib.geometry.Coordinate is integer-only, so fractional voxel sizes
+    (e.g. 72.96 nm) are scaled up by an integer factor for internal ROI math.
+    We source the TRUE physical voxel size — preferring ``original_voxel_size``
+    (authoritative; present on every dataset we write, and the value that lets
+    us read legacy datasets whose ``voxel_size`` attr still holds the scaled
+    integer) — then scale it to integers here. Sourcing the true value avoids
+    both truncating a fractional ``voxel_size`` (int(72.96)=72) and
+    double-scaling a legacy scaled value.
 
     Checks multiple metadata formats: funlib-style, OME-Zarr, N5.
 
@@ -177,21 +187,31 @@ def _read_voxel_size_offset(ds):
         ds: A zarr.Array.
 
     Returns:
-        (voxel_size, offset) as Coordinates.
+        (voxel_size, offset) as integer-scaled Coordinates.
     """
+    from cellmap_analyze.util.voxel_size_utils import scale_voxel_size_to_integers
+
     attrs = dict(ds.attrs)
 
-    # funlib-style: resolution/offset or voxel_size/offset
-    if "resolution" in attrs:
-        voxel_size = Coordinate(int(v) for v in attrs["resolution"])
+    if "original_voxel_size" in attrs:
+        true_voxel_size = [float(v) for v in attrs["original_voxel_size"]]
+    elif "resolution" in attrs:
+        true_voxel_size = [float(v) for v in attrs["resolution"]]
     elif "voxel_size" in attrs:
-        voxel_size = Coordinate(int(v) for v in attrs["voxel_size"])
+        true_voxel_size = [float(v) for v in attrs["voxel_size"]]
     else:
-        # Default to 1 for all spatial dims
-        voxel_size = Coordinate(1 for _ in ds.shape)
+        true_voxel_size = [1.0 for _ in ds.shape]
 
+    scaled_vs, scale_factor = scale_voxel_size_to_integers(true_voxel_size)
+    voxel_size = Coordinate(scaled_vs)
+
+    # The persisted offset is in true physical units (new convention) or
+    # already 0 in the overwhelming majority of cases; scale it to match the
+    # integer voxel_size, mirroring ImageDataInterface's own offset handling.
     if "offset" in attrs:
-        offset = Coordinate(int(v) for v in attrs["offset"])
+        offset = Coordinate(
+            int(round(float(v) * scale_factor)) for v in attrs["offset"]
+        )
     else:
         offset = Coordinate(0 for _ in voxel_size)
 
