@@ -580,8 +580,9 @@ def write_zarrs(tmp_zarr, test_image_dict, voxel_size, chunk_size):
                 dtype=np.uint8,
                 num_channels=np.shape(data)[0],
             )
-            # Store original voxel_size for round-tripping
-            ds.data.attrs["original_voxel_size"] = list(original_voxel_size)
+            # New convention: voxel_size attr holds the true physical value
+            # (prepare_ds wrote the scaled integer; overwrite with the truth).
+            ds.data.attrs["voxel_size"] = list(original_voxel_size)
         else:
             ds = create_multiscale_dataset(
                 data_path,

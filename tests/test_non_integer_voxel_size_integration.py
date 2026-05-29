@@ -43,8 +43,9 @@ def non_int_zarr(tmp_path):
     test_data[6:8, 6:8, 6:8] = 2  # 8-voxel cube labeled 2
     ds.data[:] = test_data
 
-    # Store original float voxel_size for round-tripping
-    ds.data.attrs["original_voxel_size"] = list(original_vs)
+    # New convention: the voxel_size attr holds the TRUE physical value
+    # (cellmap-analyze re-derives the integer scaling in memory on read).
+    ds.data.attrs["voxel_size"] = list(original_vs)
 
     return zarr_path, original_vs, scaled_vs, scale_factor, test_data
 
@@ -174,8 +175,9 @@ class TestOutputMetadata:
         for written, expected in zip(scale_transform["scale"], original_vs):
             assert abs(written - expected) < 1e-10
 
-    def test_original_voxel_size_attr_written(self, tmp_path):
-        """The array should have original_voxel_size in its attrs."""
+    def test_no_original_voxel_size_attr_written(self, tmp_path):
+        """New datasets no longer carry a separate original_voxel_size attr;
+        voxel_size itself holds the true physical value."""
         output_path = str(tmp_path / "output2.zarr" / "test_ds")
         original_vs = (3.54, 4.0, 4.0)
         scaled_vs, scale_factor = scale_voxel_size_to_integers(original_vs)
@@ -193,10 +195,43 @@ class TestOutputMetadata:
             original_voxel_size=original_vs,
         )
 
-        assert "original_voxel_size" in ds.data.attrs
-        stored = ds.data.attrs["original_voxel_size"]
+        assert "original_voxel_size" not in ds.data.attrs
+        stored = ds.data.attrs["voxel_size"]
         for s, e in zip(stored, original_vs):
-            assert abs(s - e) < 1e-10
+            assert abs(float(s) - e) < 1e-10
+
+    def test_voxel_size_attr_is_true_physical_value(self, tmp_path):
+        """The persisted voxel_size attr must hold the TRUE physical voxel
+        size, not the funlib-scaled integer — so external tools reading
+        voxel_size literally get correct units. cellmap-analyze must still
+        re-derive the scaled integer in memory."""
+        output_path = str(tmp_path / "true_vs.zarr" / "test_ds")
+        original_vs = (72.96, 64.0, 64.0)
+        scaled_vs, scale_factor = scale_voxel_size_to_integers(original_vs)
+        assert scale_factor != 1  # ensure we're exercising the fractional path
+
+        total_roi = Roi(
+            Coordinate(0, 0, 0), Coordinate(5, 5, 5) * Coordinate(scaled_vs)
+        )
+        create_multiscale_dataset(
+            output_path,
+            dtype=np.uint8,
+            voxel_size=Coordinate(scaled_vs),
+            total_roi=total_roi,
+            write_size=Coordinate(5, 5, 5) * Coordinate(scaled_vs),
+            original_voxel_size=original_vs,
+        )
+
+        # Raw attr (what an external/OME-naive reader sees) is the true value.
+        arr = zarr.open_array(output_path + "/s0", mode="r")
+        for s, e in zip(arr.attrs["voxel_size"], original_vs):
+            assert abs(float(s) - e) < 1e-10, "voxel_size attr should be physical"
+
+        # cellmap-analyze still reconstructs the scaled-integer convention.
+        idi = ImageDataInterface(output_path + "/s0")
+        assert tuple(idi.original_voxel_size) == original_vs
+        assert tuple(idi.voxel_size) == tuple(scaled_vs)
+        assert idi.voxel_size_scale_factor == scale_factor
 
 
 class TestMultiDatasetConsistency:
@@ -214,7 +249,7 @@ class TestMultiDatasetConsistency:
             voxel_size=Coordinate(scaled_vs1), dtype=np.uint8,
         )
         ds1.data[:] = np.ones(shape, dtype=np.uint8)
-        ds1.data.attrs["original_voxel_size"] = list(vs1)
+        ds1.data.attrs["voxel_size"] = list(vs1)
 
         # Dataset 2: voxel_size (4, 4, 4) -> scale_factor 1
         zarr2 = str(tmp_path / "ds2.zarr")
@@ -227,7 +262,7 @@ class TestMultiDatasetConsistency:
             voxel_size=Coordinate(scaled_vs2), dtype=np.uint8,
         )
         ds2.data[:] = np.ones(shape, dtype=np.uint8)
-        ds2.data.attrs["original_voxel_size"] = list(vs2)
+        ds2.data.attrs["voxel_size"] = list(vs2)
 
         idi1 = ImageDataInterface(f"{zarr1}/a/s0")
         idi2 = ImageDataInterface(f"{zarr2}/b/s0")
