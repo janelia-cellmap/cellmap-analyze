@@ -162,6 +162,10 @@ class Skeletonize(ComputeConfigMixin):
         minishard_bits=6,
         retry_on_oom=True,
         memory_retry_max=3,
+        peak_bytes_baseline=250_000_000,
+        peak_bytes_per_voxel=6.63,
+        memory_safety_multiplier=2.0,
+        memory_fraction=0.60,
     ):
         """
         Skeletonize a segmentation, parallelized over IDs.
@@ -190,6 +194,26 @@ class Skeletonize(ComputeConfigMixin):
                      preshift_bits=0 (good fit for densely-numbered MWS IDs).
             retry_on_oom: Halve processes-per-slot and retry on worker OOM.
             memory_retry_max: Max OOM-driven retries before raising.
+            peak_bytes_baseline, peak_bytes_per_voxel: Estimator constants for
+                     per-ID peak RSS. The per-voxel cost is automatically
+                     bumped to ``max(dtype.itemsize + 1, peak_bytes_per_voxel)``
+                     based on the segmentation's dtype, because the brief
+                     read-time peak (``raw_data + bool_mask``) becomes the
+                     binding constraint for uint64-stored datasets — observed
+                     amplification on uint64 c-elegans data is ~10 B/voxel
+                     versus ~6.6 B/voxel on uint16 data. The default of 6.63
+                     B/voxel is the "honest" fit on a heavily-proofread
+                     uint16 dataset; with the dtype bump it becomes ~9 B/voxel
+                     on uint64 datasets automatically.
+            memory_safety_multiplier: Multiplier applied to the per-ID peak
+                     estimate before wave planning. Default 2.0 covers the
+                     variance we've seen across c-elegans datasets (compact
+                     proofread vs sparse single-pass-cleanup). Bump higher
+                     (e.g. 3-4) for datasets where the giants OOM repeatedly,
+                     or lower (e.g. 1.0-1.5) for tightly-profiled datasets
+                     where you want maximum throughput.
+            memory_fraction: Fraction of per-slot memory considered usable
+                     when planning waves (rest is dask/OS/library overhead).
         """
         super().__init__(num_workers)
         self.segmentation_idi = ImageDataInterface(segmentation_path, timeout=timeout)
@@ -217,6 +241,10 @@ class Skeletonize(ComputeConfigMixin):
         self.minishard_bits = minishard_bits
         self.retry_on_oom = retry_on_oom
         self.memory_retry_max = memory_retry_max
+        self.peak_bytes_baseline = float(peak_bytes_baseline)
+        self.peak_bytes_per_voxel = float(peak_bytes_per_voxel)
+        self.memory_safety_multiplier = float(memory_safety_multiplier)
+        self.memory_fraction = float(memory_fraction)
 
         # Load CSV with bounding box info
         self.bbox_df = pd.read_csv(csv_path, index_col=0)
@@ -556,50 +584,147 @@ class Skeletonize(ComputeConfigMixin):
                 f"Wrote segment_properties info file to {segment_properties_path}"
             )
 
+    def _estimate_peak_bytes(self, id_value):
+        """Estimate per-ID peak RSS from the cached bbox row.
+
+        Uses the isotropic voxel count of the (padded) bbox times a
+        per-voxel cost that accounts for the segmentation's dtype. The
+        read-time transient ``raw_data + bool_mask`` peaks at roughly
+        ``dtype.itemsize + 1`` bytes per voxel; the later EDT/skel phase
+        peaks at roughly ``peak_bytes_per_voxel``. Whichever is larger
+        sets the per-voxel cost (max, not sum, because they occur at
+        different points in time). ``memory_safety_multiplier`` then
+        absorbs cross-dataset variance from morphology/cleanup level.
+        """
+        row = self.bbox_df.loc[id_value]
+        vs_nm = self.segmentation_idi.voxel_size
+        original_vs = self.segmentation_idi.original_voxel_size
+        dx = (row["MAX X (nm)"] - row["MIN X (nm)"]) + 2 * vs_nm[0]
+        dy = (row["MAX Y (nm)"] - row["MIN Y (nm)"]) + 2 * vs_nm[1]
+        dz = (row["MAX Z (nm)"] - row["MIN Z (nm)"]) + 2 * vs_nm[2]
+        min_vs = min(original_vs)
+        iso_voxels = (dx * dy * dz) / (min_vs ** 3)
+
+        dtype_bytes = self.segmentation_idi.ds.data.dtype.itemsize
+        bytes_per_voxel = max(dtype_bytes + 1, self.peak_bytes_per_voxel)
+        peak = self.peak_bytes_baseline + bytes_per_voxel * iso_voxels
+        return int(peak * self.memory_safety_multiplier)
+
     def skeletonize(self):
         """
         Main method to skeletonize all IDs in parallel.
+
+        Plans memory-aware dask waves: groups IDs by the per-ID peak RSS
+        estimator (``_estimate_peak_bytes``) into waves whose ``processes``
+        per slot is tuned so one item fits per worker. Each wave runs as
+        its own dask cluster with the OOM-retry safety net underneath.
         """
         logger.info(f"Starting skeletonization of {len(self.ids)} IDs")
 
         # First write the info files (only once)
         self.write_neuroglancer_info_files()
 
-        # Parallelize over IDs using dask, with OOM-driven backoff.
-        num_ids = len(self.ids)
-        tmp_merge_dir = f"{self.output_path}/_tmp_skeleton_metrics_to_merge"
-        msg = f"skeletonizing {num_ids} IDs from {self.segmentation_idi.path}"
-
-        def _phase(workers, config):
-            return dask_util.compute_blockwise_partitions(
-                num_ids,
-                workers,
-                self.compute_args,
-                logger,
-                msg,
-                self._skeletonize_id_wrapper,
-                merge_info=(Skeletonize._merge_skeleton_metrics, tmp_merge_dir),
-                config=config,
+        try:
+            base_config = dask_util._load_dask_config() if self.num_workers > 1 else None
+        except (FileNotFoundError, KeyError, TypeError, ValueError) as e:
+            logger.warning(
+                "Could not load dask-config.yaml for wave planning (%s); "
+                "running all IDs in a single wave.",
+                e,
             )
+            base_config = None
 
-        skeleton_metrics = dask_util.run_with_oom_retry(
-            _phase,
+        items = [(int(i), self._estimate_peak_bytes(i)) for i in self.ids]
+        waves = dask_util.plan_memory_waves(
+            items,
             self.num_workers,
-            "skeletonize",
-            logger,
-            max_retries=self.memory_retry_max,
-            retry_on_oom=self.retry_on_oom,
+            config=base_config,
+            memory_fraction=self.memory_fraction,
         )
+        self._log_wave_plan(waves)
+
+        tmp_merge_root = f"{self.output_path}/_tmp_skeleton_metrics_to_merge"
+        all_metrics = []
+
+        for wave_index, wave in enumerate(waves, start=1):
+            # The outer phase_name (used by the OOM-retry log line) keeps
+            # the wave's identity stable across retries. The inner msg
+            # built inside _phase reflects the *current* procs/slot so the
+            # "Started skeletonize..." log line is accurate after a halving.
+            wave_label = f"skeletonize wave {wave_index}/{len(waves)} ({len(wave.item_ids)} IDs)"
+            wave_ids = wave.item_ids
+            wave_merge_dir = f"{tmp_merge_root}_wave{wave_index}"
+
+            def _wrapper(idx, _wave_ids=wave_ids):
+                return self._skeletonize_id_by_value(_wave_ids[idx])
+
+            def _phase(workers, config, _wrapper=_wrapper, _ids=wave_ids,
+                       _merge=wave_merge_dir, _label=wave_label):
+                current_procs = (
+                    config["jobqueue"][next(iter(config["jobqueue"]))]["processes"]
+                    if config and config.get("jobqueue") else 1
+                )
+                msg = f"{_label}, procs/slot={current_procs}"
+                return dask_util.compute_blockwise_partitions(
+                    len(_ids), workers, self.compute_args, logger, msg,
+                    _wrapper,
+                    merge_info=(Skeletonize._merge_skeleton_metrics, _merge),
+                    config=config,
+                )
+
+            wave_metrics = dask_util.run_with_oom_retry(
+                _phase, wave.workers, wave_label, logger,
+                max_retries=self.memory_retry_max,
+                retry_on_oom=self.retry_on_oom,
+                config=wave.config,
+            )
+            all_metrics.extend(wave_metrics)
 
         # When sharded, workers piggybacked encoded skeleton bytes onto each
         # metrics dict via the pickle merge — no per-ID files were written.
         # Pop the bytes out (so they don't end up in the CSV) and write shards.
         if self.sharded:
-            self._pack_shards_from_metrics(skeleton_metrics)
+            self._pack_shards_from_metrics(all_metrics)
 
-        self._write_skeleton_csv(skeleton_metrics)
+        self._write_skeleton_csv(all_metrics)
 
         logger.info("Skeletonization complete")
+
+    def _log_wave_plan(self, waves):
+        if not waves:
+            return
+        total_ids = sum(len(w.item_ids) for w in waves)
+        biggest = max(w.max_estimated_peak_bytes for w in waves)
+        logger.info(
+            "Wave plan: %d wave(s) over %d IDs (largest projected peak %.2f GB)",
+            len(waves), total_ids, biggest / 1e9,
+        )
+        for i, wave in enumerate(waves, start=1):
+            logger.info(
+                "  wave %d/%d: processes/slot=%d, workers=%d, IDs=%d, "
+                "max projected peak %.2f GB",
+                i, len(waves), wave.processes, wave.workers,
+                len(wave.item_ids), wave.max_estimated_peak_bytes / 1e9,
+            )
+
+    def _skeletonize_id_by_value(self, id_value):
+        """Dispatch one ID to ``calculate_id_skeleton``. Each wave dispatches
+        a subset of IDs, so the wrapper takes the ID value directly rather
+        than an index into ``self.ids``."""
+        result = Skeletonize.calculate_id_skeleton(
+            id_value,
+            self.segmentation_idi,
+            self.bbox_df,
+            self.output_path,
+            self.erosion,
+            self.min_branch_length_nm,
+            self.tolerance_nm,
+            sharded=self.sharded,
+        )
+        if result is None:
+            result = Skeletonize._empty_metrics()
+        result["id"] = id_value
+        return result
 
     def _pack_shards_from_metrics(self, metrics_list):
         """Pack encoded skeleton bytes (already in memory via pickle merge)
@@ -678,25 +803,3 @@ class Skeletonize(ComputeConfigMixin):
         combined_df.to_csv(output_csv)
         logger.info(f"Wrote skeleton metrics CSV to {output_csv}")
 
-    def _skeletonize_id_wrapper(self, index):
-        """
-        Wrapper to call calculate_id_skeleton with the appropriate ID.
-
-        Args:
-            index: Index into self.ids list
-        """
-        id_value = self.ids[index]
-        result = Skeletonize.calculate_id_skeleton(
-            id_value,
-            self.segmentation_idi,
-            self.bbox_df,
-            self.output_path,
-            self.erosion,
-            self.min_branch_length_nm,
-            self.tolerance_nm,
-            sharded=self.sharded,
-        )
-        if result is None:
-            result = Skeletonize._empty_metrics()
-        result["id"] = id_value
-        return result
