@@ -174,8 +174,9 @@ class TestOutputMetadata:
         for written, expected in zip(scale_transform["scale"], original_vs):
             assert abs(written - expected) < 1e-10
 
-    def test_original_voxel_size_attr_written(self, tmp_path):
-        """The array should have original_voxel_size in its attrs."""
+    def test_no_original_voxel_size_attr_written(self, tmp_path):
+        """New datasets no longer carry a separate original_voxel_size attr;
+        voxel_size itself holds the true physical value."""
         output_path = str(tmp_path / "output2.zarr" / "test_ds")
         original_vs = (3.54, 4.0, 4.0)
         scaled_vs, scale_factor = scale_voxel_size_to_integers(original_vs)
@@ -193,10 +194,39 @@ class TestOutputMetadata:
             original_voxel_size=original_vs,
         )
 
-        assert "original_voxel_size" in ds.data.attrs
-        stored = ds.data.attrs["original_voxel_size"]
+        assert "original_voxel_size" not in ds.data.attrs
+        stored = ds.data.attrs["voxel_size"]
         for s, e in zip(stored, original_vs):
-            assert abs(s - e) < 1e-10
+            assert abs(float(s) - e) < 1e-10
+
+    def test_legacy_original_voxel_size_attr_still_read(self, tmp_path):
+        """Back-compat: a legacy dataset whose voxel_size attr holds the
+        scaled integer + original_voxel_size holds the true value must still
+        read correctly (original_voxel_size wins, no double-scaling)."""
+        output_path = str(tmp_path / "legacy.zarr" / "test_ds")
+        original_vs = (3.54, 4.0, 4.0)
+        scaled_vs, scale_factor = scale_voxel_size_to_integers(original_vs)
+
+        total_roi = Roi(
+            Coordinate(0, 0, 0), Coordinate(5, 5, 5) * Coordinate(scaled_vs)
+        )
+        create_multiscale_dataset(
+            output_path,
+            dtype=np.uint8,
+            voxel_size=Coordinate(scaled_vs),
+            total_roi=total_roi,
+            write_size=Coordinate(5, 5, 5) * Coordinate(scaled_vs),
+            original_voxel_size=original_vs,
+        )
+        # Rewrite attrs to the OLD convention: scaled voxel_size + original_voxel_size.
+        arr = zarr.open_array(output_path + "/s0", mode="r+")
+        arr.attrs["voxel_size"] = list(scaled_vs)
+        arr.attrs["original_voxel_size"] = list(original_vs)
+
+        idi = ImageDataInterface(output_path + "/s0")
+        assert tuple(idi.original_voxel_size) == original_vs
+        assert tuple(idi.voxel_size) == tuple(scaled_vs)
+        assert idi.voxel_size_scale_factor == scale_factor
 
     def test_voxel_size_attr_is_true_physical_value(self, tmp_path):
         """The persisted voxel_size attr must hold the TRUE physical voxel
