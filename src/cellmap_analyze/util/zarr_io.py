@@ -200,12 +200,15 @@ def _read_voxel_size_offset(ds):
     scaled_vs, scale_factor = scale_voxel_size_to_integers(true_voxel_size)
     voxel_size = Coordinate(scaled_vs)
 
-    # The persisted offset is in true physical units (new convention) or
-    # already 0 in the overwhelming majority of cases; scale it to match the
-    # integer voxel_size, mirroring ImageDataInterface's own offset handling.
+    # The persisted offset / OME translation is the voxel CENTER of voxel
+    # [0,0,0]; convert it to the funlib CORNER (begin) by subtracting half a
+    # voxel before scaling, mirroring ImageDataInterface. The write path
+    # (create_multiscale_dataset) adds the half-voxel back so stored values
+    # stay OME-correct.
     if "offset" in attrs:
         offset = Coordinate(
-            int(round(float(v) * scale_factor)) for v in attrs["offset"]
+            int(round((float(v) - true_voxel_size[i] / 2.0) * scale_factor))
+            for i, v in enumerate(attrs["offset"])
         )
     else:
         offset = Coordinate(0 for _ in voxel_size)

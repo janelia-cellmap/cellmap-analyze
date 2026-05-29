@@ -147,8 +147,9 @@ class TestZarrV2BackwardCompat:
         assert tuple(idi.voxel_size) == vs
         assert tuple(idi.roi.shape) == tuple(s * v for s, v in zip(shape, vs))
 
-        roi = Roi(Coordinate(0, 0, 0), Coordinate(shape) * Coordinate(vs))
-        read_data = idi.to_ndarray_ds(roi)
+        # Read the dataset's own ROI: the OME translation is the voxel CENTER,
+        # so the dataset corner is translation - vs/2, not the origin.
+        read_data = idi.to_ndarray_ds(idi.roi)
         assert np.all(read_data == 42)
 
     def test_read_v2_with_ome_metadata(self, tmp_path):
@@ -241,10 +242,10 @@ class TestZarrV2BackwardCompat:
         assert tuple(idi.original_voxel_size) == (16.0, 16.0, 16.0)
         assert idi.ds.data.shape == (10, 10, 10)
 
-        # Verify data round-trip
-        from funlib.geometry import Roi, Coordinate
-        roi = Roi(Coordinate(0, 0, 0), Coordinate(10, 10, 10) * idi.voxel_size)
-        read_data = idi.to_ndarray_ds(roi)
+        # Verify data round-trip. Read the dataset's own ROI: the OME
+        # translation is the voxel CENTER, so the corner is translation - vs/2,
+        # not the origin.
+        read_data = idi.to_ndarray_ds(idi.roi)
         assert np.array_equal(read_data, test_data)
 
     def test_v3_output_has_ome_ngff_metadata(self, tmp_path):

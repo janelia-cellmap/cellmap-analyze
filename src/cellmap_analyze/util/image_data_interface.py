@@ -495,6 +495,16 @@ class ImageDataInterface:
             raw_voxel_size = raw_voxel_size[::-1]
             raw_offset = raw_offset[::-1]
 
+        # The persisted offset / OME-NGFF translation is the physical position
+        # of the voxel CENTER of voxel [0,0,0]. funlib ROI math treats the
+        # offset as the voxel CORNER (begin). Convert center -> corner by
+        # subtracting half a voxel so every internal voxel<->physical
+        # conversion (measure's +0.5, assign's floor, block IO) is consistent
+        # and datasets at different scales line up. The write path
+        # (create_multiscale_dataset) converts corner -> center on the way out,
+        # so stored translations stay OME-correct.
+        raw_offset = tuple(o - vs / 2.0 for o, vs in zip(raw_offset, raw_voxel_size))
+
         # Scale float voxel sizes to integers for funlib compatibility
         scaled_vs, scale_factor = scale_voxel_size_to_integers(raw_voxel_size)
         self.original_voxel_size = raw_voxel_size

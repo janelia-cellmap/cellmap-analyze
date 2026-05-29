@@ -512,8 +512,10 @@ class TestN5AnisotropicSwapAxes:
     def test_single_voxel_roi_z_axis(self, tmp_n5):
         """A 1-voxel-thick ROI in z should return shape 1 in that dimension."""
         idi = ImageDataInterface(tmp_n5)
-        # IDI voxel_size is now (131, 100, 100) in z,y,x; z-voxel = 131
-        roi = Roi(Coordinate(0, 0, 0), Coordinate(131, 1000, 1000))
+        # IDI voxel_size is now (131, 100, 100) in z,y,x; z-voxel = 131.
+        # Anchor at idi.roi.begin: with no OME translation the offset is treated
+        # as a voxel CENTER, so the grid-aligned corner is begin = -vs/2, not 0.
+        roi = Roi(idi.roi.begin, Coordinate(131, 1000, 1000))
         result = idi.to_ndarray_ts(roi)
         assert result.shape[0] == 1, (
             f"Expected 1 voxel in z, got {result.shape[0]} (shape={result.shape})"
@@ -522,8 +524,9 @@ class TestN5AnisotropicSwapAxes:
     def test_single_voxel_roi_x_axis(self, tmp_n5):
         """A 1-voxel-thick ROI in x should return shape 1 in that dimension."""
         idi = ImageDataInterface(tmp_n5)
-        # x-voxel = 100
-        roi = Roi(Coordinate(0, 0, 0), Coordinate(1310, 1000, 100))
+        # x-voxel = 100. Anchor at idi.roi.begin (= -vs/2) since the offset is
+        # treated as a voxel CENTER when no OME translation is present.
+        roi = Roi(idi.roi.begin, Coordinate(1310, 1000, 100))
         result = idi.to_ndarray_ts(roi)
         assert result.shape[2] == 1, (
             f"Expected 1 voxel in x, got {result.shape[2]} (shape={result.shape})"
