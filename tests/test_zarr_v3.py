@@ -326,3 +326,59 @@ class TestZarrV2BackwardCompat:
         assert not os.path.exists(os.path.join(s0_path, ".zarray")), (
             "Found .zarray (v2) in v3 container — format mismatch"
         )
+
+
+class TestMultiscaleLevelSelection:
+    """Each scale level (s0, s1, ...) carries its own scale + translation in the
+    OME multiscales metadata. Opening a non-s0 level of an external dataset
+    (no per-array attrs) must read THAT level's transform, not s0's."""
+
+    def _make_external_multiscale(self, root):
+        """Two-level OME multiscale on the parent group, arrays carry no
+        per-array voxel_size/offset attrs (pure OME, like external EM data)."""
+        import zarr
+
+        seg = os.path.join(root, "seg")
+        os.makedirs(seg)
+        json.dump({"zarr_format": 2}, open(os.path.join(root, ".zgroup"), "w"))
+        json.dump({"zarr_format": 2}, open(os.path.join(seg, ".zgroup"), "w"))
+        ome = {
+            "multiscales": [{
+                "axes": [{"name": a, "type": "space", "unit": "nanometer"} for a in "zyx"],
+                "datasets": [
+                    {"path": "s0", "coordinateTransformations": [
+                        {"scale": [4.0, 4.0, 4.0], "type": "scale"},
+                        {"translation": [0.0, 0.0, 0.0], "type": "translation"}]},
+                    {"path": "s1", "coordinateTransformations": [
+                        {"scale": [8.0, 8.0, 8.0], "type": "scale"},
+                        {"translation": [2.0, 2.0, 2.0], "type": "translation"}]},
+                ],
+                "name": "", "version": "0.4",
+            }]
+        }
+        json.dump(ome, open(os.path.join(seg, ".zattrs"), "w"))
+        for name, shp in [("s0", (20, 20, 20)), ("s1", (10, 10, 10))]:
+            a = zarr.open_array(
+                os.path.join(seg, name), mode="w", shape=shp, chunks=shp,
+                dtype="uint8", zarr_format=2,
+            )
+            a[:] = 1
+        return seg
+
+    def test_reads_per_level_scale_and_translation(self, tmp_path):
+        seg = self._make_external_multiscale(str(tmp_path / "ext.zarr"))
+
+        idi0 = ImageDataInterface(f"{seg}/s0")
+        assert tuple(idi0.voxel_size) == (4, 4, 4)
+        # translation 0 (center) -> corner = 0 - 4/2 = -2
+        assert tuple(idi0.offset) == (-2, -2, -2)
+
+        idi1 = ImageDataInterface(f"{seg}/s1")
+        # must pick up s1's scale, not s0's
+        assert tuple(idi1.voxel_size) == (8, 8, 8)
+        # translation 2 (center) -> corner = 2 - 8/2 = -2
+        assert tuple(idi1.offset) == (-2, -2, -2)
+
+        # Both levels share the same corner (-V_base/2) -- the OME pyramid
+        # invariant that keeps scales aligned.
+        assert tuple(idi0.offset) == tuple(idi1.offset)

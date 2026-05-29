@@ -76,14 +76,16 @@ def read_raw_voxel_size(ds):
     if "voxel_size" in attrs:
         return tuple(float(v) for v in attrs["voxel_size"])
 
+    scale_name = _array_scale_name(ds)
+
     # Check OME-Zarr multiscales on the array itself (rare but possible)
     if "multiscales" in attrs:
-        return _extract_ome_scale(attrs)
+        return _extract_ome_scale(attrs, scale_name)
 
     # Check OME-Zarr multiscales on parent group
     parent_attrs = _read_parent_attrs(ds)
     if parent_attrs and "multiscales" in parent_attrs:
-        return _extract_ome_scale(parent_attrs)
+        return _extract_ome_scale(parent_attrs, scale_name)
 
     # Check N5 pixelResolution
     if "pixelResolution" in attrs:
@@ -108,16 +110,18 @@ def read_raw_offset(ds):
     if "offset" in attrs:
         return tuple(float(v) for v in attrs["offset"])
 
+    scale_name = _array_scale_name(ds)
+
     # Check OME-Zarr multiscales on the array
     if "multiscales" in attrs:
-        translation = _extract_ome_translation(attrs)
+        translation = _extract_ome_translation(attrs, scale_name)
         if translation is not None:
             return translation
 
     # Check parent group for OME-Zarr
     parent_attrs = _read_parent_attrs(ds)
     if parent_attrs and "multiscales" in parent_attrs:
-        translation = _extract_ome_translation(parent_attrs)
+        translation = _extract_ome_translation(parent_attrs, scale_name)
         if translation is not None:
             return translation
 
@@ -125,21 +129,59 @@ def read_raw_offset(ds):
     return tuple(float(v) for v in ds.roi.offset)
 
 
-def _extract_ome_scale(attrs):
-    """Extract voxel size from OME-Zarr multiscales metadata."""
-    transforms = attrs["multiscales"][0]["datasets"][0]["coordinateTransformations"]
+def _select_ome_dataset(attrs, scale_name=None):
+    """Pick the multiscales ``datasets`` entry for the level being opened.
+
+    Each scale level (s0, s1, ...) carries its OWN scale + translation, so we
+    must match the opened array's leaf name (e.g. "s1") against the dataset
+    ``path``. Falls back to the first entry when the level can't be identified
+    (single-scale metadata, or a non-standard array name).
+    """
+    datasets = attrs["multiscales"][0]["datasets"]
+    if scale_name is not None:
+        for d in datasets:
+            if d.get("path") == scale_name:
+                return d
+    return datasets[0]
+
+
+def _extract_ome_scale(attrs, scale_name=None):
+    """Extract voxel size from OME-Zarr multiscales metadata for a given level."""
+    transforms = _select_ome_dataset(attrs, scale_name)["coordinateTransformations"]
     for t in transforms:
         if t["type"] == "scale":
             return tuple(float(v) for v in t["scale"])
     raise ValueError("No scale transform found in OME-Zarr multiscales metadata")
 
 
-def _extract_ome_translation(attrs):
-    """Extract offset from OME-Zarr multiscales metadata."""
-    transforms = attrs["multiscales"][0]["datasets"][0]["coordinateTransformations"]
+def _extract_ome_translation(attrs, scale_name=None):
+    """Extract offset from OME-Zarr multiscales metadata for a given level."""
+    transforms = _select_ome_dataset(attrs, scale_name)["coordinateTransformations"]
     for t in transforms:
         if t["type"] == "translation":
             return tuple(float(v) for v in t["translation"])
+    return None
+
+
+def _array_scale_name(ds):
+    """Leaf name of the array's location (e.g. "s1"), used to select the
+    matching OME multiscales dataset entry. Returns None if it can't be
+    determined (then callers fall back to the first multiscales entry)."""
+    try:
+        import os
+
+        array_name = getattr(ds.data, "name", None) or getattr(ds.data, "path", "")
+        array_name = str(array_name).strip("/")
+        if array_name:
+            return array_name.split("/")[-1]
+        store_root = getattr(getattr(ds.data, "store", None), "root", None)
+        if store_root:
+            s = str(store_root)
+            if s.startswith("file://"):
+                s = s[len("file://"):]
+            return os.path.basename(s.rstrip("/"))
+    except Exception:
+        pass
     return None
 
 
