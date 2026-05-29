@@ -174,12 +174,9 @@ def _read_voxel_size_offset(ds):
 
     funlib.geometry.Coordinate is integer-only, so fractional voxel sizes
     (e.g. 72.96 nm) are scaled up by an integer factor for internal ROI math.
-    We source the TRUE physical voxel size — preferring ``original_voxel_size``
-    (authoritative; present on every dataset we write, and the value that lets
-    us read legacy datasets whose ``voxel_size`` attr still holds the scaled
-    integer) — then scale it to integers here. Sourcing the true value avoids
-    both truncating a fractional ``voxel_size`` (int(72.96)=72) and
-    double-scaling a legacy scaled value.
+    The persisted ``voxel_size``/``resolution`` attr holds the TRUE physical
+    voxel size (cellmap-analyze convention); we read it and scale to integers
+    here, which avoids truncating a fractional voxel_size (int(72.96)=72).
 
     Checks multiple metadata formats: funlib-style, OME-Zarr, N5.
 
@@ -193,9 +190,7 @@ def _read_voxel_size_offset(ds):
 
     attrs = dict(ds.attrs)
 
-    if "original_voxel_size" in attrs:
-        true_voxel_size = [float(v) for v in attrs["original_voxel_size"]]
-    elif "resolution" in attrs:
+    if "resolution" in attrs:
         true_voxel_size = [float(v) for v in attrs["resolution"]]
     elif "voxel_size" in attrs:
         true_voxel_size = [float(v) for v in attrs["voxel_size"]]

@@ -43,8 +43,9 @@ def non_int_zarr(tmp_path):
     test_data[6:8, 6:8, 6:8] = 2  # 8-voxel cube labeled 2
     ds.data[:] = test_data
 
-    # Store original float voxel_size for round-tripping
-    ds.data.attrs["original_voxel_size"] = list(original_vs)
+    # New convention: the voxel_size attr holds the TRUE physical value
+    # (cellmap-analyze re-derives the integer scaling in memory on read).
+    ds.data.attrs["voxel_size"] = list(original_vs)
 
     return zarr_path, original_vs, scaled_vs, scale_factor, test_data
 
@@ -199,35 +200,6 @@ class TestOutputMetadata:
         for s, e in zip(stored, original_vs):
             assert abs(float(s) - e) < 1e-10
 
-    def test_legacy_original_voxel_size_attr_still_read(self, tmp_path):
-        """Back-compat: a legacy dataset whose voxel_size attr holds the
-        scaled integer + original_voxel_size holds the true value must still
-        read correctly (original_voxel_size wins, no double-scaling)."""
-        output_path = str(tmp_path / "legacy.zarr" / "test_ds")
-        original_vs = (3.54, 4.0, 4.0)
-        scaled_vs, scale_factor = scale_voxel_size_to_integers(original_vs)
-
-        total_roi = Roi(
-            Coordinate(0, 0, 0), Coordinate(5, 5, 5) * Coordinate(scaled_vs)
-        )
-        create_multiscale_dataset(
-            output_path,
-            dtype=np.uint8,
-            voxel_size=Coordinate(scaled_vs),
-            total_roi=total_roi,
-            write_size=Coordinate(5, 5, 5) * Coordinate(scaled_vs),
-            original_voxel_size=original_vs,
-        )
-        # Rewrite attrs to the OLD convention: scaled voxel_size + original_voxel_size.
-        arr = zarr.open_array(output_path + "/s0", mode="r+")
-        arr.attrs["voxel_size"] = list(scaled_vs)
-        arr.attrs["original_voxel_size"] = list(original_vs)
-
-        idi = ImageDataInterface(output_path + "/s0")
-        assert tuple(idi.original_voxel_size) == original_vs
-        assert tuple(idi.voxel_size) == tuple(scaled_vs)
-        assert idi.voxel_size_scale_factor == scale_factor
-
     def test_voxel_size_attr_is_true_physical_value(self, tmp_path):
         """The persisted voxel_size attr must hold the TRUE physical voxel
         size, not the funlib-scaled integer — so external tools reading
@@ -277,7 +249,7 @@ class TestMultiDatasetConsistency:
             voxel_size=Coordinate(scaled_vs1), dtype=np.uint8,
         )
         ds1.data[:] = np.ones(shape, dtype=np.uint8)
-        ds1.data.attrs["original_voxel_size"] = list(vs1)
+        ds1.data.attrs["voxel_size"] = list(vs1)
 
         # Dataset 2: voxel_size (4, 4, 4) -> scale_factor 1
         zarr2 = str(tmp_path / "ds2.zarr")
@@ -290,7 +262,7 @@ class TestMultiDatasetConsistency:
             voxel_size=Coordinate(scaled_vs2), dtype=np.uint8,
         )
         ds2.data[:] = np.ones(shape, dtype=np.uint8)
-        ds2.data.attrs["original_voxel_size"] = list(vs2)
+        ds2.data.attrs["voxel_size"] = list(vs2)
 
         idi1 = ImageDataInterface(f"{zarr1}/a/s0")
         idi2 = ImageDataInterface(f"{zarr2}/b/s0")

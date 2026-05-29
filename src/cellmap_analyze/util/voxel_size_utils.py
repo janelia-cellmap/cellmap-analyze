@@ -71,11 +71,8 @@ def read_raw_voxel_size(ds):
     """
     attrs = dict(ds.data.attrs)
 
-    # Check for our own original_voxel_size attr (written by create_multiscale_dataset)
-    if "original_voxel_size" in attrs:
-        return tuple(float(v) for v in attrs["original_voxel_size"])
-
-    # Check funlib-style voxel_size attribute on the array
+    # funlib-style voxel_size attribute on the array. cellmap-analyze writes
+    # the TRUE physical voxel size here (see create_multiscale_dataset).
     if "voxel_size" in attrs:
         return tuple(float(v) for v in attrs["voxel_size"])
 
