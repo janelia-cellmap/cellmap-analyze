@@ -896,6 +896,78 @@ def test_skeletonize_seed_voxel_fallback(shared_tmpdir):
     assert df.loc[1, "Radius Std (nm)"] == 0.0
 
 
+def test_skeletonize_nonzero_translation_shifts_by_translation(shared_tmpdir):
+    """Regression for the OME voxel-CENTER convention in the skeletonize path.
+
+    The rest of the suite only exercises translation 0 (where the center<->corner
+    conversion cancels to a no-op). Here we skeletonize the SAME object in two
+    datasets that differ only by a non-zero OME translation, and assert the
+    resulting skeleton is identical up to a shift equal to that translation --
+    i.e. translation propagates with no half-voxel, sign, or doubling error.
+    """
+    from cellmap_analyze.util.zarr_util import create_multiscale_dataset
+    from funlib.geometry import Coordinate, Roi
+
+    vs = (2, 2, 2)          # isotropic -> no resampling; vs/2 = 1 (integer corner)
+    delta = 24              # isotropic corner shift in nm (== OME translation shift)
+
+    # Elongated rod (3x3 cross-section, 11 long) skeletonizes to a clean line.
+    seg = np.zeros((20, 20, 20), dtype=np.uint8)
+    seg[3:14, 9:12, 9:12] = 1
+    zc, yc, xc = np.where(seg)
+
+    def run(name, begin):
+        data_path = f"{shared_tmpdir}/{name}.zarr/seg"
+        total_roi = Roi(Coordinate(begin), Coordinate(seg.shape) * Coordinate(vs))
+        ds = create_multiscale_dataset(
+            data_path,
+            dtype=seg.dtype,
+            voxel_size=list(vs),
+            total_roi=total_roi,
+            write_size=Coordinate(seg.shape) * Coordinate(vs),
+            original_voxel_size=list(vs),
+        )
+        ds.data[:] = seg
+        # bbox CSV = OME centers of the object's min/max voxels, exactly what
+        # measure would emit for this dataset: (idx + 0.5)*vs + begin (sf == 1).
+        b = begin
+        csv_path = f"{shared_tmpdir}/{name}_bbox.csv"
+        pd.DataFrame([{
+            "Object ID": 1,
+            "MIN Z (nm)": (zc.min() + 0.5) * vs[0] + b[0],
+            "MIN Y (nm)": (yc.min() + 0.5) * vs[1] + b[1],
+            "MIN X (nm)": (xc.min() + 0.5) * vs[2] + b[2],
+            "MAX Z (nm)": (zc.max() + 0.5) * vs[0] + b[0],
+            "MAX Y (nm)": (yc.max() + 0.5) * vs[1] + b[1],
+            "MAX X (nm)": (xc.max() + 0.5) * vs[2] + b[2],
+        }]).set_index("Object ID").to_csv(csv_path)
+        out = f"{shared_tmpdir}/{name}_out"
+        Skeletonize(
+            segmentation_path=f"{data_path}/s0",
+            output_path=out,
+            csv_path=csv_path,
+            erosion=False,
+            min_branch_length_nm=0,
+            tolerance_nm=0,
+            num_workers=1,
+            sharded=False,
+        ).skeletonize()
+        verts, _ = CustomSkeleton.read_neuroglancer_skeleton(f"{out}/full/1")
+        return np.array(sorted(map(tuple, verts)))
+
+    verts_0 = run("skel_t0", (0, 0, 0))
+    verts_t = run("skel_tT", (delta, delta, delta))
+
+    assert len(verts_0) > 0, "expected a non-empty skeleton"
+    assert len(verts_0) == len(verts_t)
+    # The translated skeleton is the zero skeleton shifted by exactly delta.
+    assert np.allclose(verts_t, verts_0 + delta, atol=1e-6)
+    # And the zero skeleton sits on OME centers within the object's z bbox
+    # (MIN Z center = 3.5*2 = 7, MAX Z center = 13.5*2 = 27).
+    assert verts_0[:, 2].min() >= 7 - 1e-6
+    assert verts_0[:, 2].max() <= 27 + 1e-6
+
+
 def test_skeletonize_sharded_default(tmp_zarr, tmp_skeletonize_csv):
     """With sharded=True default, per-ID files are repacked into shard files
     and the info file picks up the sharding spec; one chunk should round-trip

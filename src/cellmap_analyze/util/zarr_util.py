@@ -118,46 +118,41 @@ def create_multiscale_dataset(
         # Named dataset case: has a dataset name
         metadata_path = filename + "/" + dataset_base
 
-    # Write OME-Zarr metadata with the original (true) float voxel size
-    # so that other tools can read the correct physical coordinates.
-    # The scaled integer voxel_size is only used internally for funlib compatibility.
-    metadata_voxel_size = (
-        list(original_voxel_size) if original_voxel_size is not None else voxel_size
-    )
-    if original_voxel_size is not None:
-        # Convert scaled offset back to true physical coordinates
-        from cellmap_analyze.util.voxel_size_utils import scale_voxel_size_to_integers
+    # Persist the TRUE physical voxel size and offset (OME-NGFF translation) on
+    # the array attrs so external readers (neuroglancer, OME tools) get correct
+    # physical coordinates. The scaled integer voxel_size prepare_ds wrote is
+    # internal-only; cellmap-analyze re-derives the integer scaling on read
+    # (ImageDataInterface + _read_voxel_size_offset). voxel_size now holds the
+    # true value (no separate original_voxel_size attr).
+    from cellmap_analyze.util.voxel_size_utils import scale_voxel_size_to_integers
 
-        _, scale_factor = scale_voxel_size_to_integers(original_voxel_size)
-        metadata_translation = [
-            float(b) / scale_factor for b in total_roi.get_begin()
-        ]
-    else:
-        metadata_translation = total_roi.get_begin()
+    effective_voxel_size = (
+        list(original_voxel_size)
+        if original_voxel_size is not None
+        else list(voxel_size)
+    )
+    _, scale_factor = scale_voxel_size_to_integers(effective_voxel_size)
+    # total_roi.begin is the internal funlib CORNER (= OME center - vs/2).
+    # Convert corner -> OME center (+ vs/2) so the persisted translation/offset
+    # is the voxel CENTER, matching OME-NGFF and what the read path expects
+    # (it subtracts vs/2 back to the corner). Done for integer voxels too, so
+    # there is no fall-through that leaves a raw corner on disk.
+    metadata_translation = [
+        float(b) / scale_factor + ev / 2.0
+        for b, ev in zip(total_roi.get_begin(), effective_voxel_size)
+    ]
 
     write_multiscales_metadata(
         metadata_path,
         f"s{scale}",
-        metadata_voxel_size,
+        effective_voxel_size,
         metadata_translation,
         "nanometer",
         ["z", "y", "x"],
     )
 
-    # Persist the TRUE physical voxel_size and offset on the array attrs.
-    # prepare_ds wrote the funlib-scaled integer (needed to compute the array
-    # shape in integer world coords), but that value is internal-only — every
-    # external reader (neuroglancer, OME tools, anything reading voxel_size
-    # literally) expects physical units. cellmap-analyze re-derives the integer
-    # scaling in memory on read (ImageDataInterface + _read_voxel_size_offset),
-    # so overwriting the persisted attrs with the true values is safe for our
-    # own pipeline. We no longer write a separate original_voxel_size attr —
-    # voxel_size now holds the true value. (The readers still *accept* an
-    # original_voxel_size attr if present, so legacy datasets whose voxel_size
-    # holds the old scaled integer keep reading correctly.)
-    if original_voxel_size is not None:
-        ds.data.attrs["voxel_size"] = list(original_voxel_size)
-        ds.data.attrs["offset"] = list(metadata_translation)
+    ds.data.attrs["voxel_size"] = list(effective_voxel_size)
+    ds.data.attrs["offset"] = list(metadata_translation)
 
     return ds
 
