@@ -1035,3 +1035,127 @@ def test_skeletonize_backward_compat_erosion_false(tmp_zarr, tmp_skeletonize_csv
 
     for id_val in [1, 2, 3, 4, 5, 6, 7, 8]:
         assert os.path.exists(f"{output_path}/full/{id_val}")
+
+
+def _read_seg_props(output_path, subdir="full"):
+    with open(f"{output_path}/{subdir}/segment_properties/info") as f:
+        return json.load(f)
+
+
+def test_skeletonize_segment_properties_default(tmp_zarr, tmp_skeletonize_csv):
+    """The default subset is the two triage-first metrics: num_branches and
+    longest_shortest_path_nm. radius_* are opt-in."""
+    output_path = tmp_zarr + "/test_skeletonize_segprops_default"
+    Skeletonize(
+        segmentation_path=f"{tmp_zarr}/segmentation_for_skeleton/s0",
+        output_path=output_path,
+        csv_path=tmp_skeletonize_csv,
+        erosion=False,
+        min_branch_length_nm=0,
+        tolerance_nm=0,
+        num_workers=1,
+        sharded=False,
+    ).skeletonize()
+
+    expected_ids = {"1", "2", "3", "4", "5", "6", "7", "8"}
+    default_metrics = {"num_branches", "longest_shortest_path_nm"}
+
+    for subdir in ("full", "simplified"):
+        seg = _read_seg_props(output_path, subdir)
+        ids = seg["inline"]["ids"]
+        assert set(ids) == expected_ids
+        n = len(ids)
+        props = {p["id"]: p for p in seg["inline"]["properties"]}
+        assert "label" in props
+        # exactly the two default metrics — radius_* not included
+        assert set(props.keys()) - {"label"} == default_metrics
+        for k in default_metrics:
+            p = props[k]
+            assert p["type"] == "number"
+            assert p["data_type"] in ("int32", "float32")
+            assert len(p["values"]) == n
+
+        i5 = ids.index("5")
+        assert props["num_branches"]["values"][i5] >= 3
+        assert props["longest_shortest_path_nm"]["values"][i5] > 0.0
+
+
+def test_skeletonize_segment_properties_all(tmp_zarr, tmp_skeletonize_csv):
+    """skeleton_properties='all' includes radius_mean_nm and radius_std_nm too."""
+    output_path = tmp_zarr + "/test_skeletonize_segprops_all"
+    Skeletonize(
+        segmentation_path=f"{tmp_zarr}/segmentation_for_skeleton/s0",
+        output_path=output_path,
+        csv_path=tmp_skeletonize_csv,
+        erosion=False,
+        min_branch_length_nm=0,
+        tolerance_nm=0,
+        num_workers=1,
+        sharded=False,
+        skeleton_properties="all",
+    ).skeletonize()
+
+    seg = _read_seg_props(output_path, "full")
+    props = {p["id"]: p for p in seg["inline"]["properties"]}
+    expected = {
+        "label",
+        "num_branches",
+        "longest_shortest_path_nm",
+        "radius_mean_nm",
+        "radius_std_nm",
+    }
+    assert set(props.keys()) == expected
+
+
+def test_skeletonize_segment_properties_explicit_list(tmp_zarr, tmp_skeletonize_csv):
+    """Passing an explicit list emits exactly those properties."""
+    output_path = tmp_zarr + "/test_skeletonize_segprops_list"
+    Skeletonize(
+        segmentation_path=f"{tmp_zarr}/segmentation_for_skeleton/s0",
+        output_path=output_path,
+        csv_path=tmp_skeletonize_csv,
+        erosion=False,
+        min_branch_length_nm=0,
+        tolerance_nm=0,
+        num_workers=1,
+        sharded=False,
+        skeleton_properties=["radius_mean_nm"],
+    ).skeletonize()
+
+    seg = _read_seg_props(output_path, "full")
+    props = {p["id"]: p for p in seg["inline"]["properties"]}
+    assert set(props.keys()) == {"label", "radius_mean_nm"}
+
+
+def test_skeletonize_segment_properties_opt_out(tmp_zarr, tmp_skeletonize_csv):
+    """skeleton_properties=False keeps only the label property."""
+    output_path = tmp_zarr + "/test_skeletonize_segprops_optout"
+    Skeletonize(
+        segmentation_path=f"{tmp_zarr}/segmentation_for_skeleton/s0",
+        output_path=output_path,
+        csv_path=tmp_skeletonize_csv,
+        erosion=False,
+        min_branch_length_nm=0,
+        tolerance_nm=0,
+        num_workers=1,
+        sharded=False,
+        skeleton_properties=False,
+    ).skeletonize()
+
+    seg = _read_seg_props(output_path, "full")
+    ids_in_props = {p["id"] for p in seg["inline"]["properties"]}
+    assert ids_in_props == {"label"}
+
+
+def test_skeletonize_segment_properties_invalid_key_raises(tmp_zarr, tmp_skeletonize_csv):
+    """Unknown metric keys in the list raise with a clear message."""
+    with pytest.raises(ValueError, match="unknown skeleton_properties"):
+        Skeletonize(
+            segmentation_path=f"{tmp_zarr}/segmentation_for_skeleton/s0",
+            output_path=tmp_zarr + "/test_skeletonize_segprops_bad",
+            csv_path=tmp_skeletonize_csv,
+            erosion=False,
+            num_workers=1,
+            sharded=False,
+            skeleton_properties=["num_branches", "not_a_real_metric"],
+        )
