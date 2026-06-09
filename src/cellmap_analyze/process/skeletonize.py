@@ -246,7 +246,9 @@ class Skeletonize(ComputeConfigMixin):
         self.peak_bytes_per_voxel = float(peak_bytes_per_voxel)
         self.memory_safety_multiplier = float(memory_safety_multiplier)
         self.memory_fraction = float(memory_fraction)
-        self.skeleton_properties = bool(skeleton_properties)
+        self.skeleton_properties = self._normalize_skeleton_properties(
+            skeleton_properties
+        )
 
         # Load CSV with bounding box info
         self.bbox_df = pd.read_csv(csv_path, index_col=0)
@@ -566,13 +568,84 @@ class Skeletonize(ComputeConfigMixin):
             # properties at the end of skeletonize().
             self._write_segment_properties_info(subdir, metrics_by_id=None)
 
+    # Per-ID skeleton metrics that can be baked into the neuroglancer
+    # segment_properties as sortable side-panel columns. The defaults are the
+    # two that triage best (how complex / how long); radius stats are opt-in.
+    _SKELETON_PROPERTY_DEFS = {
+        "num_branches": {
+            "data_type": "int32",
+            "description": "Number of skeleton branches",
+            "cast": int,
+            "default": 0,
+        },
+        "longest_shortest_path_nm": {
+            "data_type": "float32",
+            "description": "Longest shortest path through the skeleton (nm)",
+            "cast": float,
+            "default": 0.0,
+        },
+        "radius_mean_nm": {
+            "data_type": "float32",
+            "description": "Mean skeleton radius from EDT (nm)",
+            "cast": float,
+            "default": 0.0,
+        },
+        "radius_std_nm": {
+            "data_type": "float32",
+            "description": "Std of skeleton radius (nm)",
+            "cast": float,
+            "default": 0.0,
+        },
+    }
+    DEFAULT_SKELETON_PROPERTIES = (
+        "num_branches",
+        "longest_shortest_path_nm",
+    )
+    ALL_SKELETON_PROPERTIES = tuple(_SKELETON_PROPERTY_DEFS.keys())
+
+    @classmethod
+    def _normalize_skeleton_properties(cls, value):
+        """Normalize the user-facing ``skeleton_properties`` argument to a
+        list of metric keys to emit.
+
+        - ``True`` (default) -> ``DEFAULT_SKELETON_PROPERTIES`` (num_branches,
+          longest_shortest_path_nm). Triage-first; not the full set.
+        - ``False`` / ``None`` -> ``[]`` (label only, legacy behavior).
+        - ``"all"`` -> every metric in ``ALL_SKELETON_PROPERTIES``.
+        - ``list``/``tuple`` of metric keys -> exactly those, validated.
+        """
+        if value is True:
+            return list(cls.DEFAULT_SKELETON_PROPERTIES)
+        if value is False or value is None:
+            return []
+        if isinstance(value, str):
+            if value == "all":
+                return list(cls.ALL_SKELETON_PROPERTIES)
+            raise ValueError(
+                f"skeleton_properties string must be 'all', got {value!r}; "
+                f"valid keys: {cls.ALL_SKELETON_PROPERTIES}"
+            )
+        if isinstance(value, (list, tuple, set)):
+            keys = list(value)
+            unknown = [k for k in keys if k not in cls._SKELETON_PROPERTY_DEFS]
+            if unknown:
+                raise ValueError(
+                    f"unknown skeleton_properties: {unknown}; valid keys: "
+                    f"{cls.ALL_SKELETON_PROPERTIES}"
+                )
+            return keys
+        raise TypeError(
+            f"skeleton_properties must be bool, 'all', or a list/tuple of "
+            f"metric keys, got {type(value).__name__}"
+        )
+
     def _write_segment_properties_info(self, subdir, metrics_by_id=None):
         """Write the segment_properties/info file for a subdir.
 
-        If ``metrics_by_id`` is provided (and ``self.skeleton_properties``),
-        bake per-ID skeleton metrics into the file as ``number`` properties so
-        they surface in the neuroglancer side panel (sortable columns:
-        Number of Branches, Longest Shortest Path, Radius Mean/Std).
+        If ``metrics_by_id`` is provided and ``self.skeleton_properties`` lists
+        any metric keys, bake those per-ID skeleton metrics into the file as
+        ``number`` properties so they surface as sortable columns in the
+        neuroglancer side panel.
         """
         segment_ids = [str(int(i)) for i in self.ids]
         properties = [
@@ -583,52 +656,31 @@ class Skeletonize(ComputeConfigMixin):
             }
         ]
         if self.skeleton_properties and metrics_by_id:
-            def col(key, default):
-                vals = []
+            for key in self.skeleton_properties:
+                spec = self._SKELETON_PROPERTY_DEFS[key]
+                default = spec["default"]
+                cast = spec["cast"]
+                values = []
                 for i in self.ids:
                     v = metrics_by_id.get(int(i), {}).get(key, default)
-                    # JSON has no NaN; render missing/NaN as 0 so neuroglancer
-                    # doesn't choke and so sortable columns degrade gracefully.
+                    # JSON has no NaN; render missing/NaN as the default so
+                    # neuroglancer doesn't choke and sortable columns degrade
+                    # gracefully (Lee's-wiped objects sit at one end).
                     try:
                         if v != v:  # NaN check
                             v = default
                     except TypeError:
                         v = default
-                    vals.append(v)
-                return vals
-
-            properties.extend(
-                [
+                    values.append(cast(v))
+                properties.append(
                     {
-                        "id": "num_branches",
+                        "id": key,
                         "type": "number",
-                        "data_type": "int32",
-                        "description": "Number of skeleton branches",
-                        "values": [int(v) for v in col("num_branches", 0)],
-                    },
-                    {
-                        "id": "longest_shortest_path_nm",
-                        "type": "number",
-                        "data_type": "float32",
-                        "description": "Longest shortest path through the skeleton (nm)",
-                        "values": [float(v) for v in col("longest_shortest_path_nm", 0.0)],
-                    },
-                    {
-                        "id": "radius_mean_nm",
-                        "type": "number",
-                        "data_type": "float32",
-                        "description": "Mean skeleton radius from EDT (nm)",
-                        "values": [float(v) for v in col("radius_mean_nm", 0.0)],
-                    },
-                    {
-                        "id": "radius_std_nm",
-                        "type": "number",
-                        "data_type": "float32",
-                        "description": "Std of skeleton radius (nm)",
-                        "values": [float(v) for v in col("radius_std_nm", 0.0)],
-                    },
-                ]
-            )
+                        "data_type": spec["data_type"],
+                        "description": spec["description"],
+                        "values": values,
+                    }
+                )
 
         info = {
             "@type": "neuroglancer_segment_properties",
