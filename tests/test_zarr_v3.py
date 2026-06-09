@@ -382,3 +382,142 @@ class TestMultiscaleLevelSelection:
         # Both levels share the same corner (-V_base/2) -- the OME pyramid
         # invariant that keeps scales aligned.
         assert tuple(idi0.offset) == tuple(idi1.offset)
+
+
+class TestMetadataPrecedence:
+    """OME multiscales is the canonical source for voxel_size / translation;
+    funlib-style per-array attrs are accepted as a legacy fallback. When both
+    are present and they DISAGREE, reading must raise loudly -- silent
+    precedence in this case is exactly how stale per-array attrs can override
+    a corrected group-level OME and silently misplace downstream operations.
+    """
+
+    def _make_group_with_array(
+        self, root, ome=None, per_array=None, vs=(8, 8, 8), shape=(4, 4, 4)
+    ):
+        """Build a v2 zarr group at ``root`` with a single child array ``s0``.
+
+        ``ome``: dict to write as the group's .zattrs (typically multiscales).
+        ``per_array``: dict to write as the s0 array's .zattrs.
+        """
+        import zarr
+
+        os.makedirs(root)
+        json.dump({"zarr_format": 2}, open(os.path.join(root, ".zgroup"), "w"))
+        if ome is not None:
+            json.dump(ome, open(os.path.join(root, ".zattrs"), "w"))
+        a = zarr.open_array(
+            os.path.join(root, "s0"),
+            mode="w",
+            shape=shape,
+            chunks=shape,
+            dtype="uint8",
+            zarr_format=2,
+        )
+        a[:] = 1
+        if per_array is not None:
+            # zarr v2 writes .zattrs automatically when you set attrs; do it
+            # explicitly so we control exactly what lands on disk.
+            json.dump(
+                per_array, open(os.path.join(root, "s0", ".zattrs"), "w")
+            )
+        return os.path.join(root, "s0")
+
+    def _ome(self, vs=(8.0, 8.0, 8.0), trans=(0.0, 0.0, 0.0)):
+        return {
+            "multiscales": [
+                {
+                    "axes": [
+                        {"name": a, "type": "space", "unit": "nanometer"}
+                        for a in "zyx"
+                    ],
+                    "datasets": [
+                        {
+                            "path": "s0",
+                            "coordinateTransformations": [
+                                {"scale": list(vs), "type": "scale"},
+                                {"translation": list(trans), "type": "translation"},
+                            ],
+                        }
+                    ],
+                    "name": "",
+                    "version": "0.4",
+                }
+            ]
+        }
+
+    def test_ome_only_returns_ome_values(self, tmp_path):
+        """No per-array attrs at all -> OME is read."""
+        s0 = self._make_group_with_array(
+            str(tmp_path / "ome_only.zarr"),
+            ome=self._ome(vs=(8.0, 8.0, 8.0), trans=(4.0, 4.0, 4.0)),
+            per_array=None,
+        )
+        idi = ImageDataInterface(s0)
+        assert tuple(idi.voxel_size) == (8, 8, 8)
+        # corner = translation - vs/2 = 4 - 4 = 0
+        assert tuple(idi.offset) == (0, 0, 0)
+
+    def test_per_array_only_returns_per_array_values(self, tmp_path):
+        """No OME multiscales -> falls back to per-array attrs."""
+        s0 = self._make_group_with_array(
+            str(tmp_path / "attr_only.zarr"),
+            ome=None,
+            per_array={"voxel_size": [8.0, 8.0, 8.0], "offset": [4.0, 4.0, 4.0]},
+        )
+        idi = ImageDataInterface(s0)
+        assert tuple(idi.voxel_size) == (8, 8, 8)
+        assert tuple(idi.offset) == (0, 0, 0)
+
+    def test_both_consistent_succeeds(self, tmp_path):
+        """OME and per-array attrs both present and EQUAL -> no error, value
+        is returned (this is what cellmap-written datasets look like)."""
+        s0 = self._make_group_with_array(
+            str(tmp_path / "consistent.zarr"),
+            ome=self._ome(vs=(8.0, 8.0, 8.0), trans=(4.0, 4.0, 4.0)),
+            per_array={"voxel_size": [8.0, 8.0, 8.0], "offset": [4.0, 4.0, 4.0]},
+        )
+        idi = ImageDataInterface(s0)
+        assert tuple(idi.voxel_size) == (8, 8, 8)
+        assert tuple(idi.offset) == (0, 0, 0)
+
+    def test_voxel_size_conflict_raises(self, tmp_path):
+        """OME scale and per-array voxel_size disagree -> ValueError that
+        names BOTH values so the user can reconcile."""
+        s0 = self._make_group_with_array(
+            str(tmp_path / "vs_conflict.zarr"),
+            ome=self._ome(vs=(16.0, 16.0, 16.0), trans=(6.0, 6.0, 6.0)),
+            per_array={"voxel_size": [8.0, 8.0, 8.0], "offset": [6.0, 6.0, 6.0]},
+        )
+        with pytest.raises(ValueError) as exc:
+            ImageDataInterface(s0)
+        msg = str(exc.value)
+        assert "voxel_size" in msg
+        assert "16" in msg and "8" in msg
+        assert "OME" in msg
+
+    def test_translation_conflict_raises(self, tmp_path):
+        """OME translation and per-array offset disagree -> ValueError."""
+        s0 = self._make_group_with_array(
+            str(tmp_path / "tr_conflict.zarr"),
+            ome=self._ome(vs=(16.0, 16.0, 16.0), trans=(6.0, 6.0, 6.0)),
+            per_array={"voxel_size": [16.0, 16.0, 16.0], "offset": [0.0, 0.0, 0.0]},
+        )
+        with pytest.raises(ValueError) as exc:
+            ImageDataInterface(s0)
+        msg = str(exc.value)
+        assert "translation" in msg or "offset" in msg
+        assert "6" in msg and "0" in msg
+        assert "OME" in msg
+
+    def test_conflict_message_includes_path(self, tmp_path):
+        """The error message names the dataset path for diagnosis."""
+        target = str(tmp_path / "named.zarr")
+        s0 = self._make_group_with_array(
+            target,
+            ome=self._ome(vs=(16.0, 16.0, 16.0), trans=(6.0, 6.0, 6.0)),
+            per_array={"voxel_size": [16.0, 16.0, 16.0], "offset": [0.0, 0.0, 0.0]},
+        )
+        with pytest.raises(ValueError) as exc:
+            ImageDataInterface(s0)
+        assert "named.zarr" in str(exc.value)
