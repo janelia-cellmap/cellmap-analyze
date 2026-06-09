@@ -60,73 +60,158 @@ def compute_common_scale_factor(*scale_factors):
 def read_raw_voxel_size(ds):
     """Read the original float voxel_size from zarr/n5 attributes.
 
-    Reads directly from zarr attributes to avoid funlib.geometry.Coordinate
-    truncation. Checks multiple metadata formats.
+    Precedence: the OME-NGFF ``multiscales`` scale at the opened level is the
+    canonical source (it is the actual spec, and level-aware by construction).
+    Funlib-style per-array ``voxel_size`` attrs are accepted as a legacy
+    fallback. N5 ``pixelResolution`` and funlib's own parsed value follow.
+
+    If OME and the per-array ``voxel_size`` attr are BOTH present and
+    disagree, this raises ValueError -- silent precedence here is the exact
+    failure mode that lets stale per-array attrs override corrected group
+    metadata. Reconcile before downstream operations misread.
 
     Args:
-        ds: A funlib.persistence Array (returned by open_ds)
+        ds: A CellMapArray (returned by open_dataset).
 
     Returns:
         Tuple of floats representing the true voxel size.
     """
     attrs = dict(ds.data.attrs)
-
-    # funlib-style voxel_size attribute on the array. cellmap-analyze writes
-    # the TRUE physical voxel size here (see create_multiscale_dataset).
-    if "voxel_size" in attrs:
-        return tuple(float(v) for v in attrs["voxel_size"])
-
     scale_name = _array_scale_name(ds)
 
-    # Check OME-Zarr multiscales on the array itself (rare but possible)
-    if "multiscales" in attrs:
-        return _extract_ome_scale(attrs, scale_name)
+    ome_vs = _ome_scale_for(attrs, scale_name) or _ome_scale_for(
+        _read_parent_attrs(ds) or {}, scale_name
+    )
+    arr_vs = (
+        tuple(float(v) for v in attrs["voxel_size"])
+        if "voxel_size" in attrs
+        else None
+    )
 
-    # Check OME-Zarr multiscales on parent group
-    parent_attrs = _read_parent_attrs(ds)
-    if parent_attrs and "multiscales" in parent_attrs:
-        return _extract_ome_scale(parent_attrs, scale_name)
+    if ome_vs is not None and arr_vs is not None and not _values_match(ome_vs, arr_vs):
+        raise ValueError(
+            _conflict_msg(
+                ds,
+                "voxel_size",
+                "OME multiscales scale",
+                ome_vs,
+                "per-array voxel_size attr",
+                arr_vs,
+            )
+        )
 
-    # Check N5 pixelResolution
+    if ome_vs is not None:
+        return ome_vs
+    if arr_vs is not None:
+        return arr_vs
+
+    # N5 pixelResolution (legacy per-array fallback)
     if "pixelResolution" in attrs:
         return tuple(float(v) for v in attrs["pixelResolution"]["dimensions"])
 
-    # Fallback: use what funlib already parsed (may be truncated)
+    # Last-ditch fallback to whatever funlib already parsed
     return tuple(float(v) for v in ds.voxel_size)
 
 
 def read_raw_offset(ds):
-    """Read the original float offset from zarr/n5 attributes.
+    """Read the original float offset/translation from zarr/n5 attributes.
+
+    Same precedence and conflict semantics as :func:`read_raw_voxel_size`:
+    OME ``multiscales`` translation at the opened level is canonical, the
+    per-array ``offset`` attr is legacy fallback, and a disagreement between
+    the two raises ValueError.
 
     Args:
-        ds: A funlib.persistence Array (returned by open_ds)
+        ds: A CellMapArray (returned by open_dataset).
 
     Returns:
-        Tuple of floats representing the true offset.
+        Tuple of floats representing the stored offset/translation
+        (per OME-NGFF: the voxel CENTER of voxel [0,0,0]).
     """
     attrs = dict(ds.data.attrs)
-
-    # Check funlib-style offset attribute
-    if "offset" in attrs:
-        return tuple(float(v) for v in attrs["offset"])
-
     scale_name = _array_scale_name(ds)
 
-    # Check OME-Zarr multiscales on the array
-    if "multiscales" in attrs:
-        translation = _extract_ome_translation(attrs, scale_name)
-        if translation is not None:
-            return translation
+    ome_tr = _ome_translation_for(attrs, scale_name) or _ome_translation_for(
+        _read_parent_attrs(ds) or {}, scale_name
+    )
+    arr_off = (
+        tuple(float(v) for v in attrs["offset"]) if "offset" in attrs else None
+    )
 
-    # Check parent group for OME-Zarr
-    parent_attrs = _read_parent_attrs(ds)
-    if parent_attrs and "multiscales" in parent_attrs:
-        translation = _extract_ome_translation(parent_attrs, scale_name)
-        if translation is not None:
-            return translation
+    if ome_tr is not None and arr_off is not None and not _values_match(ome_tr, arr_off):
+        raise ValueError(
+            _conflict_msg(
+                ds,
+                "translation/offset",
+                "OME multiscales translation",
+                ome_tr,
+                "per-array offset attr",
+                arr_off,
+            )
+        )
 
-    # Fallback
+    if ome_tr is not None:
+        return ome_tr
+    if arr_off is not None:
+        return arr_off
+
     return tuple(float(v) for v in ds.roi.offset)
+
+
+def _ome_scale_for(attrs, scale_name):
+    if not attrs or "multiscales" not in attrs:
+        return None
+    try:
+        return _extract_ome_scale(attrs, scale_name)
+    except (ValueError, KeyError, IndexError, TypeError):
+        return None
+
+
+def _ome_translation_for(attrs, scale_name):
+    if not attrs or "multiscales" not in attrs:
+        return None
+    try:
+        return _extract_ome_translation(attrs, scale_name)
+    except (KeyError, IndexError, TypeError):
+        return None
+
+
+def _values_match(a, b, atol=1e-6):
+    """Element-wise float compare with absolute tolerance; length-aware."""
+    if a is None or b is None:
+        return True
+    try:
+        a = tuple(float(v) for v in a)
+        b = tuple(float(v) for v in b)
+    except (TypeError, ValueError):
+        return False
+    if len(a) != len(b):
+        return False
+    return all(abs(x - y) <= atol for x, y in zip(a, b))
+
+
+def _conflict_msg(ds, kind, name_a, val_a, name_b, val_b):
+    return (
+        f"Metadata conflict on {kind} at {_ds_path(ds)}:\n"
+        f"  {name_a}: {list(val_a)}\n"
+        f"  {name_b}: {list(val_b)}\n"
+        f"Fix one to match the other (OME-NGFF convention: voxel CENTERS), "
+        f"or delete the stale attr."
+    )
+
+
+def _ds_path(ds):
+    """Best-effort path string for diagnostic messages."""
+    try:
+        store_root = getattr(getattr(ds.data, "store", None), "root", None)
+        if store_root:
+            s = str(store_root)
+            if s.startswith("file://"):
+                s = s[len("file://"):]
+            return s.rstrip("/")
+        return getattr(ds.data, "name", None) or getattr(ds.data, "path", "?")
+    except Exception:
+        return "?"
 
 
 def _select_ome_dataset(attrs, scale_name=None):
