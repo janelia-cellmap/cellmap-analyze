@@ -8,6 +8,7 @@ from cellmap_analyze.util.dask_util import (
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 
 import logging
+import uuid
 import fastremap
 from cellmap_analyze.util.io_util import get_output_path_from_input_path
 from cellmap_analyze.util.mixins import ComputeConfigMixin
@@ -42,6 +43,9 @@ class FillHoles(ComputeConfigMixin):
             self.roi = self.input_idi.roi
         self.voxel_size = self.input_idi.voxel_size
         self.connectivity = connectivity
+        # Per-instance suffix so concurrent runs sharing output_path don't
+        # collide on the fixed-name merge dir.
+        self._run_id = uuid.uuid4().hex[:8]
 
         if output_path is None:
             output_path = get_output_path_from_input_path(input_path, "_filled")
@@ -132,7 +136,8 @@ class FillHoles(ComputeConfigMixin):
             merge_info=(
                 FillHoles._merge_hole_to_object_dicts,
                 get_output_path_from_input_path(
-                    self.output_path, "_tmp_hole_objects_to_dict_to_merge"
+                    self.output_path,
+                    f"_tmp_hole_objects_to_dict_to_merge_{self._run_id}",
                 ),
             ),
         )

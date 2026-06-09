@@ -17,6 +17,7 @@ import pandas as pd
 import numpy as np
 import os
 import shutil
+import uuid
 from scipy import spatial
 import fastremap
 import fastmorph
@@ -59,6 +60,10 @@ class AssignToOrganelles(ComputeConfigMixin):
         self.assignment_type = assignment_type
         self.output_path = str(output_path).rstrip("/")
         self.iteration_distance_nm = iteration_distance_nm
+        # Per-instance suffix isolates this run's tmp/merge dirs from any
+        # concurrent run sharing output_path -- otherwise two parallel jobs
+        # write to the same .tmp_assign/coms.npy and stomp on each other.
+        self._run_id = uuid.uuid4().hex[:8]
 
     @staticmethod
     def _group_coms_by_block(coms_nm, organelle_idi, com_row_indices=None):
@@ -294,7 +299,7 @@ class AssignToOrganelles(ComputeConfigMixin):
 
     def _save_coms_to_tmp(self, coms):
         """Save COM array to a temp file for workers to read."""
-        tmp_dir = os.path.join(self.output_path, ".tmp_assign")
+        tmp_dir = os.path.join(self.output_path, f".tmp_assign_{self._run_id}")
         os.makedirs(tmp_dir, exist_ok=True)
         coms_path = os.path.join(tmp_dir, "coms.npy")
         np.save(coms_path, coms)
@@ -314,7 +319,9 @@ class AssignToOrganelles(ComputeConfigMixin):
         if not block_indices:
             return
 
-        output_dir = os.path.join(self.output_path, ".tmp_assign_containing")
+        output_dir = os.path.join(
+            self.output_path, f".tmp_assign_containing_{self._run_id}"
+        )
         results = dask_util.compute_blockwise_partitions(
             len(block_indices),
             self.num_workers,
@@ -362,7 +369,9 @@ class AssignToOrganelles(ComputeConfigMixin):
         if not block_indices:
             return
 
-        output_dir = os.path.join(self.output_path, ".tmp_assign_nearest")
+        output_dir = os.path.join(
+            self.output_path, f".tmp_assign_nearest_{self._run_id}"
+        )
         # Each block handles its own padding expansion internally
         results = dask_util.compute_blockwise_partitions(
             len(block_indices),

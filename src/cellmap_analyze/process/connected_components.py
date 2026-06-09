@@ -17,6 +17,7 @@ import networkx as nx
 import itertools
 import fastremap
 import os
+import uuid
 from cellmap_analyze.util.mask_util import MasksFromConfig
 from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
@@ -166,6 +167,9 @@ class ConnectedComponents(ComputeConfigMixin):
         self.invert = invert
         self.delete_tmp = delete_tmp
         self.fill_holes = fill_holes
+        # Per-instance suffix isolates tmp/merge dirs from any concurrent run
+        # sharing output_path (otherwise the fixed-name dir races).
+        self._run_id = uuid.uuid4().hex[:8]
 
     @staticmethod
     def calculate_block_connected_components(
@@ -455,7 +459,8 @@ class ConnectedComponents(ComputeConfigMixin):
             merge_info=(
                 ConnectedComponents._merge_tuples,
                 get_output_path_from_input_path(
-                    self.output_path, "_tmp_connected_component_info_to_merge"
+                    self.output_path,
+                    f"_tmp_connected_component_info_to_merge_{self._run_id}",
                 ) + "/",
             ),
         )
