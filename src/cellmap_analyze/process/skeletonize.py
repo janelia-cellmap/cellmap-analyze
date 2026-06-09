@@ -166,6 +166,7 @@ class Skeletonize(ComputeConfigMixin):
         peak_bytes_per_voxel=6.63,
         memory_safety_multiplier=2.0,
         memory_fraction=0.60,
+        skeleton_properties=True,
     ):
         """
         Skeletonize a segmentation, parallelized over IDs.
@@ -245,6 +246,7 @@ class Skeletonize(ComputeConfigMixin):
         self.peak_bytes_per_voxel = float(peak_bytes_per_voxel)
         self.memory_safety_multiplier = float(memory_safety_multiplier)
         self.memory_fraction = float(memory_fraction)
+        self.skeleton_properties = bool(skeleton_properties)
 
         # Load CSV with bounding box info
         self.bbox_df = pd.read_csv(csv_path, index_col=0)
@@ -559,30 +561,84 @@ class Skeletonize(ComputeConfigMixin):
                 json.dump(info, f)
             logger.info(f"Wrote neuroglancer info file to {info_path}")
 
-            # Write segment_properties info file
-            segment_ids = [str(id_val) for id_val in self.ids]
-            segment_properties_info = {
-                "@type": "neuroglancer_segment_properties",
-                "inline": {
-                    "ids": segment_ids,
-                    "properties": [
-                        {
-                            "id": "label",
-                            "type": "label",
-                            "values": ["" for _ in segment_ids],
-                        }
-                    ],
-                },
-            }
+            # Initial (metrics-free) segment_properties so the layer is valid
+            # even before metrics are computed. We rewrite it with the numeric
+            # properties at the end of skeletonize().
+            self._write_segment_properties_info(subdir, metrics_by_id=None)
 
-            segment_properties_path = (
-                f"{self.output_path}/{subdir}/segment_properties/info"
+    def _write_segment_properties_info(self, subdir, metrics_by_id=None):
+        """Write the segment_properties/info file for a subdir.
+
+        If ``metrics_by_id`` is provided (and ``self.skeleton_properties``),
+        bake per-ID skeleton metrics into the file as ``number`` properties so
+        they surface in the neuroglancer side panel (sortable columns:
+        Number of Branches, Longest Shortest Path, Radius Mean/Std).
+        """
+        segment_ids = [str(int(i)) for i in self.ids]
+        properties = [
+            {
+                "id": "label",
+                "type": "label",
+                "values": ["" for _ in segment_ids],
+            }
+        ]
+        if self.skeleton_properties and metrics_by_id:
+            def col(key, default):
+                vals = []
+                for i in self.ids:
+                    v = metrics_by_id.get(int(i), {}).get(key, default)
+                    # JSON has no NaN; render missing/NaN as 0 so neuroglancer
+                    # doesn't choke and so sortable columns degrade gracefully.
+                    try:
+                        if v != v:  # NaN check
+                            v = default
+                    except TypeError:
+                        v = default
+                    vals.append(v)
+                return vals
+
+            properties.extend(
+                [
+                    {
+                        "id": "num_branches",
+                        "type": "number",
+                        "data_type": "int32",
+                        "description": "Number of skeleton branches",
+                        "values": [int(v) for v in col("num_branches", 0)],
+                    },
+                    {
+                        "id": "longest_shortest_path_nm",
+                        "type": "number",
+                        "data_type": "float32",
+                        "description": "Longest shortest path through the skeleton (nm)",
+                        "values": [float(v) for v in col("longest_shortest_path_nm", 0.0)],
+                    },
+                    {
+                        "id": "radius_mean_nm",
+                        "type": "number",
+                        "data_type": "float32",
+                        "description": "Mean skeleton radius from EDT (nm)",
+                        "values": [float(v) for v in col("radius_mean_nm", 0.0)],
+                    },
+                    {
+                        "id": "radius_std_nm",
+                        "type": "number",
+                        "data_type": "float32",
+                        "description": "Std of skeleton radius (nm)",
+                        "values": [float(v) for v in col("radius_std_nm", 0.0)],
+                    },
+                ]
             )
-            with open(segment_properties_path, "w") as f:
-                json.dump(segment_properties_info, f)
-            logger.info(
-                f"Wrote segment_properties info file to {segment_properties_path}"
-            )
+
+        info = {
+            "@type": "neuroglancer_segment_properties",
+            "inline": {"ids": segment_ids, "properties": properties},
+        }
+        path = f"{self.output_path}/{subdir}/segment_properties/info"
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(info, f, allow_nan=False)
+        logger.info(f"Wrote segment_properties info file to {path}")
 
     def _estimate_peak_bytes(self, id_value):
         """Estimate per-ID peak RSS from the cached bbox row.
@@ -687,6 +743,13 @@ class Skeletonize(ComputeConfigMixin):
             self._pack_shards_from_metrics(all_metrics)
 
         self._write_skeleton_csv(all_metrics)
+
+        # Rewrite segment_properties with the per-ID metrics so they show up
+        # as sortable columns in the neuroglancer side panel.
+        if self.skeleton_properties:
+            metrics_by_id = {int(m["id"]): m for m in all_metrics}
+            for subdir in ("full", "simplified"):
+                self._write_segment_properties_info(subdir, metrics_by_id)
 
         logger.info("Skeletonization complete")
 

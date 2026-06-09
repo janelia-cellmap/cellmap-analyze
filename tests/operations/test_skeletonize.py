@@ -1035,3 +1035,80 @@ def test_skeletonize_backward_compat_erosion_false(tmp_zarr, tmp_skeletonize_csv
 
     for id_val in [1, 2, 3, 4, 5, 6, 7, 8]:
         assert os.path.exists(f"{output_path}/full/{id_val}")
+
+
+def _read_seg_props(output_path, subdir="full"):
+    with open(f"{output_path}/{subdir}/segment_properties/info") as f:
+        return json.load(f)
+
+
+def test_skeletonize_segment_properties_default(tmp_zarr, tmp_skeletonize_csv):
+    """By default the segment_properties/info bakes in the per-ID skeleton
+    metrics (num_branches, longest_shortest_path_nm, radius_mean/std_nm) so
+    neuroglancer can show them as sortable columns in the side panel."""
+    output_path = tmp_zarr + "/test_skeletonize_segprops_default"
+    Skeletonize(
+        segmentation_path=f"{tmp_zarr}/segmentation_for_skeleton/s0",
+        output_path=output_path,
+        csv_path=tmp_skeletonize_csv,
+        erosion=False,
+        min_branch_length_nm=0,
+        tolerance_nm=0,
+        num_workers=1,
+        sharded=False,
+    ).skeletonize()
+
+    expected_ids = {"1", "2", "3", "4", "5", "6", "7", "8"}
+    expected_metric_ids = {
+        "num_branches",
+        "longest_shortest_path_nm",
+        "radius_mean_nm",
+        "radius_std_nm",
+    }
+
+    for subdir in ("full", "simplified"):
+        seg = _read_seg_props(output_path, subdir)
+        assert seg["@type"] == "neuroglancer_segment_properties"
+        ids = seg["inline"]["ids"]
+        assert set(ids) == expected_ids
+        n = len(ids)
+        props = {p["id"]: p for p in seg["inline"]["properties"]}
+        # label property still present
+        assert "label" in props and props["label"]["type"] == "label"
+        # the four metric properties present with the right types and length
+        assert expected_metric_ids.issubset(props.keys())
+        for k in expected_metric_ids:
+            p = props[k]
+            assert p["type"] == "number"
+            assert p["data_type"] in ("int32", "float32")
+            assert len(p["values"]) == n
+            assert "description" in p
+
+        # ID 5 (the cross shape) gets real metrics under no-erosion.
+        i5 = ids.index("5")
+        assert props["num_branches"]["values"][i5] >= 3
+        assert props["longest_shortest_path_nm"]["values"][i5] > 0.0
+        assert props["radius_mean_nm"]["values"][i5] > 0.0
+
+
+def test_skeletonize_segment_properties_opt_out(tmp_zarr, tmp_skeletonize_csv):
+    """skeleton_properties=False keeps only the label property (legacy
+    behavior); the four metric columns are not written."""
+    output_path = tmp_zarr + "/test_skeletonize_segprops_optout"
+    Skeletonize(
+        segmentation_path=f"{tmp_zarr}/segmentation_for_skeleton/s0",
+        output_path=output_path,
+        csv_path=tmp_skeletonize_csv,
+        erosion=False,
+        min_branch_length_nm=0,
+        tolerance_nm=0,
+        num_workers=1,
+        sharded=False,
+        skeleton_properties=False,
+    ).skeletonize()
+
+    seg = _read_seg_props(output_path, "full")
+    ids_in_props = {p["id"] for p in seg["inline"]["properties"]}
+    assert ids_in_props == {"label"}, (
+        f"expected only 'label' property when opted out, got {ids_in_props}"
+    )
