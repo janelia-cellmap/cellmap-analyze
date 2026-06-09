@@ -151,7 +151,7 @@ class Skeletonize(ComputeConfigMixin):
         self,
         segmentation_path,
         output_path,
-        csv_path,
+        csv_path=None,
         erosion=True,
         min_branch_length_nm=100,
         tolerance_nm=50,
@@ -174,9 +174,15 @@ class Skeletonize(ComputeConfigMixin):
         Args:
             segmentation_path: Path to the segmentation zarr dataset
             output_path: Path to the output directory for skeletons
-            csv_path: Path to CSV containing bounding box info with columns:
-                     MIN X (nm), MIN Y (nm), MIN Z (nm), MAX X (nm), MAX Y (nm), MAX Z (nm)
-                     and index column for IDs
+            csv_path: Optional path to a CSV with per-object bounding boxes
+                     (the kind Measure produces: ``Object ID`` index plus
+                     ``MIN X (nm)`` ... ``MAX Z (nm)`` columns). If left as
+                     ``None`` (the default), Measure is run on the
+                     segmentation to generate one at
+                     ``<output_path>/bboxes/<leaf>.csv``. Pass an existing
+                     path to skip the auto-measure step. A path that does
+                     not exist raises ``FileNotFoundError`` rather than
+                     silently auto-generating to that exact location.
             erosion: Controls pre-skeletonization erosion.
                      True or "full": standard binary erosion with 6-connectivity cross SE.
                      6: targeted removal of edge/vertex-only bridges (keep face-connected).
@@ -217,8 +223,18 @@ class Skeletonize(ComputeConfigMixin):
                      when planning waves (rest is dask/OS/library overhead).
         """
         super().__init__(num_workers)
+        self.segmentation_path = segmentation_path
         self.segmentation_idi = ImageDataInterface(segmentation_path, timeout=timeout)
         self.output_path = str(output_path).rstrip("/")
+
+        if csv_path is None:
+            csv_path = self._generate_bbox_csv()
+        elif not os.path.exists(csv_path):
+            raise FileNotFoundError(
+                f"csv_path {csv_path!r} does not exist. Pass csv_path=None "
+                f"to auto-generate bboxes via Measure, or provide an "
+                f"existing CSV (the kind Measure produces)."
+            )
         self.csv_path = csv_path
         # Normalize erosion parameter
         if erosion is True:
@@ -263,6 +279,39 @@ class Skeletonize(ComputeConfigMixin):
 
         logger.info(f"Loaded {len(self.ids)} IDs from {csv_path}")
         logger.info(f"Output will be written to {output_path}")
+
+    def _generate_bbox_csv(self):
+        """Run Measure on the segmentation to produce a per-object bbox CSV.
+
+        Used when the caller does not supply ``csv_path``. The CSV lands at
+        ``<output_path>/bboxes/<leaf>.csv`` so the user can find/reuse it
+        later (point a subsequent run at it via ``csv_path``).
+        """
+        from cellmap_analyze.analyze.measure import Measure
+        from cellmap_analyze.util.io_util import get_leaf_name_from_path
+
+        bbox_dir = os.path.join(self.output_path, "bboxes")
+        os.makedirs(bbox_dir, exist_ok=True)
+        logger.info(
+            "No csv_path provided; running Measure on %s to generate "
+            "per-object bboxes (output -> %s).",
+            self.segmentation_path,
+            bbox_dir,
+        )
+        Measure(
+            input_path=self.segmentation_path,
+            output_path=bbox_dir,
+            num_workers=self.num_workers,
+        ).get_measurements()
+
+        leaf = get_leaf_name_from_path(self.segmentation_path) or "measurements"
+        csv_path = os.path.join(bbox_dir, f"{leaf}.csv")
+        if not os.path.exists(csv_path):
+            raise RuntimeError(
+                f"Measure did not produce expected CSV at {csv_path}"
+            )
+        logger.info("Auto-generated bbox CSV at %s", csv_path)
+        return csv_path
 
     @staticmethod
     def _empty_metrics():

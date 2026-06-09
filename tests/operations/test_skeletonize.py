@@ -1159,3 +1159,53 @@ def test_skeletonize_segment_properties_invalid_key_raises(tmp_zarr, tmp_skeleto
             sharded=False,
             skeleton_properties=["num_branches", "not_a_real_metric"],
         )
+
+
+def test_skeletonize_auto_measure_when_csv_omitted(tmp_zarr):
+    """Without a csv_path, Skeletonize runs Measure on the segmentation to
+    generate per-object bboxes at <output>/bboxes/<leaf>.csv, then proceeds
+    normally."""
+    output_path = tmp_zarr + "/test_skeletonize_auto_measure"
+    Skeletonize(
+        segmentation_path=f"{tmp_zarr}/segmentation_for_skeleton/s0",
+        output_path=output_path,
+        # no csv_path: should auto-run Measure
+        erosion=False,
+        min_branch_length_nm=0,
+        tolerance_nm=0,
+        num_workers=1,
+        sharded=False,
+    ).skeletonize()
+
+    # The CSV should have been written under <output>/bboxes/
+    auto_csv = f"{output_path}/bboxes/segmentation_for_skeleton.csv"
+    assert os.path.exists(auto_csv), (
+        f"expected auto-generated bbox CSV at {auto_csv}"
+    )
+    # Has the columns Skeletonize needs (Measure's standard output).
+    df = pd.read_csv(auto_csv, index_col=0)
+    for col in [
+        "MIN X (nm)", "MIN Y (nm)", "MIN Z (nm)",
+        "MAX X (nm)", "MAX Y (nm)", "MAX Z (nm)",
+    ]:
+        assert col in df.columns, f"auto bbox CSV missing column {col!r}"
+
+    # Skeletons were produced for all IDs in segmentation_for_skeleton
+    for id_val in [1, 2, 3, 4, 5, 6, 7, 8]:
+        assert os.path.exists(f"{output_path}/full/{id_val}"), (
+            f"missing full skeleton for ID {id_val}"
+        )
+
+
+def test_skeletonize_missing_csv_path_raises(tmp_zarr):
+    """A csv_path that doesn't exist should error -- do not silently
+    auto-generate to that exact path."""
+    with pytest.raises(FileNotFoundError, match="csv_path"):
+        Skeletonize(
+            segmentation_path=f"{tmp_zarr}/segmentation_for_skeleton/s0",
+            output_path=tmp_zarr + "/test_skeletonize_missing_csv",
+            csv_path="/this/path/does/not/exist.csv",
+            erosion=False,
+            num_workers=1,
+            sharded=False,
+        )
