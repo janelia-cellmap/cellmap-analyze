@@ -14,6 +14,7 @@ from skimage.morphology import skeletonize, binary_erosion
 from tqdm import tqdm
 import logging
 import os
+import uuid
 import json
 
 logging.basicConfig(
@@ -265,6 +266,9 @@ class Skeletonize(ComputeConfigMixin):
         self.skeleton_properties = self._normalize_skeleton_properties(
             skeleton_properties
         )
+        # Per-instance suffix so concurrent runs sharing output_path don't
+        # collide on the wave merge dirs.
+        self._run_id = uuid.uuid4().hex[:8]
 
         # Load CSV with bounding box info
         self.bbox_df = pd.read_csv(csv_path, index_col=0)
@@ -800,7 +804,9 @@ class Skeletonize(ComputeConfigMixin):
         )
         self._log_wave_plan(waves)
 
-        tmp_merge_root = f"{self.output_path}/_tmp_skeleton_metrics_to_merge"
+        tmp_merge_root = (
+            f"{self.output_path}/_tmp_skeleton_metrics_to_merge_{self._run_id}"
+        )
         all_metrics = []
 
         for wave_index, wave in enumerate(waves, start=1):

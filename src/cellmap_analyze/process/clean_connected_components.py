@@ -8,6 +8,7 @@ from cellmap_analyze.util.dask_util import (
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.io_util import get_output_path_from_input_path
 import logging
+import uuid
 import itertools
 from cellmap_analyze.util.mask_util import MasksFromConfig
 import fastremap
@@ -85,6 +86,9 @@ class CleanConnectedComponents(ComputeConfigMixin):
         self.connectivity = connectivity
         self.fill_holes = fill_holes
         self.delete_tmp = delete_tmp
+        # Per-instance suffix so concurrent runs sharing output_path don't
+        # collide on the fixed-name merge dir.
+        self._run_id = uuid.uuid4().hex[:8]
 
     @staticmethod
     def volume_filter_connected_ids(
@@ -143,7 +147,8 @@ class CleanConnectedComponents(ComputeConfigMixin):
             merge_info=(
                 ConnectedComponents._merge_tuples,
                 get_output_path_from_input_path(
-                    self.output_path, "_tmp_cleaned_connected_component_info_to_merge"
+                    self.output_path,
+                    f"_tmp_cleaned_connected_component_info_to_merge_{self._run_id}",
                 ),
             ),
         )
