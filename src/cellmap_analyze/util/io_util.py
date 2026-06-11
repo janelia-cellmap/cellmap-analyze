@@ -93,6 +93,12 @@ def split_dataset_path(dataset_path, scale=None) -> tuple[str, str]:
         Tuple of filename and dataset
     """
 
+    # No .zarr/.n5 anywhere → treat the full path as the container.
+    # Neuroglancer precomputed volumes (and any future container-less
+    # format) hit this path; the dataset name is empty.
+    if dataset_path.rfind(".zarr") == -1 and dataset_path.rfind(".n5") == -1:
+        return dataset_path, ""
+
     # split at .zarr or .n5, whichever comes last
     splitter = (
         ".zarr" if dataset_path.rfind(".zarr") > dataset_path.rfind(".n5") else ".n5"
@@ -409,12 +415,31 @@ from urllib.request import Request, urlopen
 
 _REMOTE_SCHEMES = {"http", "https", "gs", "s3"}
 
+PRECOMPUTED_PREFIX = "precomputed://"
+
 
 def is_remote_path(path) -> bool:
     """True if ``path`` is a remote URI (s3://, gs://, http(s)://)."""
     if path is None:
         return False
-    return urlparse(str(path)).scheme in _REMOTE_SCHEMES
+    return urlparse(str(strip_precomputed_prefix(path))).scheme in _REMOTE_SCHEMES
+
+
+def is_precomputed_path(path) -> bool:
+    """True if ``path`` carries the explicit ``precomputed://`` prefix.
+
+    The prefix is no longer required — content probing for an ``info``
+    marker in :func:`_detect_zarr_driver` is the canonical signal — but
+    it's still honored for copy-paste from neuroglancer.
+    """
+    return isinstance(path, str) and path.startswith(PRECOMPUTED_PREFIX)
+
+
+def strip_precomputed_prefix(path):
+    """Return ``path`` with any leading ``precomputed://`` removed."""
+    if is_precomputed_path(path):
+        return path[len(PRECOMPUTED_PREFIX):]
+    return path
 
 
 def path_join(base, *parts):

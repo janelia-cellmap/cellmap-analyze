@@ -95,25 +95,49 @@ def read_with_retries(dataset, valid_slices, max_retries=10, timeout=5, base_del
 
 
 def _detect_zarr_driver(dataset_path: str) -> str:
-    """Detect whether a zarr dataset is v2 or v3 format.
+    """Detect the tensorstore driver for ``dataset_path``.
 
-    Returns 'zarr' for v2, 'zarr3' for v3, or 'n5' for N5. Works for both
-    local paths and remote URIs (``s3://`` / ``gs://`` / ``http(s)://``).
+    Returns one of ``"zarr"``, ``"zarr3"``, ``"n5"``, or
+    ``"neuroglancer_precomputed"``. Works for both local paths and
+    remote URIs (``s3://`` / ``gs://`` / ``http(s)://``).
+
+    Precomputed is detected by either the explicit ``precomputed://``
+    URL prefix OR by probing for an ``info`` marker file (at the path
+    or its parent, since precomputed paths often end in a scale key
+    like ``/s0`` that's not a real subdirectory).
     """
     from cellmap_analyze.util.io_util import (
+        is_precomputed_path,
         is_remote_path,
+        path_dirname,
         path_join,
         read_json_path,
+        strip_precomputed_prefix,
     )
 
-    if dataset_path.rfind(".n5") > dataset_path.rfind(".zarr"):
+    if is_precomputed_path(dataset_path):
+        return "neuroglancer_precomputed"
+
+    canonical = strip_precomputed_prefix(dataset_path)
+
+    # Precomputed: ``info`` sits at the dataset root. Try the path itself
+    # first, then its parent (covers paths like ``.../seg/s0`` where the
+    # trailing segment is a scale key, not a real subdirectory).
+    if read_json_path(path_join(canonical, "info")) is not None:
+        return "neuroglancer_precomputed"
+    parent = path_dirname(canonical)
+    if parent and parent != canonical:
+        if read_json_path(path_join(parent, "info")) is not None:
+            return "neuroglancer_precomputed"
+
+    if canonical.rfind(".n5") > canonical.rfind(".zarr"):
         return "n5"
 
     # Check for zarr v3 format marker (zarr.json at dataset level).
     # ``read_json_path`` returns None when missing -- exactly the
     # fall-through-to-v2 signal we want.
-    zarr_json_path = path_join(dataset_path, "zarr.json")
-    if is_remote_path(dataset_path):
+    zarr_json_path = path_join(canonical, "zarr.json")
+    if is_remote_path(canonical):
         if read_json_path(zarr_json_path) is not None:
             return "zarr3"
     else:
@@ -129,7 +153,11 @@ def open_ds_tensorstore(dataset_path: str, mode="r", concurrency_limit=None):
     (``s3://``, ``gs://``, ``http(s)://``, ``file://``). Tensorstore's
     native kvstore drivers handle the transport -- no fsspec/s3fs.
     """
-    from cellmap_analyze.util.io_util import is_remote_path, kvstore_for_path
+    from cellmap_analyze.util.io_util import (
+        is_remote_path,
+        kvstore_for_path,
+        strip_precomputed_prefix,
+    )
 
     if is_remote_path(dataset_path) and mode != "r":
         raise ValueError(
@@ -137,8 +165,19 @@ def open_ds_tensorstore(dataset_path: str, mode="r", concurrency_limit=None):
             f"cellmap-analyze only supports reading from object storage."
         )
 
-    # open with zarr, zarr3, or n5 depending on format
+    # open with zarr, zarr3, n5, or neuroglancer_precomputed depending on format
     filetype = _detect_zarr_driver(dataset_path)
+    if filetype == "neuroglancer_precomputed":
+        if mode != "r":
+            raise ValueError(
+                "neuroglancer precomputed datasets are read-only"
+            )
+        from cellmap_analyze.util.precomputed_io import (
+            open_precomputed_tensorstore,
+        )
+        return open_precomputed_tensorstore(dataset_path)
+
+    dataset_path = strip_precomputed_prefix(dataset_path)
     kvstore, key = kvstore_for_path(dataset_path)
     # tensorstore expects the chunk key inside the kvstore. Append a
     # trailing slash so it's treated as a directory of chunks.
@@ -485,21 +524,36 @@ class ImageDataInterface:
         timeout=5,
         interpolation_order=0,
     ):
-        # Don't resolve remote URIs as local paths -- ``Path("s3://...").resolve()``
-        # collapses the double slash and prepends the CWD.
-        from cellmap_analyze.util.io_util import is_remote_path
-
-        if not is_remote_path(dataset_path):
-            dataset_path = str(Path(dataset_path).resolve())
-        else:
-            dataset_path = str(dataset_path)
-        self.path = dataset_path
-        filename, dataset = split_dataset_path(dataset_path)
-        self.ds = open_dataset(filename, dataset, mode=mode)
-        self.filetype = (
-            "zarr" if dataset_path.rfind(".zarr") > dataset_path.rfind(".n5") else "n5"
+        # Don't resolve remote URIs / precomputed URLs as local paths --
+        # ``Path("s3://...").resolve()`` collapses the double slash and
+        # prepends the CWD, and a ``precomputed://`` prefix is not a
+        # filesystem path either.
+        from cellmap_analyze.util.io_util import (
+            is_precomputed_path,
+            is_remote_path,
+            strip_precomputed_prefix,
         )
-        self.swap_axes = self.filetype == "n5"
+
+        dataset_path = str(dataset_path)
+        if not is_remote_path(dataset_path) and not is_precomputed_path(dataset_path):
+            dataset_path = str(Path(dataset_path).resolve())
+        # Tensorstore + our open_dataset accept either a precomputed:// URL
+        # or the bare URL -- strip the prefix for ``self.path`` so the
+        # tensorstore reopen in ``to_ndarray_ts`` doesn't pay the cost
+        # of stripping it again on every block.
+        self.path = strip_precomputed_prefix(dataset_path)
+        filename, dataset = split_dataset_path(self.path)
+        self.ds = open_dataset(filename, dataset, mode=mode)
+        # Content-based detection (probes for info / zarr.json / .zarray /
+        # attributes.json) -- the .zarr-vs-.n5 filename heuristic
+        # can't see precomputed volumes (no extension) or non-standard
+        # naming.
+        self.filetype = _detect_zarr_driver(self.path)
+        # Precomputed's tensorstore handle is XYZ-ordered (the channel
+        # dim is dropped inside open_precomputed_tensorstore), matching
+        # N5's layout, so the same swap_axes=True codepath converts it
+        # to ZYX for everything downstream.
+        self.swap_axes = self.filetype in ("n5", "neuroglancer_precomputed")
         self.ts = None
         self.dtype = self.ds.dtype
         self.chunk_shape = self.ds.chunk_shape

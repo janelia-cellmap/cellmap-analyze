@@ -101,6 +101,64 @@ def _read_zarr_or_n5_attrs(full_path):
     return {}
 
 
+def _open_precomputed_dataset(full_path, mode):
+    """Open a neuroglancer precomputed volume as a CellMapArray.
+
+    Reads shape/dtype/chunks + voxel_size + offset from the ``info``
+    file (via ``precomputed_io.precomputed_array_metadata``). The
+    precomputed convention is that ``voxel_offset * resolution`` is the
+    physical CORNER of voxel [0,0,0]; cellmap-analyze's standard read
+    path interprets the ``offset`` attr as the OME-style CENTER and
+    subtracts ``vs/2`` to recover the corner -- so we stash CENTER =
+    CORNER + vs/2 here, and the round-trip lands back on the right
+    corner without special-casing the read path.
+
+    Data reads happen via tensorstore through
+    :func:`open_ds_tensorstore`, which dispatches on the filetype
+    returned by :func:`_detect_zarr_driver` and routes precomputed
+    paths to ``open_precomputed_tensorstore``.
+    """
+    from cellmap_analyze.util.precomputed_io import precomputed_array_metadata
+
+    if mode != "r":
+        raise ValueError(
+            f"write to precomputed {full_path!r} is not supported; "
+            f"cellmap-analyze only supports reading from precomputed."
+        )
+
+    meta = precomputed_array_metadata(full_path)
+    # ``precomputed_array_metadata`` returns ZYX-ordered values for
+    # parity with the rest of the codebase, but ``ImageDataInterface``
+    # treats this CellMapArray's shape / attrs as XYZ (just like an N5
+    # array) and reverses to ZYX via ``swap_axes=True``. To slot in
+    # uniformly, present everything here in XYZ so the IDI's existing
+    # N5 codepath produces ZYX without special-casing.
+    vs_xyz = list(meta["voxel_size"][::-1])
+    corner_xyz = list(meta["offset_corner"][::-1])
+    center_xyz = [c + v / 2.0 for c, v in zip(corner_xyz, vs_xyz)]
+    shape_xyz = tuple(meta["shape"][::-1])
+    chunks_xyz = tuple(meta["chunks"][::-1])
+
+    attrs = {
+        "voxel_size": vs_xyz,
+        "offset": center_xyz,
+    }
+
+    data = _RemoteArrayMetadata(
+        shape=shape_xyz,
+        dtype=np.dtype(meta["dtype"]),
+        chunks=chunks_xyz,
+        attrs=attrs,
+    )
+    voxel_size, offset = _read_voxel_size_offset(data)
+    arr = CellMapArray(data, voxel_size, offset)
+    arr._cellmap_path = full_path
+    # No OME parent group for precomputed; signal that explicitly so
+    # ``_read_parent_attrs`` doesn't try to open a zarr group at the URL.
+    arr._cellmap_parent_attrs = {}
+    return arr
+
+
 def _open_remote_dataset(full_path, mode):
     """Open a remote (s3/gs/http) zarr array.
 
@@ -155,10 +213,23 @@ def open_dataset(filename, ds_name, mode="r"):
     Returns:
         A CellMapArray wrapping the dataset.
     """
-    from cellmap_analyze.util.io_util import is_remote_path, path_join
+    from cellmap_analyze.util.io_util import (
+        is_precomputed_path,
+        is_remote_path,
+        path_join,
+        strip_precomputed_prefix,
+    )
+    from cellmap_analyze.util.image_data_interface import _detect_zarr_driver
 
     logger.debug("opening zarr dataset %s in %s", ds_name, filename)
     full_path = path_join(filename, ds_name) if ds_name else str(filename)
+
+    # Precomputed: detect via the explicit ``precomputed://`` prefix OR
+    # by probing for an ``info`` marker. ``_detect_zarr_driver`` does
+    # both. Strip the prefix here so downstream code can treat the path
+    # as a regular URL/local path.
+    if is_precomputed_path(full_path) or _detect_zarr_driver(full_path) == "neuroglancer_precomputed":
+        return _open_precomputed_dataset(strip_precomputed_prefix(full_path), mode)
 
     if is_remote_path(filename):
         return _open_remote_dataset(full_path, mode)
