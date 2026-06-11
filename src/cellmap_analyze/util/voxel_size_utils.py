@@ -255,6 +255,12 @@ def _array_scale_name(ds):
     try:
         import os
 
+        # Prefer the path the caller used to open this array -- works for
+        # both local paths and remote URIs (s3://...).
+        full_path = getattr(ds, "_cellmap_path", None)
+        if full_path:
+            return os.path.basename(str(full_path).rstrip("/")) or None
+
         array_name = getattr(ds.data, "name", None) or getattr(ds.data, "path", "")
         array_name = str(array_name).strip("/")
         if array_name:
@@ -275,6 +281,21 @@ def _read_parent_attrs(ds):
     try:
         import os
         import zarr
+
+        # Preferred path: the CellMapArray was opened via ``open_dataset``,
+        # which stashes the full path on the array. Compute the parent
+        # group's path directly -- this works uniformly for local paths and
+        # remote URIs (s3://, etc.).
+        full_path = getattr(ds, "_cellmap_path", None)
+        if full_path:
+            parent_path = os.path.dirname(str(full_path).rstrip("/"))
+            if parent_path:
+                try:
+                    parent = zarr.open_group(parent_path, mode="r")
+                    return dict(parent.attrs)
+                except Exception:
+                    return None
+            return None
 
         # Get the filesystem path of the array's store root
         store = ds.data.store

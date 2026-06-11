@@ -381,3 +381,59 @@ def tee_streams(output_path, append=False):
         with open(output_path, "a") as f:
             traceback.print_exc(file=f)
         raise
+
+
+# ----- Remote (S3 / GCS / etc.) path support -----------------------------
+#
+# cellmap-analyze otherwise assumes POSIX-mounted storage. The helpers below
+# let the READ path accept ``s3://bucket/key`` (and similar fsspec-scheme)
+# URIs so a dataset can live in object storage. zarr 3.x reads these
+# natively when ``s3fs`` is installed (``pip install cellmap-analyze[s3]``);
+# tensorstore needs the URI parsed into its kvstore spec.
+#
+# WRITES to remote paths are NOT supported -- the tmp-dir / merge-dir /
+# rename machinery is built on POSIX semantics (atomic same-parent rename,
+# real directories) that S3 doesn't provide.
+
+_REMOTE_SCHEMES = ("s3://", "gs://", "https://", "http://")
+
+
+def is_remote_path(path) -> bool:
+    """True if ``path`` is a remote URI (s3:// etc.), False for local paths."""
+    if path is None:
+        return False
+    p = str(path)
+    return any(p.startswith(s) for s in _REMOTE_SCHEMES)
+
+
+def remote_exists(path) -> bool:
+    """fsspec-aware existence check for remote paths.
+
+    Falls back to ``os.path.exists`` for local paths so callers can use this
+    uniformly. For ``s3://`` URIs, requires ``s3fs`` to be installed.
+    """
+    if not is_remote_path(path):
+        return os.path.exists(path)
+    try:
+        import fsspec
+
+        fs, p = fsspec.core.url_to_fs(str(path))
+        return fs.exists(p)
+    except Exception:
+        # Treat any failure (missing fsspec backend, network, auth) as
+        # "doesn't exist" -- callers fall through to other branches.
+        return False
+
+
+def parse_s3_uri(uri):
+    """Parse ``s3://bucket/key/path`` into ``(bucket, key)`` for use as a
+    tensorstore S3 kvstore spec. Raises ValueError for non-s3:// URIs."""
+    s = str(uri)
+    if not s.startswith("s3://"):
+        raise ValueError(f"not an s3:// URI: {uri!r}")
+    rest = s[len("s3://"):].lstrip("/")
+    if "/" in rest:
+        bucket, key = rest.split("/", 1)
+    else:
+        bucket, key = rest, ""
+    return bucket, key

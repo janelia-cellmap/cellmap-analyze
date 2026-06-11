@@ -59,24 +59,42 @@ def open_dataset(filename, ds_name, mode="r"):
     """Open a zarr dataset and return a CellMapArray.
 
     Supports zarr v2, v3, hybrid (v2 groups with v3 arrays), and N5 formats.
+    Accepts both local POSIX paths and remote URIs (``s3://bucket/path``)
+    for read mode; ``s3://`` reads require ``s3fs`` (install via
+    ``cellmap-analyze[s3]``). Writes to remote paths are not supported.
 
     Args:
-        filename: Path to the zarr container directory.
+        filename: Path or URI to the zarr container directory.
         ds_name: Name of the dataset within the container.
         mode: Open mode ('r', 'r+', 'a', 'w').
 
     Returns:
         A CellMapArray wrapping the dataset.
     """
+    from cellmap_analyze.util.io_util import is_remote_path, remote_exists
+
     logger.debug("opening zarr dataset %s in %s", ds_name, filename)
     full_path = os.path.join(filename, ds_name)
+    remote = is_remote_path(filename)
+    if remote and mode not in ("r",):
+        raise ValueError(
+            f"remote write to {filename!r} is not supported; cellmap-analyze "
+            f"only supports reading from object storage."
+        )
     try:
         ds = zarr.open_array(full_path, mode=mode)
     except Exception:
         # Zarr 3.x cannot open N5 natively — fall back to reading
         # the N5 attributes.json for metadata.
         n5_attrs_path = os.path.join(full_path, "attributes.json")
-        if os.path.exists(n5_attrs_path):
+        if remote_exists(n5_attrs_path):
+            if remote:
+                # N5ArrayMetadata directly reads a local file via open(); we
+                # don't want to silently mishandle that for remote URIs.
+                raise NotImplementedError(
+                    f"N5 reads from remote URIs are not supported "
+                    f"({full_path!r})"
+                )
             logger.debug("falling back to N5 metadata reader for %s", full_path)
             ds = N5ArrayMetadata(full_path)
         else:
@@ -84,7 +102,11 @@ def open_dataset(filename, ds_name, mode="r"):
             raise
 
     voxel_size, offset = _read_voxel_size_offset(ds)
-    return CellMapArray(ds, voxel_size, offset)
+    arr = CellMapArray(ds, voxel_size, offset)
+    # Remember the path we opened from so parent-group metadata lookups
+    # don't have to go spelunking through zarr store internals.
+    arr._cellmap_path = full_path
+    return arr
 
 
 def prepare_ds(

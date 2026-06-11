@@ -36,7 +36,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-cov", "coverage", "build"]
+dev = ["pytest", "pytest-cov", "coverage", "build", "s3fs", "moto[s3,server]"]
+# Read zarr/n5 datasets from S3 (anonymous or credentialed). Pulls in
+# s3fs which gives zarr-python the fsspec backend it needs for s3:// URIs.
+s3 = ["s3fs"]
 
 [project.scripts]
 connected-components = "cli.cli:connected_components"
