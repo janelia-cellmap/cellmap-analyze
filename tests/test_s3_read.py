@@ -54,16 +54,6 @@ def s3_env(monkeypatch, s3_server):
     return s3_server
 
 
-@pytest.fixture
-def s3fs_client(s3_env):
-    import s3fs
-
-    return s3fs.S3FileSystem(
-        anon=False,
-        client_kwargs={"endpoint_url": s3_env, "region_name": "us-east-1"},
-    )
-
-
 def _make_bucket(s3_env, bucket: str):
     import boto3
 
@@ -77,7 +67,28 @@ def _make_bucket(s3_env, bucket: str):
     s3.create_bucket(Bucket=bucket)
 
 
-def _write_zarr_dataset(fs, bucket, group_path, level_name, vs, trans, data):
+def _open_group_on_mock_s3(s3_env, url, mode):
+    """Open a zarr group at ``url`` on the moto mock S3 server.
+
+    Goes through zarr's URL-based store creation (with ``storage_options``)
+    rather than manually instantiating an s3fs filesystem -- the manual
+    path tripped zarr 3.x's ``async_impl`` check on some s3fs versions.
+    """
+    import zarr
+
+    return zarr.open_group(
+        url,
+        mode=mode,
+        zarr_format=3,
+        storage_options={
+            "client_kwargs": {"endpoint_url": s3_env, "region_name": "us-east-1"},
+            "key": "test",
+            "secret": "test",
+        },
+    )
+
+
+def _write_zarr_dataset(s3_env, bucket, group_path, level_name, vs, trans, data):
     """Upload a single-level OME-NGFF zarr v3 dataset to mock S3.
 
     Group (parent) holds the multiscales metadata; the array at
@@ -85,12 +96,7 @@ def _write_zarr_dataset(fs, bucket, group_path, level_name, vs, trans, data):
     OME-NGFF datasets are typically laid out (per-level transforms only in
     the parent group, no per-array offset/voxel_size attrs).
     """
-    import zarr
-
-    # The group itself
-    group_full = f"{bucket}/{group_path}"
-    group_store = zarr.storage.FsspecStore(fs, path=group_full)
-    group = zarr.open_group(store=group_store, mode="w", zarr_format=3)
+    group = _open_group_on_mock_s3(s3_env, f"s3://{bucket}/{group_path}", mode="w")
     group.attrs["multiscales"] = [
         {
             "axes": [
@@ -121,7 +127,7 @@ def _write_zarr_dataset(fs, bucket, group_path, level_name, vs, trans, data):
     arr[:] = data
 
 
-def test_s3_read_zarr_via_idi(s3_env, s3fs_client):
+def test_s3_read_zarr_via_idi(s3_env):
     """Open s3://.../seg/s0 via IDI; voxel_size, offset, and data all
     come back correctly through the OME multiscales metadata."""
     from cellmap_analyze.util.image_data_interface import ImageDataInterface
@@ -134,7 +140,7 @@ def test_s3_read_zarr_via_idi(s3_env, s3fs_client):
     # translation exercises the center<->corner conversion (PR #70).
     data = np.arange(8 * 8 * 8, dtype=np.uint8).reshape((8, 8, 8))
     _write_zarr_dataset(
-        s3fs_client,
+        s3_env,
         bucket,
         "data.zarr/seg",
         "s0",
@@ -157,7 +163,7 @@ def test_s3_read_zarr_via_idi(s3_env, s3fs_client):
     np.testing.assert_array_equal(read, data)
 
 
-def test_s3_read_picks_correct_multiscale_level(s3_env, s3fs_client):
+def test_s3_read_picks_correct_multiscale_level(s3_env):
     """The multiscale-level fix (PR #73) also has to work over s3:// --
     opening s1 must pick the s1 transform from the parent's multiscales
     metadata, not s0's."""
@@ -167,13 +173,8 @@ def test_s3_read_picks_correct_multiscale_level(s3_env, s3fs_client):
     _make_bucket(s3_env, bucket)
 
     # Build a two-level group: s0 vs=4 trans=0; s1 vs=8 trans=2.
-    import zarr
-
-    base = f"{bucket}/data.zarr/seg"
-    group = zarr.open_group(
-        store=zarr.storage.FsspecStore(s3fs_client, path=base),
-        mode="w",
-        zarr_format=3,
+    group = _open_group_on_mock_s3(
+        s3_env, f"s3://{bucket}/data.zarr/seg", mode="w"
     )
     group.attrs["multiscales"] = [
         {
