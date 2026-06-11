@@ -18,6 +18,19 @@ from cellmap_analyze.util.io_util import (
 from datetime import datetime
 import yaml
 from yaml.loader import SafeLoader
+
+
+def _available_cpu_count() -> int:
+    """Cross-platform process CPU count.
+
+    Prefers ``os.sched_getaffinity`` on linux to respect cgroup / LSF /
+    Slurm CPU pinning (more accurate than total physical cores under
+    those schedulers). Falls back to ``os.cpu_count()`` everywhere
+    sched_getaffinity isn't exposed (macOS, Windows).
+    """
+    if hasattr(os, "sched_getaffinity"):
+        return len(os.sched_getaffinity(0))
+    return os.cpu_count() or 1
 from dataclasses import dataclass
 from funlib.geometry import Coordinate, Roi
 import numpy as np
@@ -850,7 +863,7 @@ def compute_blockwise_partitions(
 
     with TimingMessager(f"Reading results for {msg}", logger):
         list_of_results = read_results_to_merge(
-            output_directory, num_blocks, threads=len(os.sched_getaffinity(0))
+            output_directory, num_blocks, threads=_available_cpu_count()
         )
 
     with TimingMessager(f"Merging results for {msg}", logger):

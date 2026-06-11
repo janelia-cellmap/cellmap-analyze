@@ -1,6 +1,13 @@
 name: CI
 
-on: [push, pull_request]
+# Run on every PR (so feature-branch work is verified) and on direct
+# pushes to main (so post-merge state is verified). Feature-branch
+# pushes WITHOUT an open PR don't trigger -- open a PR to get CI.
+# This avoids the double-firing (push + pull_request) we saw before.
+on:
+  push:
+    branches: [main]
+  pull_request:
 
 jobs:
   test:
