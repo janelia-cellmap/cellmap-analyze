@@ -1,10 +1,24 @@
 name: CI
 
-on: [push, pull_request]
+# Run on every PR (so feature-branch work is verified) and on direct
+# pushes to main (so post-merge state is verified). Feature-branch
+# pushes WITHOUT an open PR don't trigger -- open a PR to get CI.
+# This avoids the double-firing (push + pull_request) we saw before.
+on:
+  push:
+    branches: [main]
+  pull_request:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Don't kill the linux run on a mac hiccup (or vice versa); we want
+      # the per-platform signal to come through independently.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ['3.12']
 
     steps:
       - uses: actions/checkout@v3
@@ -12,7 +26,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python-version }}
 
       - name: Upgrade pip and install build tools
         run: |
@@ -27,6 +41,8 @@ jobs:
           pytest --cov=cellmap_analyze --cov-report=xml
 
       - name: Upload coverage report to Codecov
+        # Only upload once per push (from linux) to avoid double-reporting.
+        if: matrix.os == 'ubuntu-latest'
         uses: codecov/codecov-action@v4.2.0
         with:
           files: ./coverage.xml

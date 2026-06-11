@@ -36,7 +36,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-cov", "coverage", "build"]
+dev = ["pytest", "pytest-cov", "coverage", "build", "moto[s3,server]"]
 
 [project.scripts]
 connected-components = "cli.cli:connected_components"

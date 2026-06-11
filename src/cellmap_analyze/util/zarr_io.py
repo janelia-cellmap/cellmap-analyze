@@ -55,21 +55,185 @@ class N5ArrayMetadata:
         )
 
 
+class _RemoteArrayMetadata:
+    """Minimal zarr.Array-shaped wrapper for remote (s3/gs/http) reads.
+
+    Provides ``shape``, ``dtype``, ``chunks``, ``attrs`` — the surface
+    that ``_read_voxel_size_offset`` and ``CellMapArray`` need. Data
+    reads always go through tensorstore (via ``ImageDataInterface``);
+    direct ``__getitem__`` is intentionally unsupported because we don't
+    want to fall back to a different remote-IO library.
+    """
+
+    def __init__(self, shape, dtype, chunks, attrs):
+        self.shape = tuple(shape)
+        self.dtype = dtype
+        self.chunks = tuple(chunks)
+        self.attrs = dict(attrs or {})
+
+    def __getitem__(self, slices):
+        raise NotImplementedError(
+            "Direct __getitem__ on a remote array is not supported; "
+            "use ImageDataInterface.to_ndarray_ts() instead."
+        )
+
+
+def _read_zarr_or_n5_attrs(full_path):
+    """Read a zarr/n5 array's attrs directly as JSON. Returns a dict
+    (possibly empty) -- never raises. Works over local paths and remote
+    URIs because :func:`read_json_path` does."""
+    from cellmap_analyze.util.io_util import path_join, read_json_path
+
+    # N5: attributes.json holds both schema (shape/dtype) and user attrs.
+    if full_path.rfind(".n5") > full_path.rfind(".zarr"):
+        return read_json_path(path_join(full_path, "attributes.json")) or {}
+
+    # Zarr v3: attributes live under ``attributes`` in zarr.json.
+    zarr_json = read_json_path(path_join(full_path, "zarr.json"))
+    if zarr_json is not None:
+        return zarr_json.get("attributes", {}) or {}
+
+    # Zarr v2: .zattrs sits next to .zarray.
+    zattrs = read_json_path(path_join(full_path, ".zattrs"))
+    if zattrs is not None:
+        return zattrs
+
+    return {}
+
+
+def _open_precomputed_dataset(full_path, mode):
+    """Open a neuroglancer precomputed volume as a CellMapArray.
+
+    Reads shape/dtype/chunks + voxel_size + offset from the ``info``
+    file (via ``precomputed_io.precomputed_array_metadata``). The
+    precomputed convention is that ``voxel_offset * resolution`` is the
+    physical CORNER of voxel [0,0,0]; cellmap-analyze's standard read
+    path interprets the ``offset`` attr as the OME-style CENTER and
+    subtracts ``vs/2`` to recover the corner -- so we stash CENTER =
+    CORNER + vs/2 here, and the round-trip lands back on the right
+    corner without special-casing the read path.
+
+    Data reads happen via tensorstore through
+    :func:`open_ds_tensorstore`, which dispatches on the filetype
+    returned by :func:`_detect_zarr_driver` and routes precomputed
+    paths to ``open_precomputed_tensorstore``.
+    """
+    from cellmap_analyze.util.precomputed_io import precomputed_array_metadata
+
+    if mode != "r":
+        raise ValueError(
+            f"write to precomputed {full_path!r} is not supported; "
+            f"cellmap-analyze only supports reading from precomputed."
+        )
+
+    meta = precomputed_array_metadata(full_path)
+    # ``precomputed_array_metadata`` returns ZYX-ordered values for
+    # parity with the rest of the codebase, but ``ImageDataInterface``
+    # treats this CellMapArray's shape / attrs as XYZ (just like an N5
+    # array) and reverses to ZYX via ``swap_axes=True``. To slot in
+    # uniformly, present everything here in XYZ so the IDI's existing
+    # N5 codepath produces ZYX without special-casing.
+    vs_xyz = list(meta["voxel_size"][::-1])
+    corner_xyz = list(meta["offset_corner"][::-1])
+    center_xyz = [c + v / 2.0 for c, v in zip(corner_xyz, vs_xyz)]
+    shape_xyz = tuple(meta["shape"][::-1])
+    chunks_xyz = tuple(meta["chunks"][::-1])
+
+    attrs = {
+        "voxel_size": vs_xyz,
+        "offset": center_xyz,
+    }
+
+    data = _RemoteArrayMetadata(
+        shape=shape_xyz,
+        dtype=np.dtype(meta["dtype"]),
+        chunks=chunks_xyz,
+        attrs=attrs,
+    )
+    voxel_size, offset = _read_voxel_size_offset(data)
+    arr = CellMapArray(data, voxel_size, offset)
+    arr._cellmap_path = full_path
+    # No OME parent group for precomputed; signal that explicitly so
+    # ``_read_parent_attrs`` doesn't try to open a zarr group at the URL.
+    arr._cellmap_parent_attrs = {}
+    return arr
+
+
+def _open_remote_dataset(full_path, mode):
+    """Open a remote (s3/gs/http) zarr array.
+
+    Reads array attrs and parent-group attrs via stdlib urllib (no
+    fsspec / s3fs / zarr-python fsspec backend involved). Opens
+    tensorstore on the data for shape / dtype / chunks so we don't need
+    a second JSON parser for the array layout.
+    """
+    from cellmap_analyze.util.io_util import path_dirname
+    from cellmap_analyze.util.image_data_interface import open_ds_tensorstore
+
+    if mode != "r":
+        raise ValueError(
+            f"remote write to {full_path!r} is not supported; cellmap-analyze "
+            f"only supports reading from object storage."
+        )
+
+    attrs = _read_zarr_or_n5_attrs(full_path)
+    parent_attrs = _read_zarr_or_n5_attrs(path_dirname(full_path)) or None
+
+    ts_ds = open_ds_tensorstore(full_path, mode="r")
+    shape = tuple(ts_ds.shape)
+    dtype = ts_ds.dtype.numpy_dtype
+    chunks = tuple(ts_ds.chunk_layout.read_chunk.shape)
+
+    data = _RemoteArrayMetadata(shape, dtype, chunks, attrs)
+    voxel_size, offset = _read_voxel_size_offset(data)
+    arr = CellMapArray(data, voxel_size, offset)
+    arr._cellmap_path = full_path
+    # Stash the parent attrs so ``_read_parent_attrs`` doesn't have to go
+    # back over the wire (and doesn't try to open the parent via
+    # ``zarr.open_group``, which would pull in the fsspec/s3fs path).
+    arr._cellmap_parent_attrs = parent_attrs
+    return arr
+
+
 def open_dataset(filename, ds_name, mode="r"):
     """Open a zarr dataset and return a CellMapArray.
 
     Supports zarr v2, v3, hybrid (v2 groups with v3 arrays), and N5 formats.
+    Accepts both local POSIX paths and remote URIs (``s3://``, ``gs://``,
+    ``http(s)://``) for read mode -- remote metadata is fetched via
+    stdlib ``urllib`` and remote voxel data via tensorstore's native
+    drivers, so no fsspec / s3fs / google-cloud-storage are required.
+    Writes to remote paths are not supported.
 
     Args:
-        filename: Path to the zarr container directory.
+        filename: Path or URI to the zarr container directory.
         ds_name: Name of the dataset within the container.
         mode: Open mode ('r', 'r+', 'a', 'w').
 
     Returns:
         A CellMapArray wrapping the dataset.
     """
+    from cellmap_analyze.util.io_util import (
+        is_precomputed_path,
+        is_remote_path,
+        path_join,
+        strip_precomputed_prefix,
+    )
+    from cellmap_analyze.util.image_data_interface import _detect_zarr_driver
+
     logger.debug("opening zarr dataset %s in %s", ds_name, filename)
-    full_path = os.path.join(filename, ds_name)
+    full_path = path_join(filename, ds_name) if ds_name else str(filename)
+
+    # Precomputed: detect via the explicit ``precomputed://`` prefix OR
+    # by probing for an ``info`` marker. ``_detect_zarr_driver`` does
+    # both. Strip the prefix here so downstream code can treat the path
+    # as a regular URL/local path.
+    if is_precomputed_path(full_path) or _detect_zarr_driver(full_path) == "neuroglancer_precomputed":
+        return _open_precomputed_dataset(strip_precomputed_prefix(full_path), mode)
+
+    if is_remote_path(filename):
+        return _open_remote_dataset(full_path, mode)
+
     try:
         ds = zarr.open_array(full_path, mode=mode)
     except Exception:
@@ -84,7 +248,11 @@ def open_dataset(filename, ds_name, mode="r"):
             raise
 
     voxel_size, offset = _read_voxel_size_offset(ds)
-    return CellMapArray(ds, voxel_size, offset)
+    arr = CellMapArray(ds, voxel_size, offset)
+    # Remember the path we opened from so parent-group metadata lookups
+    # don't have to go spelunking through zarr store internals.
+    arr._cellmap_path = full_path
+    return arr
 
 
 def prepare_ds(
