@@ -98,47 +98,38 @@ def _detect_zarr_driver(dataset_path: str) -> str:
     """Detect whether a zarr dataset is v2 or v3 format.
 
     Returns 'zarr' for v2, 'zarr3' for v3, or 'n5' for N5. Works for both
-    local paths and remote URIs (``s3://`` etc.).
+    local paths and remote URIs (``s3://`` / ``gs://`` / ``http(s)://``).
     """
-    from cellmap_analyze.util.io_util import remote_exists
+    from cellmap_analyze.util.io_util import (
+        is_remote_path,
+        path_join,
+        read_json_path,
+    )
 
     if dataset_path.rfind(".n5") > dataset_path.rfind(".zarr"):
         return "n5"
-    # Check for zarr v3 format marker (zarr.json at dataset level)
-    if remote_exists(os.path.join(dataset_path, "zarr.json")):
-        return "zarr3"
+
+    # Check for zarr v3 format marker (zarr.json at dataset level).
+    # ``read_json_path`` returns None when missing -- exactly the
+    # fall-through-to-v2 signal we want.
+    zarr_json_path = path_join(dataset_path, "zarr.json")
+    if is_remote_path(dataset_path):
+        if read_json_path(zarr_json_path) is not None:
+            return "zarr3"
+    else:
+        if os.path.exists(zarr_json_path):
+            return "zarr3"
     return "zarr"
 
 
-def _build_tensorstore_kvstore(dataset_path: str) -> dict:
-    """Build the tensorstore kvstore spec for a dataset path.
-
-    Local paths get ``{"driver": "file", "path": ...}``; ``s3://bucket/key``
-    URIs get ``{"driver": "s3", "bucket": ..., "path": ...}`` so tensorstore
-    talks to S3 directly (no s3fs needed for the data read path).
-    """
-    from cellmap_analyze.util.io_util import is_remote_path, parse_s3_uri
-
-    if is_remote_path(dataset_path) and dataset_path.startswith("s3://"):
-        bucket, key = parse_s3_uri(dataset_path)
-        kv = {"driver": "s3", "bucket": bucket, "path": key}
-        # Honor AWS_ENDPOINT_URL so this works against MinIO, moto, or
-        # similar non-AWS S3-compatible services. Production AWS reads
-        # don't need anything set.
-        endpoint = os.environ.get("AWS_ENDPOINT_URL")
-        if endpoint:
-            kv["endpoint"] = endpoint
-        return kv
-    if is_remote_path(dataset_path):
-        raise NotImplementedError(
-            f"tensorstore read of {dataset_path!r} not supported "
-            f"(only s3:// remote URIs are currently wired up)"
-        )
-    return {"driver": "file", "path": dataset_path}
-
-
 def open_ds_tensorstore(dataset_path: str, mode="r", concurrency_limit=None):
-    from cellmap_analyze.util.io_util import is_remote_path
+    """Open a tensorstore handle for ``dataset_path``.
+
+    ``dataset_path`` may be a local filesystem path or a remote URI
+    (``s3://``, ``gs://``, ``http(s)://``, ``file://``). Tensorstore's
+    native kvstore drivers handle the transport -- no fsspec/s3fs.
+    """
+    from cellmap_analyze.util.io_util import is_remote_path, kvstore_for_path
 
     if is_remote_path(dataset_path) and mode != "r":
         raise ValueError(
@@ -148,7 +139,10 @@ def open_ds_tensorstore(dataset_path: str, mode="r", concurrency_limit=None):
 
     # open with zarr, zarr3, or n5 depending on format
     filetype = _detect_zarr_driver(dataset_path)
-    kvstore = _build_tensorstore_kvstore(dataset_path)
+    kvstore, key = kvstore_for_path(dataset_path)
+    # tensorstore expects the chunk key inside the kvstore. Append a
+    # trailing slash so it's treated as a directory of chunks.
+    kvstore["path"] = (key.rstrip("/") + "/") if key else ""
     if concurrency_limit:
         spec = {
             "driver": filetype,

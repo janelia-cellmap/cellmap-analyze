@@ -282,10 +282,17 @@ def _read_parent_attrs(ds):
         import os
         import zarr
 
+        # Remote opens (open_dataset for s3://, gs://, http(s)://) stash
+        # the parent group's attrs as a dict directly on the
+        # CellMapArray, so we don't have to go back over the wire and
+        # don't have to route through zarr's fsspec backend.
+        stashed = getattr(ds, "_cellmap_parent_attrs", None)
+        if stashed is not None:
+            return stashed
+
         # Preferred path: the CellMapArray was opened via ``open_dataset``,
         # which stashes the full path on the array. Compute the parent
-        # group's path directly -- this works uniformly for local paths and
-        # remote URIs (s3://, etc.).
+        # group's path directly -- this works for local paths.
         full_path = getattr(ds, "_cellmap_path", None)
         if full_path:
             parent_path = os.path.dirname(str(full_path).rstrip("/"))

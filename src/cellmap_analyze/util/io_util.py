@@ -383,57 +383,153 @@ def tee_streams(output_path, append=False):
         raise
 
 
-# ----- Remote (S3 / GCS / etc.) path support -----------------------------
+# ----- Remote (S3 / GCS / HTTP) read support -----------------------------
 #
-# cellmap-analyze otherwise assumes POSIX-mounted storage. The helpers below
-# let the READ path accept ``s3://bucket/key`` (and similar fsspec-scheme)
-# URIs so a dataset can live in object storage. zarr 3.x reads these
-# natively when ``s3fs`` is installed (``pip install cellmap-analyze[s3]``);
-# tensorstore needs the URI parsed into its kvstore spec.
+# cellmap-analyze otherwise assumes POSIX-mounted storage. The helpers
+# below let the READ path accept remote URIs (``s3://``, ``gs://``,
+# ``http(s)://``) so a dataset can live in object storage or a web mirror.
+#
+# Architecture: for metadata reads (.zattrs, zarr.json, multiscales) we
+# go through stdlib ``urllib.request.urlopen`` directly on the JSON file
+# URL -- no fsspec, no s3fs, no zarr-python fsspec backend (and so no
+# async-vs-aiobotocore-vs-zarr version churn between those libraries).
+# For data reads, tensorstore has its own native drivers for s3, gcs,
+# and http kvstores. This module just routes URIs to the right
+# tensorstore kvstore spec and reads JSON metadata over the wire.
 #
 # WRITES to remote paths are NOT supported -- the tmp-dir / merge-dir /
-# rename machinery is built on POSIX semantics (atomic same-parent rename,
-# real directories) that S3 doesn't provide.
+# rename machinery is built on POSIX semantics (atomic same-parent
+# rename, real directories) that object stores don't provide.
 
-_REMOTE_SCHEMES = ("s3://", "gs://", "https://", "http://")
+import json as _json
+import posixpath
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse, urlunparse
+from urllib.request import Request, urlopen
+
+_REMOTE_SCHEMES = {"http", "https", "gs", "s3"}
 
 
 def is_remote_path(path) -> bool:
-    """True if ``path`` is a remote URI (s3:// etc.), False for local paths."""
+    """True if ``path`` is a remote URI (s3://, gs://, http(s)://)."""
     if path is None:
         return False
-    p = str(path)
-    return any(p.startswith(s) for s in _REMOTE_SCHEMES)
+    return urlparse(str(path)).scheme in _REMOTE_SCHEMES
 
 
-def remote_exists(path) -> bool:
-    """fsspec-aware existence check for remote paths.
+def path_join(base, *parts):
+    """Join URL or local-filesystem path components.
 
-    Falls back to ``os.path.exists`` for local paths so callers can use this
-    uniformly. For ``s3://`` URIs, requires ``s3fs`` to be installed.
+    For URLs, manipulates only the path component (via ``posixpath``) and
+    reassembles via ``urlunparse`` so query strings and fragments survive.
     """
-    if not is_remote_path(path):
-        return os.path.exists(path)
+    base = str(base)
+    if not parts:
+        return base
+    if is_remote_path(base):
+        parsed = urlparse(base)
+        new_path = parsed.path.rstrip("/")
+        for p in parts:
+            new_path = posixpath.join(new_path, str(p).lstrip("/"))
+        return urlunparse(parsed._replace(path=new_path))
+    return os.path.join(base, *(str(p) for p in parts))
+
+
+def path_dirname(path):
+    """Parent path for a URL or a local-filesystem path."""
+    path = str(path)
+    if is_remote_path(path):
+        parsed = urlparse(path)
+        dirname = posixpath.dirname(parsed.path.rstrip("/"))
+        return urlunparse(parsed._replace(path=dirname or "/"))
+    return os.path.dirname(path)
+
+
+def path_basename(path):
+    """Final component of a URL or a local-filesystem path."""
+    path = str(path)
+    if is_remote_path(path):
+        return posixpath.basename(urlparse(path).path.rstrip("/"))
+    return os.path.basename(path)
+
+
+def url_to_public_https(path):
+    """Translate ``s3://`` / ``gs://`` to a public HTTPS URL.
+
+    Used for metadata probes so we can read JSON via ``urlopen`` without
+    needing s3fs / google-cloud-storage / auth setup. Public buckets just
+    work; private buckets will return 403 from the probe, which is the
+    correct signal -- the subsequent tensorstore open would also need
+    authentication (handled there, not here). Honors ``AWS_ENDPOINT_URL``
+    so MinIO / moto / non-AWS S3-compatible services work.
+    """
+    parsed = urlparse(str(path))
+    if parsed.scheme == "gs":
+        return f"https://storage.googleapis.com/{parsed.netloc}{parsed.path}"
+    if parsed.scheme == "s3":
+        endpoint = os.environ.get("AWS_ENDPOINT_URL")
+        if endpoint:
+            base = endpoint.rstrip("/")
+            return f"{base}/{parsed.netloc}{parsed.path}"
+        return f"https://{parsed.netloc}.s3.amazonaws.com{parsed.path}"
+    return str(path)
+
+
+def read_json_path(path, timeout: float = 10.0):
+    """Read a JSON file from a local path or remote URL.
+
+    Returns the parsed dict on success, or ``None`` if the file is
+    missing / not JSON / unreachable. Never raises -- callers test the
+    return value (mirrors how zarr/n5 metadata probes can legitimately
+    miss when an array doesn't have its own attrs).
+    """
     try:
-        import fsspec
+        if is_remote_path(path):
+            url = url_to_public_https(path)
+            request = Request(url, headers={"Accept": "application/json"})
+            with urlopen(request, timeout=timeout) as f:
+                return _json.load(f)
+        with open(path) as f:
+            return _json.load(f)
+    except (
+        FileNotFoundError,
+        OSError,
+        HTTPError,
+        URLError,
+        TimeoutError,
+        _json.JSONDecodeError,
+    ):
+        return None
 
-        fs, p = fsspec.core.url_to_fs(str(path))
-        return fs.exists(p)
-    except Exception:
-        # Treat any failure (missing fsspec backend, network, auth) as
-        # "doesn't exist" -- callers fall through to other branches.
-        return False
 
+def kvstore_for_path(path):
+    """Build a tensorstore kvstore spec for ``path`` (any supported scheme).
 
-def parse_s3_uri(uri):
-    """Parse ``s3://bucket/key/path`` into ``(bucket, key)`` for use as a
-    tensorstore S3 kvstore spec. Raises ValueError for non-s3:// URIs."""
-    s = str(uri)
-    if not s.startswith("s3://"):
-        raise ValueError(f"not an s3:// URI: {uri!r}")
-    rest = s[len("s3://"):].lstrip("/")
-    if "/" in rest:
-        bucket, key = rest.split("/", 1)
-    else:
-        bucket, key = rest, ""
-    return bucket, key
+    Returns ``(kvstore_spec, key)`` where ``key`` is the path within the
+    kvstore that the caller should set as ``kvstore_spec["path"]`` (or
+    append a trailing slash to, depending on the tensorstore driver).
+
+    Supported schemes: ``s3``, ``gs``, ``http``, ``https``, ``file``,
+    plus bare local-filesystem paths. Honors ``AWS_ENDPOINT_URL`` so
+    MinIO / moto / non-AWS S3-compatible services work.
+    """
+    parsed = urlparse(str(path))
+    scheme = parsed.scheme.lower()
+    if scheme == "s3":
+        kv = {"driver": "s3", "bucket": parsed.netloc}
+        endpoint = os.environ.get("AWS_ENDPOINT_URL")
+        if endpoint:
+            kv["endpoint"] = endpoint
+        return kv, parsed.path.lstrip("/")
+    if scheme == "gs":
+        return {"driver": "gcs", "bucket": parsed.netloc}, parsed.path.lstrip("/")
+    if scheme in ("http", "https"):
+        return (
+            {"driver": "http", "base_url": f"{scheme}://{parsed.netloc}"},
+            parsed.path.lstrip("/"),
+        )
+    if scheme == "file":
+        return {"driver": "file"}, parsed.path
+    if scheme == "":
+        return {"driver": "file"}, os.path.abspath(str(path))
+    raise ValueError(f"Unsupported URL scheme: {scheme!r} in {path!r}")

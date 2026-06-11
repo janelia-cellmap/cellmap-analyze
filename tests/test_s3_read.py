@@ -1,24 +1,20 @@
-"""Read-only S3 support: end-to-end test against an in-process mock S3.
-
-Uses moto's ThreadedMotoServer so both s3fs (which zarr uses for ``s3://``
-URIs) and tensorstore (which has its own HTTP client) talk to the same mock
-endpoint. No real network, no AWS credentials needed. ``s3fs`` and
-``moto[s3,server]`` are in the ``[dev]`` extra.
+"""Read-only support for ``s3://`` zarr datasets, tested end-to-end against
+an in-process mock S3 (moto). No fsspec, no s3fs -- the test path mirrors
+the production path: zarr metadata via stdlib ``urllib`` (with
+``AWS_ENDPOINT_URL`` redirecting to moto), voxel data via tensorstore's
+native S3 driver pointed at the same endpoint.
 
 Coverage:
-- IDI accepts ``s3://`` URIs and reports the right voxel_size/translation.
-- ``read_raw_voxel_size`` / ``read_raw_offset`` correctly walk to the parent
-  group's OME multiscales when only that is present (per the read-precedence
-  rules in PR #73; this is the standard layout for cellmap data on S3).
+- IDI accepts ``s3://`` URIs and reports the right voxel_size /
+  translation (which lives in the parent group's OME multiscales).
 - ``to_ndarray_ts`` reads voxel data through tensorstore's S3 driver and
   returns the same bytes that were uploaded.
-- The "I didn't change anything else" guarantee: ``_array_scale_name`` /
-  multiscale level selection still works when the path is an s3:// URI
-  (i.e. opening ``s3://.../seg/s1`` picks the s1 transform, not s0's).
+- Multiscale level selection works over S3 (PR #73's ``datasets[0]``
+  fix continuing to work when metadata is fetched over the wire).
 """
 from __future__ import annotations
 
-import json
+import os
 import socket
 
 import numpy as np
@@ -33,8 +29,7 @@ def _free_port() -> int:
 
 @pytest.fixture(scope="module")
 def s3_server():
-    """Start an in-process mock S3 server. All s3:// reads in tests
-    using this fixture talk to it via ``AWS_ENDPOINT_URL``."""
+    """Start an in-process mock S3 server."""
     from moto.server import ThreadedMotoServer
 
     port = _free_port()
@@ -46,7 +41,7 @@ def s3_server():
 
 @pytest.fixture
 def s3_env(monkeypatch, s3_server):
-    """Point boto3/s3fs/tensorstore at the moto server."""
+    """Point boto3 / tensorstore / our own ``url_to_public_https`` at moto."""
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
     monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
@@ -54,103 +49,124 @@ def s3_env(monkeypatch, s3_server):
     return s3_server
 
 
-def _make_bucket(s3_env, bucket: str):
+def _boto_client(s3_env):
     import boto3
 
-    s3 = boto3.client(
+    return boto3.client(
         "s3",
         endpoint_url=s3_env,
         region_name="us-east-1",
         aws_access_key_id="test",
         aws_secret_access_key="test",
     )
-    s3.create_bucket(Bucket=bucket)
 
 
-def _open_group_on_mock_s3(s3_env, url, mode):
-    """Open a zarr group at ``url`` on the moto mock S3 server.
+def _make_bucket(s3_env, bucket: str):
+    """Create a public-read bucket on the mock S3 server.
 
-    Goes through zarr's URL-based store creation (with ``storage_options``)
-    rather than manually instantiating an s3fs filesystem -- the manual
-    path tripped zarr 3.x's ``async_impl`` check on some s3fs versions.
+    cellmap-analyze reads zarr metadata via stdlib ``urllib.request.urlopen``
+    against the bucket's HTTPS URL -- unsigned. Real cellmap data on S3 is
+    public-read, which is what makes that unsigned read work. We mirror
+    that here by setting a public-read GetObject policy on the bucket so
+    the test exercises the same unsigned-read code path.
     """
-    import zarr
+    import json as _json
 
-    return zarr.open_group(
-        url,
-        mode=mode,
-        zarr_format=3,
-        storage_options={
-            "client_kwargs": {"endpoint_url": s3_env, "region_name": "us-east-1"},
-            "key": "test",
-            "secret": "test",
-        },
+    s3 = _boto_client(s3_env)
+    s3.create_bucket(Bucket=bucket)
+    s3.put_bucket_policy(
+        Bucket=bucket,
+        Policy=_json.dumps(
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Sid": "PublicRead",
+                        "Effect": "Allow",
+                        "Principal": "*",
+                        "Action": "s3:GetObject",
+                        "Resource": f"arn:aws:s3:::{bucket}/*",
+                    }
+                ],
+            }
+        ),
     )
 
 
-def _write_zarr_dataset(s3_env, bucket, group_path, level_name, vs, trans, data):
-    """Upload a single-level OME-NGFF zarr v3 dataset to mock S3.
+def _upload_dir_to_s3(s3_env, local_root: str, bucket: str, key_prefix: str):
+    """Upload every file under ``local_root`` to ``s3://bucket/key_prefix/``
+    preserving relative paths. Used to mirror a locally-built zarr to
+    mock S3 without needing an async/fsspec stack to write directly."""
+    s3 = _boto_client(s3_env)
+    key_prefix = key_prefix.strip("/")
+    for dirpath, _dirnames, filenames in os.walk(local_root):
+        for name in filenames:
+            local_path = os.path.join(dirpath, name)
+            rel = os.path.relpath(local_path, local_root).replace(os.sep, "/")
+            key = f"{key_prefix}/{rel}".lstrip("/")
+            with open(local_path, "rb") as f:
+                s3.put_object(Bucket=bucket, Key=key, Body=f.read())
 
-    Group (parent) holds the multiscales metadata; the array at
-    ``group_path/level_name`` holds the voxel data. Mirrors how external
-    OME-NGFF datasets are typically laid out (per-level transforms only in
-    the parent group, no per-array offset/voxel_size attrs).
+
+def _build_local_ome_zarr(
+    root: str, level_data: dict[str, tuple[tuple, np.ndarray, tuple, tuple]],
+):
+    """Build a v3 OME-Zarr group at ``root`` with one or more levels.
+
+    ``level_data`` is ``{level_name: (vs_tuple, data_ndarray, vs, trans)}``
+    -- we accept ``vs``/``trans`` both at the level entry (for the OME
+    multiscales) and as the first tuple element (for the array's own
+    voxel_size convention). Locally-built and then mirrored to S3 by the
+    caller -- this lets the test code stay stdlib-only (no s3fs).
     """
-    group = _open_group_on_mock_s3(s3_env, f"s3://{bucket}/{group_path}", mode="w")
+    import zarr
+
+    group = zarr.open_group(root, mode="w", zarr_format=3)
+    datasets = []
+    for name, (_, data, vs, trans) in level_data.items():
+        datasets.append(
+            {
+                "path": name,
+                "coordinateTransformations": [
+                    {"scale": list(vs), "type": "scale"},
+                    {"translation": list(trans), "type": "translation"},
+                ],
+            }
+        )
+        arr = group.create_array(
+            name=name, shape=data.shape, chunks=data.shape, dtype=data.dtype
+        )
+        arr[:] = data
     group.attrs["multiscales"] = [
         {
             "axes": [
                 {"name": a, "type": "space", "unit": "nanometer"}
                 for a in ("z", "y", "x")
             ],
-            "datasets": [
-                {
-                    "path": level_name,
-                    "coordinateTransformations": [
-                        {"scale": list(vs), "type": "scale"},
-                        {"translation": list(trans), "type": "translation"},
-                    ],
-                }
-            ],
+            "datasets": datasets,
             "name": "",
             "version": "0.4",
         }
     ]
 
-    # The data array
-    arr = group.create_array(
-        name=level_name,
-        shape=data.shape,
-        chunks=data.shape,
-        dtype=data.dtype,
-    )
-    arr[:] = data
 
-
-def test_s3_read_zarr_via_idi(s3_env):
-    """Open s3://.../seg/s0 via IDI; voxel_size, offset, and data all
-    come back correctly through the OME multiscales metadata."""
+def test_s3_read_zarr_via_idi(tmp_path, s3_env):
+    """Open s3://.../seg/s0 via IDI; voxel_size, offset, and data come
+    back correctly through the parent group's OME multiscales."""
     from cellmap_analyze.util.image_data_interface import ImageDataInterface
 
     bucket = "cellmap-test"
     _make_bucket(s3_env, bucket)
 
-    # OME pyramid-like: vs=8, translation=4 → OME-correct s1 of a base-8
-    # pyramid would actually be (V-V_base)/2 = 0, but a non-zero
-    # translation exercises the center<->corner conversion (PR #70).
     data = np.arange(8 * 8 * 8, dtype=np.uint8).reshape((8, 8, 8))
-    _write_zarr_dataset(
-        s3_env,
-        bucket,
-        "data.zarr/seg",
-        "s0",
-        vs=(8.0, 8.0, 8.0),
-        trans=(4.0, 4.0, 4.0),
-        data=data,
+    local_root = tmp_path / "local_data.zarr" / "seg"
+    _build_local_ome_zarr(
+        str(local_root),
+        {"s0": (None, data, (8.0, 8.0, 8.0), (4.0, 4.0, 4.0))},
     )
+    _upload_dir_to_s3(s3_env, str(local_root), bucket, "data.zarr/seg")
 
-    uri = f"s3://{bucket}/data.zarr/seg/s0"
-    idi = ImageDataInterface(uri)
+    idi = ImageDataInterface(f"s3://{bucket}/data.zarr/seg/s0")
 
     # Metadata round-trips through the parent group's OME multiscales.
     assert tuple(idi.voxel_size) == (8, 8, 8)
@@ -163,48 +179,26 @@ def test_s3_read_zarr_via_idi(s3_env):
     np.testing.assert_array_equal(read, data)
 
 
-def test_s3_read_picks_correct_multiscale_level(s3_env):
-    """The multiscale-level fix (PR #73) also has to work over s3:// --
-    opening s1 must pick the s1 transform from the parent's multiscales
+def test_s3_read_picks_correct_multiscale_level(tmp_path, s3_env):
+    """The level-selection fix (PR #73) also has to work over s3:// --
+    opening s1 picks the s1 transform from the parent's multiscales
     metadata, not s0's."""
     from cellmap_analyze.util.image_data_interface import ImageDataInterface
 
     bucket = "cellmap-test-multiscale"
     _make_bucket(s3_env, bucket)
 
-    # Build a two-level group: s0 vs=4 trans=0; s1 vs=8 trans=2.
-    group = _open_group_on_mock_s3(
-        s3_env, f"s3://{bucket}/data.zarr/seg", mode="w"
-    )
-    group.attrs["multiscales"] = [
+    s0 = np.ones((16, 16, 16), dtype=np.uint8) * 1
+    s1 = np.ones((8, 8, 8), dtype=np.uint8) * 2
+    local_root = tmp_path / "ms.zarr" / "seg"
+    _build_local_ome_zarr(
+        str(local_root),
         {
-            "axes": [
-                {"name": a, "type": "space", "unit": "nanometer"}
-                for a in ("z", "y", "x")
-            ],
-            "datasets": [
-                {
-                    "path": "s0",
-                    "coordinateTransformations": [
-                        {"scale": [4.0, 4.0, 4.0], "type": "scale"},
-                        {"translation": [0.0, 0.0, 0.0], "type": "translation"},
-                    ],
-                },
-                {
-                    "path": "s1",
-                    "coordinateTransformations": [
-                        {"scale": [8.0, 8.0, 8.0], "type": "scale"},
-                        {"translation": [2.0, 2.0, 2.0], "type": "translation"},
-                    ],
-                },
-            ],
-            "name": "",
-            "version": "0.4",
-        }
-    ]
-    for level, shape, val in [("s0", (16, 16, 16), 1), ("s1", (8, 8, 8), 2)]:
-        a = group.create_array(name=level, shape=shape, chunks=shape, dtype="uint8")
-        a[:] = val
+            "s0": (None, s0, (4.0, 4.0, 4.0), (0.0, 0.0, 0.0)),
+            "s1": (None, s1, (8.0, 8.0, 8.0), (2.0, 2.0, 2.0)),
+        },
+    )
+    _upload_dir_to_s3(s3_env, str(local_root), bucket, "data.zarr/seg")
 
     # s0: vs=4, corner = 0 − 4/2 = −2.
     idi0 = ImageDataInterface(f"s3://{bucket}/data.zarr/seg/s0")
@@ -212,13 +206,13 @@ def test_s3_read_picks_correct_multiscale_level(s3_env):
     assert tuple(idi0.offset) == (-2, -2, -2)
     assert np.all(idi0.to_ndarray_ts(idi0.roi) == 1)
 
-    # s1: vs=8, trans=2 → corner = 2 − 8/2 = −2. Same corner as s0
-    # (the OME pyramid invariant) -- the LEVEL is what we have to pick
+    # s1: vs=8, trans=2 → corner = 2 − 8/2 = −2. Same corner as s0 (the
+    # OME pyramid invariant) -- the LEVEL is what we have to pick
     # correctly here.
     idi1 = ImageDataInterface(f"s3://{bucket}/data.zarr/seg/s1")
     assert tuple(idi1.voxel_size) == (8, 8, 8), (
         f"expected s1 voxel_size 8 but got {tuple(idi1.voxel_size)} -- "
-        f"this is the datasets[0]-hardcoding bug if it fails"
+        f"this is the datasets[0]-hardcoding regression if it fails"
     )
     assert tuple(idi1.offset) == (-2, -2, -2)
     assert np.all(idi1.to_ndarray_ts(idi1.roi) == 2)

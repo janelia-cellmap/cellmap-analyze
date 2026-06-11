@@ -55,13 +55,97 @@ class N5ArrayMetadata:
         )
 
 
+class _RemoteArrayMetadata:
+    """Minimal zarr.Array-shaped wrapper for remote (s3/gs/http) reads.
+
+    Provides ``shape``, ``dtype``, ``chunks``, ``attrs`` — the surface
+    that ``_read_voxel_size_offset`` and ``CellMapArray`` need. Data
+    reads always go through tensorstore (via ``ImageDataInterface``);
+    direct ``__getitem__`` is intentionally unsupported because we don't
+    want to fall back to a different remote-IO library.
+    """
+
+    def __init__(self, shape, dtype, chunks, attrs):
+        self.shape = tuple(shape)
+        self.dtype = dtype
+        self.chunks = tuple(chunks)
+        self.attrs = dict(attrs or {})
+
+    def __getitem__(self, slices):
+        raise NotImplementedError(
+            "Direct __getitem__ on a remote array is not supported; "
+            "use ImageDataInterface.to_ndarray_ts() instead."
+        )
+
+
+def _read_zarr_or_n5_attrs(full_path):
+    """Read a zarr/n5 array's attrs directly as JSON. Returns a dict
+    (possibly empty) -- never raises. Works over local paths and remote
+    URIs because :func:`read_json_path` does."""
+    from cellmap_analyze.util.io_util import path_join, read_json_path
+
+    # N5: attributes.json holds both schema (shape/dtype) and user attrs.
+    if full_path.rfind(".n5") > full_path.rfind(".zarr"):
+        return read_json_path(path_join(full_path, "attributes.json")) or {}
+
+    # Zarr v3: attributes live under ``attributes`` in zarr.json.
+    zarr_json = read_json_path(path_join(full_path, "zarr.json"))
+    if zarr_json is not None:
+        return zarr_json.get("attributes", {}) or {}
+
+    # Zarr v2: .zattrs sits next to .zarray.
+    zattrs = read_json_path(path_join(full_path, ".zattrs"))
+    if zattrs is not None:
+        return zattrs
+
+    return {}
+
+
+def _open_remote_dataset(full_path, mode):
+    """Open a remote (s3/gs/http) zarr array.
+
+    Reads array attrs and parent-group attrs via stdlib urllib (no
+    fsspec / s3fs / zarr-python fsspec backend involved). Opens
+    tensorstore on the data for shape / dtype / chunks so we don't need
+    a second JSON parser for the array layout.
+    """
+    from cellmap_analyze.util.io_util import path_dirname
+    from cellmap_analyze.util.image_data_interface import open_ds_tensorstore
+
+    if mode != "r":
+        raise ValueError(
+            f"remote write to {full_path!r} is not supported; cellmap-analyze "
+            f"only supports reading from object storage."
+        )
+
+    attrs = _read_zarr_or_n5_attrs(full_path)
+    parent_attrs = _read_zarr_or_n5_attrs(path_dirname(full_path)) or None
+
+    ts_ds = open_ds_tensorstore(full_path, mode="r")
+    shape = tuple(ts_ds.shape)
+    dtype = ts_ds.dtype.numpy_dtype
+    chunks = tuple(ts_ds.chunk_layout.read_chunk.shape)
+
+    data = _RemoteArrayMetadata(shape, dtype, chunks, attrs)
+    voxel_size, offset = _read_voxel_size_offset(data)
+    arr = CellMapArray(data, voxel_size, offset)
+    arr._cellmap_path = full_path
+    # Stash the parent attrs so ``_read_parent_attrs`` doesn't have to go
+    # back over the wire (and doesn't try to open the parent via
+    # ``zarr.open_group``, which would pull in the fsspec/s3fs path).
+    arr._cellmap_parent_attrs = parent_attrs
+    return arr
+
+
 def open_dataset(filename, ds_name, mode="r"):
     """Open a zarr dataset and return a CellMapArray.
 
     Supports zarr v2, v3, hybrid (v2 groups with v3 arrays), and N5 formats.
-    Accepts both local POSIX paths and remote URIs (``s3://bucket/path``)
-    for read mode; ``s3://`` reads require ``s3fs`` (install via
-    ``cellmap-analyze[s3]``). Writes to remote paths are not supported.
+    Accepts both local POSIX paths and remote URIs (``s3://``, ``gs://``,
+    ``http(s)://``) for read mode -- remote metadata is fetched via
+    stdlib ``urllib`` and remote voxel data via tensorstore's native
+    drivers, so no fsspec / s3fs / google-cloud-storage are required.
+    Writes to remote paths are not supported.
 
     Args:
         filename: Path or URI to the zarr container directory.
@@ -71,30 +155,21 @@ def open_dataset(filename, ds_name, mode="r"):
     Returns:
         A CellMapArray wrapping the dataset.
     """
-    from cellmap_analyze.util.io_util import is_remote_path, remote_exists
+    from cellmap_analyze.util.io_util import is_remote_path, path_join
 
     logger.debug("opening zarr dataset %s in %s", ds_name, filename)
-    full_path = os.path.join(filename, ds_name)
-    remote = is_remote_path(filename)
-    if remote and mode not in ("r",):
-        raise ValueError(
-            f"remote write to {filename!r} is not supported; cellmap-analyze "
-            f"only supports reading from object storage."
-        )
+    full_path = path_join(filename, ds_name) if ds_name else str(filename)
+
+    if is_remote_path(filename):
+        return _open_remote_dataset(full_path, mode)
+
     try:
         ds = zarr.open_array(full_path, mode=mode)
     except Exception:
         # Zarr 3.x cannot open N5 natively — fall back to reading
         # the N5 attributes.json for metadata.
         n5_attrs_path = os.path.join(full_path, "attributes.json")
-        if remote_exists(n5_attrs_path):
-            if remote:
-                # N5ArrayMetadata directly reads a local file via open(); we
-                # don't want to silently mishandle that for remote URIs.
-                raise NotImplementedError(
-                    f"N5 reads from remote URIs are not supported "
-                    f"({full_path!r})"
-                )
+        if os.path.exists(n5_attrs_path):
             logger.debug("falling back to N5 metadata reader for %s", full_path)
             ds = N5ArrayMetadata(full_path)
         else:
