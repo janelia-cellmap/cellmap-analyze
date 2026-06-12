@@ -545,6 +545,19 @@ def kvstore_for_path(path):
         endpoint = os.environ.get("AWS_ENDPOINT_URL")
         if endpoint:
             kv["endpoint"] = endpoint
+        # Default to anonymous mode for public-bucket reads (OpenOrganelle,
+        # most cellmap-published data) so they don't pay multi-second
+        # IMDS / profile / web-identity timeouts in the tensorstore S3
+        # driver's credential chain. Users with private S3 access opt in
+        # via env -- any of AWS_ACCESS_KEY_ID / AWS_PROFILE /
+        # AWS_ENDPOINT_URL switches back to the default credential chain.
+        # (Moto tests already set AWS_ACCESS_KEY_ID + AWS_ENDPOINT_URL,
+        # so they're unaffected.)
+        if not any(
+            os.environ.get(k)
+            for k in ("AWS_ACCESS_KEY_ID", "AWS_PROFILE", "AWS_ENDPOINT_URL")
+        ):
+            kv["aws_credentials"] = {"type": "anonymous"}
         return kv, parsed.path.lstrip("/")
     if scheme == "gs":
         return {"driver": "gcs", "bucket": parsed.netloc}, parsed.path.lstrip("/")
