@@ -118,8 +118,10 @@ def list_multiscale_levels(group_path):
         already a scale-level array, a precomputed volume, or a non-OME
         layout). Levels missing a name or scale transform are dropped.
     """
+    from cellmap_analyze.util.voxel_size_utils import get_multiscales
+
     attrs = _read_zarr_or_n5_attrs(group_path)
-    multiscales = attrs.get("multiscales") if attrs else None
+    multiscales = get_multiscales(attrs)
     if not multiscales:
         return None
     try:

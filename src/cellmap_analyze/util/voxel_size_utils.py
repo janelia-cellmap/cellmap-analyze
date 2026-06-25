@@ -158,8 +158,26 @@ def read_raw_offset(ds):
     return tuple(float(v) for v in ds.roi.offset)
 
 
+def get_multiscales(attrs):
+    """Return the OME ``multiscales`` list from an attrs dict, or None.
+
+    Handles both metadata layouts:
+    - NGFF <= 0.4: ``multiscales`` sits at the top level of the attrs.
+    - NGFF >= 0.5: everything is nested under an ``ome`` key, so the list
+      lives at ``attrs["ome"]["multiscales"]``.
+    """
+    if not attrs:
+        return None
+    if "multiscales" in attrs:
+        return attrs["multiscales"]
+    ome = attrs.get("ome")
+    if isinstance(ome, dict) and "multiscales" in ome:
+        return ome["multiscales"]
+    return None
+
+
 def _ome_scale_for(attrs, scale_name):
-    if not attrs or "multiscales" not in attrs:
+    if get_multiscales(attrs) is None:
         return None
     try:
         return _extract_ome_scale(attrs, scale_name)
@@ -168,7 +186,7 @@ def _ome_scale_for(attrs, scale_name):
 
 
 def _ome_translation_for(attrs, scale_name):
-    if not attrs or "multiscales" not in attrs:
+    if get_multiscales(attrs) is None:
         return None
     try:
         return _extract_ome_translation(attrs, scale_name)
@@ -222,7 +240,7 @@ def _select_ome_dataset(attrs, scale_name=None):
     ``path``. Falls back to the first entry when the level can't be identified
     (single-scale metadata, or a non-standard array name).
     """
-    datasets = attrs["multiscales"][0]["datasets"]
+    datasets = get_multiscales(attrs)[0]["datasets"]
     if scale_name is not None:
         for d in datasets:
             if d.get("path") == scale_name:
