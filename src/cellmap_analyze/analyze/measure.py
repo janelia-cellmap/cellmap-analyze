@@ -98,7 +98,14 @@ class Measure(ComputeConfigMixin):
 
         if "raw_path" in kwargs and kwargs["raw_path"]:
             self.raw_path = kwargs["raw_path"]
-            self.raw_idi = ImageDataInterface(self.raw_path, chunk_shape=chunk_shape)
+            # If raw_path is a multiscale group (no scale level given), pick
+            # the level whose voxel size best matches the input segmentation
+            # so intensities line up with minimal resampling.
+            self.raw_idi = ImageDataInterface(
+                self.raw_path,
+                chunk_shape=chunk_shape,
+                target_voxel_size=self.input_idi.original_voxel_size,
+            )
             # Align scale factors between raw and input
             raw_sf = compute_common_scale_factor(
                 self.input_idi.voxel_size_scale_factor,
