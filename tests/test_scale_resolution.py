@@ -74,11 +74,20 @@ def test_resolve_matches_exact_target(multiscale_group):
     ).endswith("/s1")
 
 
-def test_resolve_matches_closest_target(multiscale_group):
-    # 15nm is closest to the 16nm level.
+def test_resolve_prefers_finer_over_upsampling(multiscale_group):
+    # 15nm sits between the 8nm and 16nm levels. Picking 16nm would require
+    # upsampling, so the coarsest level at or finer than the target (8nm) is
+    # chosen instead.
     assert resolve_scale_path(
         multiscale_group, target_voxel_size=(15.0, 15.0, 15.0)
-    ).endswith("/s2")
+    ).endswith("/s1")
+
+
+def test_resolve_falls_back_to_finest_when_all_coarser(multiscale_group):
+    # Target finer than every level -> upsampling is unavoidable; use s0.
+    assert resolve_scale_path(
+        multiscale_group, target_voxel_size=(2.0, 2.0, 2.0)
+    ).endswith("/s0")
 
 
 def test_resolve_leaves_scale_array_untouched(multiscale_group):

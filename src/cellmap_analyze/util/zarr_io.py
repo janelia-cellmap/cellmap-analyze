@@ -155,10 +155,13 @@ def resolve_scale_path(dataset_path, target_voxel_size=None, logger=None):
 
     - ``target_voxel_size is None``: the finest level (``s0`` by convention)
       is chosen. This makes a bare group path default to full resolution.
-    - ``target_voxel_size`` given: the level whose voxel size is closest to
-      the target is chosen (exact match preferred; ties broken toward the
-      finer level). Used so an intensity/raw source lines up with the
-      segmentation it is measured against, minimizing resampling.
+    - ``target_voxel_size`` given: the coarsest level that is still at or
+      finer than the target is chosen, so the source is only ever
+      downsampled onto the target grid -- never upsampled (which would
+      fabricate detail by repetition). When every level is coarser than the
+      target, the finest available level is used as the least-bad fallback.
+      Used so an intensity/raw source lines up with the segmentation it is
+      measured against.
 
     The selection is logged so it is never silent.
     """
@@ -166,28 +169,41 @@ def resolve_scale_path(dataset_path, target_voxel_size=None, logger=None):
     if not levels:
         return dataset_path
 
+    def volume(level_vs):
+        v = 1.0
+        for c in level_vs:
+            v *= c
+        return v
+
     if target_voxel_size is None:
         chosen_path, chosen_vs = levels[0]
         reason = "defaulting to finest scale (s0)"
     else:
         target_key = _voxel_size_sort_key(target_voxel_size)
 
-        def distance(level_vs):
-            return sum(
-                abs(a - b) / b
+        def is_finer_or_equal(level_vs):
+            return all(
+                a <= b * (1 + 1e-6)
                 for a, b in zip(_voxel_size_sort_key(level_vs), target_key)
             )
 
-        def volume(level_vs):
-            v = 1.0
-            for c in level_vs:
-                v *= c
-            return v
-
-        chosen_path, chosen_vs = min(
-            levels, key=lambda lv: (distance(lv[1]), volume(lv[1]))
-        )
-        reason = f"matching target voxel size {tuple(target_voxel_size)}"
+        finer = [lv for lv in levels if is_finer_or_equal(lv[1])]
+        if finer:
+            # Coarsest level that still doesn't require upsampling -- closest
+            # to the target from the finer side, so the least downsampling.
+            chosen_path, chosen_vs = max(finer, key=lambda lv: volume(lv[1]))
+            reason = (
+                f"coarsest level at or finer than target voxel size "
+                f"{tuple(target_voxel_size)} (downsample only, no upsampling)"
+            )
+        else:
+            # Every level is coarser than the target; nothing avoids
+            # upsampling, so use the finest available.
+            chosen_path, chosen_vs = min(levels, key=lambda lv: volume(lv[1]))
+            reason = (
+                f"finest available -- all levels coarser than target voxel "
+                f"size {tuple(target_voxel_size)}"
+            )
 
     from cellmap_analyze.util.io_util import path_join
 
