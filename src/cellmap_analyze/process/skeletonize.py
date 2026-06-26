@@ -169,6 +169,7 @@ class Skeletonize(ComputeConfigMixin):
         memory_fraction=0.60,
         skeleton_properties=True,
         write_vertex_radius=False,
+        prune_only=False,
     ):
         """
         Skeletonize a segmentation, parallelized over IDs.
@@ -227,8 +228,20 @@ class Skeletonize(ComputeConfigMixin):
                      radius as a float32 ``radius`` vertex attribute on the
                      full skeletons (declared in the full ``info`` so
                      neuroglancer can color by it). Default False keeps the
-                     full skeletons geometry-only. The simplified skeletons
-                     never carry it regardless.
+                     full skeletons geometry-only. The geometrically-simplified
+                     skeletons never carry it (simplify drops vertices, so the
+                     radii would be lossy); the prune-only output does (see
+                     ``prune_only``).
+            prune_only: When True, the second output is a *prune-only*
+                     skeleton (short terminal branches removed, but every
+                     surviving original vertex kept -- no geometric
+                     simplification), written to a ``pruned/`` directory
+                     instead of ``simplified/``. ``tolerance_nm`` is ignored.
+                     Because no vertices move or merge, each surviving node
+                     keeps its exact original EDT radius, so this output also
+                     carries the per-vertex radius when ``write_vertex_radius``
+                     is set. Default False preserves the prune+simplify
+                     ``simplified/`` output.
         """
         super().__init__(num_workers)
         self.segmentation_path = segmentation_path
@@ -274,6 +287,11 @@ class Skeletonize(ComputeConfigMixin):
             skeleton_properties
         )
         self.write_vertex_radius = bool(write_vertex_radius)
+        self.prune_only = bool(prune_only)
+        # The second output is either prune+simplify ("simplified") or, when
+        # prune_only is set, prune-only ("pruned"). Named honestly so the
+        # neuroglancer layer reflects what it actually contains.
+        self.second_subdir = "pruned" if self.prune_only else "simplified"
         # Per-instance suffix so concurrent runs sharing output_path don't
         # collide on the wave merge dirs.
         self._run_id = uuid.uuid4().hex[:8]
@@ -283,11 +301,15 @@ class Skeletonize(ComputeConfigMixin):
         self.ids = self.bbox_df.index.tolist()
 
         # Create output directories
-        # Each output directory (full and simplified) needs its own structure
+        # Each output directory (full and the second output) needs its own
+        # structure. The second is 'simplified' or, in prune_only mode,
+        # 'pruned'.
         os.makedirs(f"{output_path}/full", exist_ok=True)
         os.makedirs(f"{output_path}/full/segment_properties", exist_ok=True)
-        os.makedirs(f"{output_path}/simplified", exist_ok=True)
-        os.makedirs(f"{output_path}/simplified/segment_properties", exist_ok=True)
+        os.makedirs(f"{output_path}/{self.second_subdir}", exist_ok=True)
+        os.makedirs(
+            f"{output_path}/{self.second_subdir}/segment_properties", exist_ok=True
+        )
 
         logger.info(f"Loaded {len(self.ids)} IDs from {csv_path}")
         logger.info(f"Output will be written to {output_path}")
@@ -345,28 +367,36 @@ class Skeletonize(ComputeConfigMixin):
         tolerance_nm: float,
         sharded: bool = False,
         write_vertex_radius: bool = False,
+        prune_only: bool = False,
+        second_subdir: str = "simplified",
     ):
         """
-        Process a single ID: extract, skeletonize, prune, simplify, and emit.
+        Process a single ID: extract, skeletonize, prune, (simplify,) and emit.
+
+        Emits two skeletons: ``full`` (raw) and ``second_subdir`` -- either
+        ``simplified`` (prune+simplify) or, when ``prune_only`` is set,
+        ``pruned`` (prune only, all surviving original vertices kept).
 
         When ``sharded=True``, encoded skeleton bytes are returned in the
-        result dict under ``"full_bytes"``/``"simplified_bytes"`` so the
+        result dict under ``"full_bytes"``/``"{second_subdir}_bytes"`` so the
         driver can pack them into shard files via the existing pickle merge
         path — no per-ID NRS write happens. When ``sharded=False``, per-ID
-        files are written under ``{output_path}/{full,simplified}/{id}``.
+        files are written under ``{output_path}/{full,<second_subdir>}/{id}``.
         """
         from funlib.geometry import Roi
 
         result: dict = dict(Skeletonize._empty_metrics())
 
         def emit(subdir: str, skel_obj: CustomSkeleton):
-            # Per-vertex radii are written only on the "full" skeleton, and
-            # only when requested. The "simplified" geometry stays
-            # attribute-free (its decimated vertices no longer align with the
-            # sampled radii, and its info declares no vertex attributes).
-            encoded = skel_obj.encode_neuroglancer_bytes(
-                include_radii=(subdir == "full" and write_vertex_radius)
+            # Radii are written on the full skeleton and on the prune-only
+            # output (both keep every original vertex, so radii stay exact and
+            # aligned). The geometrically-simplified output stays attribute-free
+            # -- simplify drops vertices, so its radii would be lossy and its
+            # info declares no vertex attributes.
+            include_radii = write_vertex_radius and (
+                subdir == "full" or prune_only
             )
+            encoded = skel_obj.encode_neuroglancer_bytes(include_radii=include_radii)
             if sharded:
                 result[f"{subdir}_bytes"] = encoded
             else:
@@ -378,7 +408,7 @@ class Skeletonize(ComputeConfigMixin):
         def emit_empty():
             empty = CustomSkeleton(vertices=[], edges=[])
             emit("full", empty)
-            emit("simplified", empty)
+            emit(second_subdir, empty)
 
         try:
             # Get bounding box for this ID
@@ -483,13 +513,14 @@ class Skeletonize(ComputeConfigMixin):
                         vertices=[seed_vertex],
                         edges=np.zeros((0, 2), dtype=np.uint32),
                     )
-                    # Keep the full skeleton's radius attribute populated even
-                    # for the single seed vertex (set directly to dodge
-                    # add_vertex's falsy-radius skip).
+                    # Keep the radius attribute populated even for the single
+                    # seed vertex (set directly to dodge add_vertex's
+                    # falsy-radius skip) so the full / prune-only outputs stay
+                    # consistent with their declared vertex attribute.
                     if write_vertex_radius:
                         seed_skel.radii = [peak_radius_nm]
                     emit("full", seed_skel)
-                    emit("simplified", seed_skel)
+                    emit(second_subdir, seed_skel)
                     result["radius_mean_nm"] = peak_radius_nm
                     result["radius_std_nm"] = 0.0
                     return result
@@ -533,6 +564,13 @@ class Skeletonize(ComputeConfigMixin):
             g = skeleton.skeleton_to_graph()
             skeleton.polylines = skeleton.get_polylines_positions_from_graph(g)
 
+            # Attach the per-vertex radii (sampled from the EDT in the same
+            # np.argwhere voxel order that produced the skeleton vertices)
+            # before pruning, so prune() carries each surviving node's exact
+            # original radius through to the prune-only output.
+            if write_vertex_radius:
+                skeleton.radii = list(radii)
+
             # Prune
             if min_branch_length_nm > 0:
                 pruned = skeleton.prune(min_branch_length_nm)
@@ -566,13 +604,17 @@ class Skeletonize(ComputeConfigMixin):
             result["radius_mean_nm"] = float(np.mean(radii))
             result["radius_std_nm"] = float(np.std(radii))
 
-            # Simplify
-            if tolerance_nm > 0:
-                simplified = pruned.simplify(tolerance_nm)
+            # Build the second output: prune-only keeps every surviving
+            # vertex (and its exact radius); otherwise simplify the pruned
+            # skeleton. tolerance_nm is ignored in prune_only mode.
+            if prune_only:
+                second_skel = pruned
+            elif tolerance_nm > 0:
+                second_skel = pruned.simplify(tolerance_nm)
             else:
-                simplified = pruned
+                second_skel = pruned
 
-            if len(simplified.vertices) == 0:
+            if len(second_skel.vertices) == 0:
                 logger.warning(
                     f"Pruning/simplification removed all vertices for ID {id_value}, emitting empty skeleton"
                 )
@@ -586,20 +628,13 @@ class Skeletonize(ComputeConfigMixin):
             else:
                 skeleton.edges = np.array(skeleton.edges, dtype=np.uint32)
 
-            if len(simplified.edges) == 0:
-                simplified.edges = np.zeros((0, 2), dtype=np.uint32)
+            if len(second_skel.edges) == 0:
+                second_skel.edges = np.zeros((0, 2), dtype=np.uint32)
             else:
-                simplified.edges = np.array(simplified.edges, dtype=np.uint32)
-
-            # Attach the per-vertex radii (sampled from the EDT in the same
-            # np.argwhere voxel order that produced the skeleton vertices) to
-            # the full skeleton. Set here, after prune/simplify, so those
-            # derived skeletons stay radius-free.
-            if write_vertex_radius:
-                skeleton.radii = list(radii)
+                second_skel.edges = np.array(second_skel.edges, dtype=np.uint32)
 
             emit("full", skeleton)
-            emit("simplified", simplified)
+            emit(second_subdir, second_skel)
             return result
 
         except Exception as e:
@@ -610,8 +645,9 @@ class Skeletonize(ComputeConfigMixin):
         """
         Write the neuroglancer info file and segment_properties info file for both full and simplified directories.
         """
-        # Write info files for both 'full' and 'simplified' directories
-        for subdir in ["full", "simplified"]:
+        # Write info files for the 'full' and second ('simplified'/'pruned')
+        # output directories.
+        for subdir in ["full", self.second_subdir]:
             # Write main info file for skeletons
             info = {
                 "@type": "neuroglancer_skeletons",
@@ -632,11 +668,11 @@ class Skeletonize(ComputeConfigMixin):
                 "segment_properties": "segment_properties",
             }
 
-            # The full skeletons carry a per-vertex radius (sampled from the
-            # EDT) when write_vertex_radius is set; declare it so neuroglancer
-            # can read and color by it. The simplified skeletons are
-            # geometry-only.
-            if subdir == "full" and self.write_vertex_radius:
+            # The full and prune-only skeletons carry a per-vertex radius
+            # (sampled from the EDT) when write_vertex_radius is set; declare
+            # it so neuroglancer can read and color by it. The
+            # geometrically-simplified skeletons are geometry-only.
+            if self.write_vertex_radius and (subdir == "full" or self.prune_only):
                 info["vertex_attributes"] = [
                     {
                         "id": "radius",
@@ -895,7 +931,7 @@ class Skeletonize(ComputeConfigMixin):
         # as sortable columns in the neuroglancer side panel.
         if self.skeleton_properties:
             metrics_by_id = {int(m["id"]): m for m in all_metrics}
-            for subdir in ("full", "simplified"):
+            for subdir in ("full", self.second_subdir):
                 self._write_segment_properties_info(subdir, metrics_by_id)
 
         logger.info("Skeletonization complete")
@@ -931,6 +967,8 @@ class Skeletonize(ComputeConfigMixin):
             self.tolerance_nm,
             sharded=self.sharded,
             write_vertex_radius=self.write_vertex_radius,
+            prune_only=self.prune_only,
+            second_subdir=self.second_subdir,
         )
         if result is None:
             result = Skeletonize._empty_metrics()
@@ -941,7 +979,7 @@ class Skeletonize(ComputeConfigMixin):
         """Pack encoded skeleton bytes (already in memory via pickle merge)
         into precomputed sharded shard files.
 
-        Pops ``full_bytes``/``simplified_bytes`` from each metric dict in
+        Pops ``full_bytes``/``{second_subdir}_bytes`` from each metric dict in
         ``metrics_list`` so subsequent CSV writing sees only metric columns.
         No NRS read/unlink work — the bytes were carried back on the dask
         merge path that runs for every job regardless.
@@ -949,7 +987,10 @@ class Skeletonize(ComputeConfigMixin):
         import time
         from cellmap_analyze.util.sharded_skeleton import pack_sharded_skeletons
 
-        for subdir, bytes_key in [("full", "full_bytes"), ("simplified", "simplified_bytes")]:
+        for subdir, bytes_key in [
+            ("full", "full_bytes"),
+            (self.second_subdir, f"{self.second_subdir}_bytes"),
+        ]:
             dir_path = f"{self.output_path}/{subdir}"
 
             t0 = time.time()

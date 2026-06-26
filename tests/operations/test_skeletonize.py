@@ -296,6 +296,60 @@ def test_skeletonize_writes_per_vertex_radius(tmp_zarr, tmp_skeletonize_csv):
     assert saw_non_empty
 
 
+def test_skeletonize_prune_only_keeps_nodes_and_radii(tmp_zarr, tmp_skeletonize_csv):
+    """prune_only writes a `pruned/` output (not `simplified/`) that keeps the
+    full skeleton's vertices except pruned branches, and carries faithful
+    per-vertex radii when write_vertex_radius is set."""
+    output_path = tmp_zarr + "/test_skeletonize_prune_only"
+
+    skeletonizer = Skeletonize(
+        segmentation_path=f"{tmp_zarr}/segmentation_for_skeleton/s0",
+        output_path=output_path,
+        csv_path=tmp_skeletonize_csv,
+        erosion=True,
+        min_branch_length_nm=0,
+        tolerance_nm=200,  # ignored in prune_only mode
+        num_workers=1,
+        sharded=False,
+        write_vertex_radius=True,
+        prune_only=True,
+    )
+    skeletonizer.skeletonize()
+
+    # The second output is named `pruned`, not `simplified`.
+    assert os.path.isdir(f"{output_path}/pruned")
+    assert not os.path.exists(f"{output_path}/simplified")
+
+    # Both full and pruned declare the radius vertex attribute.
+    radius_attr = [{"id": "radius", "data_type": "float32", "num_components": 1}]
+    with open(f"{output_path}/full/info") as f:
+        assert json.load(f)["vertex_attributes"] == radius_attr
+    with open(f"{output_path}/pruned/info") as f:
+        assert json.load(f)["vertex_attributes"] == radius_attr
+
+    # With min_branch_length_nm=0 nothing is pruned, so pruned == full: same
+    # vertices and the same per-vertex radii (each surviving node keeps its
+    # original radius verbatim, since prune never moves or merges vertices).
+    saw_non_empty = False
+    for id_val in [1, 2, 3, 4, 5, 6, 7, 8]:
+        with open(f"{output_path}/full/{id_val}", "rb") as f:
+            full_verts, _, full_radii = _parse_skeleton_bytes(
+                f.read(), n_radius_components=1
+            )
+        with open(f"{output_path}/pruned/{id_val}", "rb") as f:
+            pruned_verts, _, pruned_radii = _parse_skeleton_bytes(
+                f.read(), n_radius_components=1
+            )
+        if len(full_verts) == 0:
+            continue
+        saw_non_empty = True
+        assert np.array_equal(np.sort(full_radii), np.sort(pruned_radii))
+        assert np.all(pruned_radii > 0)
+        assert len(pruned_verts) == len(full_verts)
+
+    assert saw_non_empty
+
+
 def test_skeletonize_produces_reasonable_skeletons(
     tmp_zarr, tmp_skeletonize_csv, voxel_size
 ):
