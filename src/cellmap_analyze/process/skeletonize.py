@@ -10,7 +10,7 @@ from cellmap_analyze.util.skeleton_util import (
     skimage_to_custom_skeleton_fast,
 )
 from scipy.ndimage import zoom
-from skimage.morphology import skeletonize, binary_erosion
+from skimage.morphology import skeletonize
 from tqdm import tqdm
 import logging
 import os
@@ -147,6 +147,140 @@ def remove_unbridged_adjacencies(data, connectivity=6):
     return data & ~to_remove
 
 
+# Map the codebase's connectivity convention (6/18/26 neighbours) to the
+# scipy.ndimage structuring-element rank.
+_CONNECTIVITY_TO_RANK = {6: 1, 18: 2, 26: 3}
+
+# Standard binary morphology applied with a structuring element + iterations.
+_STANDARD_MORPHOLOGY_OPS = ("erosion", "dilation", "opening", "closing")
+
+# Targeted removal of diagonal-only ("corner-touching") connections, which
+# otherwise produce spurious skeleton branches. Connectivity is implied by the
+# op name.
+_CORNER_BRIDGE_OPS = {
+    "remove_corner_bridges_6": 6,
+    "remove_corner_bridges_18": 18,
+    "6": 6,
+    "18": 18,
+}
+
+
+def _binary_structure(connectivity):
+    from scipy.ndimage import generate_binary_structure
+
+    if connectivity not in _CONNECTIVITY_TO_RANK:
+        raise ValueError(
+            f"connectivity must be one of {sorted(_CONNECTIVITY_TO_RANK)}; "
+            f"got {connectivity!r}"
+        )
+    return generate_binary_structure(3, _CONNECTIVITY_TO_RANK[connectivity])
+
+
+def normalize_morphological_operations(operations):
+    """Normalize a morphological-operations spec into a list of
+    ``{operation, iterations, connectivity}`` dicts.
+
+    Accepts a single op or a list, where each op is either:
+    - a string: ``"erosion"``, ``"dilation"``, ``"opening"``, ``"closing"``,
+      or a corner-bridge removal (``"remove_corner_bridges_6"``/``"6"``,
+      ``"remove_corner_bridges_18"``/``"18"``); or
+    - a dict ``{"operation": ..., "iterations": int, "connectivity": 6|18|26}``
+      (``iterations``/``connectivity`` optional; default 1 and 6).
+    """
+    if operations is None:
+        return []
+    if isinstance(operations, (str, dict)):
+        operations = [operations]
+
+    normalized = []
+    for op in operations:
+        if isinstance(op, str):
+            op = {"operation": op}
+        elif not isinstance(op, dict):
+            raise TypeError(
+                f"each morphological operation must be a str or dict; got "
+                f"{type(op).__name__}"
+            )
+        name = op.get("operation")
+        if name in _CORNER_BRIDGE_OPS:
+            # Connectivity is fixed by the op name; iterations don't apply.
+            normalized.append(
+                {
+                    "operation": "remove_corner_bridges",
+                    "connectivity": _CORNER_BRIDGE_OPS[name],
+                    "iterations": 1,
+                }
+            )
+            continue
+        if name not in _STANDARD_MORPHOLOGY_OPS:
+            raise ValueError(
+                f"unknown morphological operation {name!r}; valid: "
+                f"{list(_STANDARD_MORPHOLOGY_OPS) + list(_CORNER_BRIDGE_OPS)}"
+            )
+        iterations = int(op.get("iterations", 1))
+        if iterations < 1:
+            raise ValueError("iterations must be at least 1")
+        connectivity = int(op.get("connectivity", 6))
+        _binary_structure(connectivity)  # validate connectivity early
+        normalized.append(
+            {
+                "operation": name,
+                "iterations": iterations,
+                "connectivity": connectivity,
+            }
+        )
+    return normalized
+
+
+def apply_morphological_operations(data, operations):
+    """Apply a sequence of normalized morphological operations to a boolean
+    mask, in order, returning the resulting boolean mask."""
+    from scipy.ndimage import (
+        binary_closing,
+        binary_dilation,
+        binary_erosion,
+        binary_opening,
+    )
+
+    funcs = {
+        "erosion": binary_erosion,
+        "dilation": binary_dilation,
+        "opening": binary_opening,
+        "closing": binary_closing,
+    }
+    for op in operations:
+        name = op["operation"]
+        if name == "remove_corner_bridges":
+            data = remove_unbridged_adjacencies(
+                data, connectivity=op["connectivity"]
+            )
+        else:
+            data = funcs[name](
+                data,
+                structure=_binary_structure(op["connectivity"]),
+                iterations=op["iterations"],
+            )
+    return data
+
+
+def _erosion_to_operations(erosion):
+    """Map the legacy ``erosion`` argument to a morphological-operations spec.
+
+    ``True``/``"full"`` -> a single 6-connectivity erosion; ``6``/``18`` ->
+    the corresponding corner-bridge removal; ``False``/``None`` -> no ops.
+    """
+    if erosion is True or erosion == "full":
+        return ["erosion"]
+    if erosion is False or erosion is None:
+        return []
+    if erosion in (6, 18, "6", "18"):
+        return [str(erosion)]
+    raise ValueError(
+        f"erosion must be True, False, None, 'full', 6, 18, '6', or '18', "
+        f"got {erosion!r}"
+    )
+
+
 class Skeletonize(ComputeConfigMixin):
     def __init__(
         self,
@@ -154,6 +288,7 @@ class Skeletonize(ComputeConfigMixin):
         output_path,
         csv_path=None,
         erosion=True,
+        morphological_operations=None,
         min_branch_length_nm=100,
         tolerance_nm=50,
         num_workers=10,
@@ -186,11 +321,32 @@ class Skeletonize(ComputeConfigMixin):
                      path to skip the auto-measure step. A path that does
                      not exist raises ``FileNotFoundError`` rather than
                      silently auto-generating to that exact location.
-            erosion: Controls pre-skeletonization erosion.
-                     True or "full": standard binary erosion with 6-connectivity cross SE.
+            erosion: Legacy shorthand for pre-skeletonization morphology
+                     (used only when ``morphological_operations`` is None).
+                     True or "full": one 6-connectivity binary erosion.
                      6: targeted removal of edge/vertex-only bridges (keep face-connected).
                      18: targeted removal of vertex-only bridges (keep face+edge-connected).
-                     False or None: no erosion.
+                     False or None: no operation.
+            morphological_operations: Sequence of morphological operations
+                     applied (in order) to each object's binary mask before
+                     skeletonization. Supersedes ``erosion`` when provided.
+                     Each item is a string or a dict:
+                       - ``"erosion"`` / ``"dilation"`` / ``"opening"`` /
+                         ``"closing"`` -- standard binary morphology;
+                       - ``"6"`` / ``"18"`` (a.k.a.
+                         ``"remove_corner_bridges_6"`` /
+                         ``"remove_corner_bridges_18"``) -- remove diagonal-only
+                         connections that spawn spurious branches;
+                       - ``{"operation": <name>, "iterations": <int>,
+                         "connectivity": 6|18|26}`` for control over the
+                         structuring element and repeat count.
+                     E.g. ``["closing", "6"]`` fills small holes then strips
+                     corner bridges; ``[{"operation": "opening",
+                     "iterations": 2}]`` removes thin protrusions. Radii are
+                     measured on the union of the original and processed masks,
+                     so shrinking ops (erosion/opening) keep true-object radii
+                     while growing ops (dilation/closing) reflect the
+                     grown/filled structure.
             min_branch_length_nm: Minimum branch length for pruning (in nm)
             tolerance_nm: Tolerance for simplification (in nm)
             num_workers: Number of parallel workers
@@ -257,20 +413,15 @@ class Skeletonize(ComputeConfigMixin):
                 f"existing CSV (the kind Measure produces)."
             )
         self.csv_path = csv_path
-        # Normalize erosion parameter
-        if erosion is True:
-            erosion = "full"
-        elif erosion is False or erosion is None:
-            erosion = None
-        elif erosion in (6, 18):
-            erosion = str(erosion)
-        elif erosion in ("full", "6", "18"):
-            pass
+        # Resolve the pre-skeletonization morphological operations. The newer
+        # ``morphological_operations`` (a sequence of ops) supersedes the
+        # legacy ``erosion`` shorthand when provided; otherwise ``erosion`` is
+        # mapped into the equivalent op list.
+        if morphological_operations is None:
+            ops_spec = _erosion_to_operations(erosion)
         else:
-            raise ValueError(
-                f"erosion must be True, False, None, 'full', 6, 18, '6', or '18', got {erosion!r}"
-            )
-        self.erosion = erosion
+            ops_spec = morphological_operations
+        self.morphological_operations = normalize_morphological_operations(ops_spec)
         self.min_branch_length_nm = min_branch_length_nm
         self.tolerance_nm = tolerance_nm
         self.num_workers = num_workers
@@ -362,7 +513,7 @@ class Skeletonize(ComputeConfigMixin):
         segmentation_idi: ImageDataInterface,
         bbox_df: pd.DataFrame,
         output_path: str,
-        erosion: str,
+        morphological_operations: list,
         min_branch_length_nm: float,
         tolerance_nm: float,
         sharded: bool = False,
@@ -453,29 +604,34 @@ class Skeletonize(ComputeConfigMixin):
             else:
                 isotropic_voxel_size = np.array(original_vs)
 
-            # Compute EDT on pre-erosion mask for approximate radii
-            distance_transform = edt_module.edt(data, anisotropy=tuple(isotropic_voxel_size))
-
-            # Apply erosion if requested
-            if erosion == "full":
-                # Define a 3D cross-shaped structuring element (6-connectivity)
-                cross_3d = np.array(
-                    [
-                        [[0, 0, 0], [0, 1, 0], [0, 0, 0]],
-                        [[0, 1, 0], [1, 1, 1], [0, 1, 0]],
-                        [[0, 0, 0], [0, 1, 0], [0, 0, 0]],
-                    ],
-                    dtype=bool,
+            # Apply the requested morphological operations (in order) to the
+            # mask that gets skeletonized.
+            original_mask = data
+            if morphological_operations:
+                data = apply_morphological_operations(
+                    data, morphological_operations
                 )
-                data = binary_erosion(data, cross_3d)
-            elif erosion == "6":
-                data = remove_unbridged_adjacencies(data, connectivity=6)
-            elif erosion == "18":
-                data = remove_unbridged_adjacencies(data, connectivity=18)
 
-            if erosion is not None and not np.any(data):
+            # Compute EDT for radii on the union of the original and processed
+            # masks. For shrinking ops (erosion/opening) the processed mask is
+            # a subset, so the union is the original -- radii reflect the true
+            # object thickness (unchanged from the pre-erosion behavior). For
+            # growing ops (dilation/closing) the union is the processed mask,
+            # so radii reflect the grown/hole-filled structure that was
+            # actually skeletonized.
+            edt_mask = (
+                np.logical_or(original_mask, data)
+                if morphological_operations
+                else data
+            )
+            distance_transform = edt_module.edt(
+                edt_mask, anisotropy=tuple(isotropic_voxel_size)
+            )
+
+            if morphological_operations and not np.any(data):
                 logger.warning(
-                    f"Erosion removed all voxels for ID {id_value}, emitting empty skeleton"
+                    f"Morphological operations removed all voxels for ID "
+                    f"{id_value}, emitting empty skeleton"
                 )
                 emit_empty()
                 return result
@@ -969,7 +1125,7 @@ class Skeletonize(ComputeConfigMixin):
             self.segmentation_idi,
             self.bbox_df,
             self.output_path,
-            self.erosion,
+            self.morphological_operations,
             self.min_branch_length_nm,
             self.tolerance_nm,
             sharded=self.sharded,

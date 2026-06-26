@@ -296,6 +296,82 @@ def test_skeletonize_writes_per_vertex_radius(tmp_zarr, tmp_skeletonize_csv):
     assert saw_non_empty
 
 
+def test_normalize_morphological_operations():
+    from cellmap_analyze.process.skeletonize import (
+        normalize_morphological_operations,
+    )
+
+    assert normalize_morphological_operations(None) == []
+    # single string is wrapped; defaults applied
+    assert normalize_morphological_operations("closing") == [
+        {"operation": "closing", "iterations": 1, "connectivity": 6}
+    ]
+    # corner-bridge shorthands map to remove_corner_bridges with fixed conn
+    assert normalize_morphological_operations(["6", "18"]) == [
+        {"operation": "remove_corner_bridges", "connectivity": 6, "iterations": 1},
+        {"operation": "remove_corner_bridges", "connectivity": 18, "iterations": 1},
+    ]
+    # dict form passes through iterations/connectivity
+    assert normalize_morphological_operations(
+        [{"operation": "opening", "iterations": 2, "connectivity": 18}]
+    ) == [{"operation": "opening", "iterations": 2, "connectivity": 18}]
+
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError):
+        normalize_morphological_operations(["not_an_op"])
+    with _pytest.raises(ValueError):
+        normalize_morphological_operations([{"operation": "erosion", "connectivity": 7}])
+
+
+def test_apply_morphological_operations_closing_fills_hole():
+    from cellmap_analyze.process.skeletonize import (
+        apply_morphological_operations,
+        normalize_morphological_operations,
+    )
+
+    # Solid cube with a single interior background voxel (a hole).
+    data = np.ones((5, 5, 5), dtype=bool)
+    data[2, 2, 2] = False
+    assert not data[2, 2, 2]
+
+    closed = apply_morphological_operations(
+        data, normalize_morphological_operations(["closing"])
+    )
+    assert closed[2, 2, 2]  # hole filled
+
+    # Opening removes a small isolated object while keeping the bulk.
+    data2 = np.zeros((9, 9, 9), dtype=bool)
+    data2[2:7, 2:7, 2:7] = True  # solid bulk
+    data2[0, 0, 0] = True  # lone voxel, not connected to the bulk
+    opened = apply_morphological_operations(
+        data2, normalize_morphological_operations(["opening"])
+    )
+    assert not opened[0, 0, 0]  # isolated voxel removed
+    assert opened[4, 4, 4]  # bulk core survives
+
+
+def test_skeletonize_closing_morphological_operation(tmp_zarr, tmp_skeletonize_csv):
+    """A non-erosion op (closing) runs end-to-end and supersedes erosion."""
+    output_path = tmp_zarr + "/test_skeletonize_closing"
+    sk = Skeletonize(
+        segmentation_path=f"{tmp_zarr}/segmentation_for_skeleton/s0",
+        output_path=output_path,
+        csv_path=tmp_skeletonize_csv,
+        morphological_operations=["closing"],
+        min_branch_length_nm=0,
+        tolerance_nm=0,
+        num_workers=1,
+        sharded=False,
+    )
+    assert sk.morphological_operations == [
+        {"operation": "closing", "iterations": 1, "connectivity": 6}
+    ]
+    sk.skeletonize()
+    for id_val in [1, 2, 3, 4, 5, 6, 7, 8]:
+        assert os.path.exists(f"{output_path}/full/{id_val}")
+
+
 def test_skeletonize_prune_only_keeps_nodes_and_radii(tmp_zarr, tmp_skeletonize_csv):
     """prune_only writes a `pruned/` output (not `simplified/`) that keeps the
     full skeleton's vertices except pruned branches, and carries faithful
@@ -970,7 +1046,9 @@ def test_skeletonize_backward_compat_erosion_true(tmp_zarr, tmp_skeletonize_csv)
         sharded=False,
     )
 
-    assert skeletonizer.erosion == "full"
+    assert skeletonizer.morphological_operations == [
+        {"operation": "erosion", "iterations": 1, "connectivity": 6}
+    ]
     skeletonizer.skeletonize()
 
     for id_val in [1, 2, 3, 4, 5, 6, 7, 8]:
@@ -1191,7 +1269,7 @@ def test_skeletonize_backward_compat_erosion_false(tmp_zarr, tmp_skeletonize_csv
         sharded=False,
     )
 
-    assert skeletonizer.erosion is None
+    assert skeletonizer.morphological_operations == []
     skeletonizer.skeletonize()
 
     for id_val in [1, 2, 3, 4, 5, 6, 7, 8]:
