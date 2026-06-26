@@ -238,14 +238,17 @@ def guesstimate_npartitions(elements, num_workers, scaling=4):
     return actual_partitions
 
 
-def set_local_directory(cluster_type):
+def set_local_directory(cluster_type, candidate_dirs=None):
     """Sets local directory used for dask outputs
 
     Args:
         cluster_type ('str'): The type of cluster used
+        candidate_dirs (list[str], optional): Ordered list of directories to
+            try. Defaults to ``["/scratch/<user>", "/tmp/<user>"]``. Exposed
+            mainly for testing.
 
     Raises:
-        RuntimeError: Error if cannot create directory
+        RuntimeError: Error if cannot create a writable directory
     """
 
     # From https://github.com/janelia-flyem/flyemflows/blob/master/flyemflows/util/dask_util.py
@@ -256,10 +259,20 @@ def set_local_directory(cluster_type):
         return
 
     user = getpass.getuser()
+    if candidate_dirs is None:
+        candidate_dirs = [f"/scratch/{user}", f"/tmp/{user}"]
     local_dir = None
-    for d in [f"/scratch/{user}", f"/tmp/{user}"]:
+    for d in candidate_dirs:
         try:
             os.makedirs(d, exist_ok=True)
+            # ``makedirs(exist_ok=True)`` succeeds even when ``d`` already
+            # exists but isn't writable by us (e.g. /scratch/<user> left
+            # behind by another job/root). That silent pass is exactly what
+            # lets a dask worker later blow up trying to create
+            # ``<d>/dask-scratch-space``. Probe actual writability by
+            # creating and removing a temp subdirectory inside ``d``.
+            probe = tempfile.mkdtemp(dir=d)
+            os.rmdir(probe)
         except OSError:
             continue
         else:
@@ -275,7 +288,8 @@ def set_local_directory(cluster_type):
 
     if local_dir is None:
         raise RuntimeError(
-            "Could not create a local-directory in any of the standard places."
+            "Could not create a writable local-directory in any of the "
+            "standard places (tried /scratch/<user> and /tmp/<user>)."
         )
 
 
