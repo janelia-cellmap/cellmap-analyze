@@ -208,9 +208,37 @@ def _parse_skeleton_bytes(buf, n_radius_components=0):
     return vp.reshape((n_vertices, 3)), ed.reshape((n_edges, 2)), radii
 
 
+def test_skeletonize_radius_off_by_default(tmp_zarr, tmp_skeletonize_csv):
+    """With write_vertex_radius unset, full skeletons declare no vertex
+    attributes and their bytes carry no radii."""
+    output_path = tmp_zarr + "/test_skeletonize_radius_off"
+
+    skeletonizer = Skeletonize(
+        segmentation_path=f"{tmp_zarr}/segmentation_for_skeleton/s0",
+        output_path=output_path,
+        csv_path=tmp_skeletonize_csv,
+        erosion=True,
+        min_branch_length_nm=0,
+        tolerance_nm=0,
+        num_workers=1,
+        sharded=False,
+    )
+    skeletonizer.skeletonize()
+
+    with open(f"{output_path}/full/info") as f:
+        assert "vertex_attributes" not in json.load(f)
+
+    for id_val in [1, 2, 3, 4, 5, 6, 7, 8]:
+        with open(f"{output_path}/full/{id_val}", "rb") as f:
+            buf = f.read()
+        # Parsing with zero radius components must consume the whole buffer.
+        _parse_skeleton_bytes(buf, n_radius_components=0)
+
+
 def test_skeletonize_writes_per_vertex_radius(tmp_zarr, tmp_skeletonize_csv):
-    """The full skeletons carry a per-vertex radius attribute (declared in the
-    info and aligned with the vertices); the simplified ones do not."""
+    """With write_vertex_radius=True, the full skeletons carry a per-vertex
+    radius attribute (declared in the info and aligned with the vertices); the
+    simplified ones do not."""
     output_path = tmp_zarr + "/test_skeletonize_radius"
 
     skeletonizer = Skeletonize(
@@ -222,6 +250,7 @@ def test_skeletonize_writes_per_vertex_radius(tmp_zarr, tmp_skeletonize_csv):
         tolerance_nm=0,
         num_workers=1,
         sharded=False,
+        write_vertex_radius=True,
     )
     skeletonizer.skeletonize()
 
