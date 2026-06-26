@@ -4,7 +4,10 @@ import numpy as np
 import os
 import logging
 import time
-from neuroglancer.skeleton import Skeleton as NeuroglancerSkeleton
+from neuroglancer.skeleton import (
+    Skeleton as NeuroglancerSkeleton,
+    VertexAttributeInfo,
+)
 import fastremap
 import networkx as nx
 from pybind11_rdp import rdp
@@ -879,12 +882,20 @@ class CustomSkeleton:
         # use hypot for Pythagoras to improve accuracy
         return np.hypot(h, c)
 
-    def encode_neuroglancer_bytes(self) -> bytes:
+    def encode_neuroglancer_bytes(self, include_radii=True) -> bytes:
         """Return the bytes that would be written to disk by
         write_neuroglancer_skeleton, without touching the filesystem.
 
         Empty skeletons are encoded as 8 bytes (two zero uint32s), matching
         the on-disk format used by neuroglancer for an empty chunk.
+
+        When ``include_radii`` is set and this skeleton carries a per-vertex
+        ``radii`` array aligned with its vertices, the radii are written as a
+        single-component ``radius`` vertex attribute (float32). The skeleton
+        source's ``info`` must declare a matching ``vertex_attributes`` entry,
+        and every skeleton in that source must carry it -- so callers writing
+        to a source that declares the attribute must pass radii (or an empty
+        skeleton, which has no vertices and therefore no attribute values).
         """
         import struct
 
@@ -900,10 +911,24 @@ class CustomSkeleton:
         else:
             edges = np.asarray(self.edges, dtype=np.uint32)
 
+        vertex_attributes = None
+        source = Source()
+        if include_radii and self.radii is not None and len(self.radii) == len(
+            self.vertices
+        ):
+            radii = np.asarray(self.radii, dtype="<f4")
+            vertex_attributes = {"radius": radii}
+            source = Source()
+            source.vertex_attributes = {
+                "radius": VertexAttributeInfo(
+                    data_type=np.dtype("float32"), num_components=1
+                )
+            }
+
         skel = NeuroglancerSkeleton(
-            self.vertices, edges, vertex_attributes=None
+            self.vertices, edges, vertex_attributes=vertex_attributes
         )
-        return skel.encode(Source())
+        return skel.encode(source)
 
     def write_neuroglancer_skeleton(self, path):
         os.makedirs(os.path.dirname(path), exist_ok=True)

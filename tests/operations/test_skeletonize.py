@@ -189,6 +189,72 @@ def test_skeletonize_single_worker(tmp_zarr, tmp_skeletonize_csv):
         assert os.path.exists(simplified_path), f"Simplified skeleton missing for ID {id_val}"
 
 
+def _parse_skeleton_bytes(buf, n_radius_components=0):
+    """Decode a neuroglancer skeleton chunk into (vertices, edges, radii)."""
+    import struct
+
+    off = 0
+    n_vertices, n_edges = struct.unpack_from("<II", buf, off)
+    off += 8
+    vp = np.frombuffer(buf, "<f4", n_vertices * 3, off)
+    off += vp.nbytes
+    ed = np.frombuffer(buf, "<u4", n_edges * 2, off)
+    off += ed.nbytes
+    radii = None
+    if n_radius_components:
+        radii = np.frombuffer(buf, "<f4", n_vertices * n_radius_components, off)
+        off += radii.nbytes
+    assert off == len(buf), f"trailing bytes: parsed {off} of {len(buf)}"
+    return vp.reshape((n_vertices, 3)), ed.reshape((n_edges, 2)), radii
+
+
+def test_skeletonize_writes_per_vertex_radius(tmp_zarr, tmp_skeletonize_csv):
+    """The full skeletons carry a per-vertex radius attribute (declared in the
+    info and aligned with the vertices); the simplified ones do not."""
+    output_path = tmp_zarr + "/test_skeletonize_radius"
+
+    skeletonizer = Skeletonize(
+        segmentation_path=f"{tmp_zarr}/segmentation_for_skeleton/s0",
+        output_path=output_path,
+        csv_path=tmp_skeletonize_csv,
+        erosion=True,
+        min_branch_length_nm=0,
+        tolerance_nm=0,
+        num_workers=1,
+        sharded=False,
+    )
+    skeletonizer.skeletonize()
+
+    # full info declares the radius vertex attribute; simplified does not.
+    with open(f"{output_path}/full/info") as f:
+        full_info = json.load(f)
+    assert full_info["vertex_attributes"] == [
+        {"id": "radius", "data_type": "float32", "num_components": 1}
+    ]
+    with open(f"{output_path}/simplified/info") as f:
+        assert "vertex_attributes" not in json.load(f)
+
+    # At least one non-empty full skeleton, and every non-empty one has a
+    # positive radius per vertex; the simplified twin parses with no radii.
+    saw_non_empty = False
+    for id_val in [1, 2, 3, 4, 5, 6, 7, 8]:
+        with open(f"{output_path}/full/{id_val}", "rb") as f:
+            full_buf = f.read()
+        verts, _, radii = _parse_skeleton_bytes(full_buf, n_radius_components=1)
+        if len(verts) == 0:
+            continue
+        saw_non_empty = True
+        assert radii is not None and len(radii) == len(verts)
+        assert np.all(radii > 0)
+
+        with open(f"{output_path}/simplified/{id_val}", "rb") as f:
+            simp_buf = f.read()
+        # Parsing with zero radius components must consume the whole buffer.
+        _parse_skeleton_bytes(simp_buf, n_radius_components=0)
+
+    assert saw_non_empty
+
+
 def test_skeletonize_produces_reasonable_skeletons(
     tmp_zarr, tmp_skeletonize_csv, voxel_size
 ):
