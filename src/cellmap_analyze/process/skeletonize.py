@@ -566,10 +566,13 @@ class Skeletonize(ComputeConfigMixin):
 
             # Attach the per-vertex radii (sampled from the EDT in the same
             # np.argwhere voxel order that produced the skeleton vertices)
-            # before pruning, so prune() carries each surviving node's exact
-            # original radius through to the prune-only output.
-            if write_vertex_radius:
-                skeleton.radii = list(radii)
+            # before pruning. prune() carries each surviving node's exact
+            # original radius through (graph_to_skeleton rebuilds vertices and
+            # radii from the same node set), so the pruned skeleton's radii are
+            # available both for the prune-only output and for the radius
+            # stats below. This is independent of write_vertex_radius, which
+            # only controls whether radii are written into the skeleton bytes.
+            skeleton.radii = list(radii)
 
             # Prune
             if min_branch_length_nm > 0:
@@ -599,10 +602,14 @@ class Skeletonize(ComputeConfigMixin):
                         longest_shortest_path, component_diameter
                     )
 
+            # Radius stats describe the pruned skeleton, consistent with
+            # num_branches / longest_shortest_path above. Fall back to the
+            # full sampled radii if pruning somehow dropped them.
+            pruned_radii = pruned.radii if pruned.radii else radii
             result["longest_shortest_path_nm"] = longest_shortest_path
             result["num_branches"] = num_branches
-            result["radius_mean_nm"] = float(np.mean(radii))
-            result["radius_std_nm"] = float(np.std(radii))
+            result["radius_mean_nm"] = float(np.mean(pruned_radii))
+            result["radius_std_nm"] = float(np.std(pruned_radii))
 
             # Build the second output: prune-only keeps every surviving
             # vertex (and its exact radius); otherwise simplify the pruned
