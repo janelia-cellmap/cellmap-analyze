@@ -44,6 +44,20 @@ def test_contact_site_whole_24nm(
     assert np.array_equal(cs, contact_sites_distance_24nm)
 
 
+def test_contact_sites_resolve_group_paths_to_s0(tmp_zarr):
+    """Bare multiscale group paths (no scale level) auto-resolve to s0."""
+    cs = ContactSites(
+        f"{tmp_zarr}/segmentation_1",
+        f"{tmp_zarr}/segmentation_2",
+        tmp_zarr + "/test_contact_sites_autoscale",
+        contact_distance_nm=8,
+        minimum_volume_nm_3=0,
+        num_workers=1,
+    )
+    assert cs.organelle_1_idi.path.endswith("/segmentation_1/s0")
+    assert cs.organelle_2_idi.path.endswith("/segmentation_2/s0")
+
+
 @pytest.mark.parametrize("contact_distance_nm", [8, 16, 24])
 def test_contact_site_blocks(tmp_zarr, voxel_size, contact_distance_nm):
     cs = ContactSites(

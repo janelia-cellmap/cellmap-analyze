@@ -189,6 +189,18 @@ def test_skeletonize_single_worker(tmp_zarr, tmp_skeletonize_csv):
         assert os.path.exists(simplified_path), f"Simplified skeleton missing for ID {id_val}"
 
 
+def test_skeletonize_resolves_group_path_to_s0(tmp_zarr, tmp_skeletonize_csv):
+    """A bare multiscale group path (no scale level) auto-resolves to s0."""
+    sk = Skeletonize(
+        segmentation_path=f"{tmp_zarr}/segmentation_for_skeleton",
+        output_path=tmp_zarr + "/test_skeletonize_autoscale",
+        csv_path=tmp_skeletonize_csv,
+        num_workers=1,
+        sharded=False,
+    )
+    assert sk.segmentation_idi.path.endswith("/segmentation_for_skeleton/s0")
+
+
 def test_skeletonize_produces_reasonable_skeletons(
     tmp_zarr, tmp_skeletonize_csv, voxel_size
 ):
