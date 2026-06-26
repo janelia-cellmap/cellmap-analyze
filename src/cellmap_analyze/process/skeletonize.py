@@ -147,16 +147,18 @@ def remove_unbridged_adjacencies(data, connectivity=6):
     return data & ~to_remove
 
 
-# Map the codebase's connectivity convention (6/18/26 neighbours) to the
-# scipy.ndimage structuring-element rank.
-_CONNECTIVITY_TO_RANK = {6: 1, 18: 2, 26: 3}
-
 # Standard binary morphology applied with a structuring element + iterations.
 _STANDARD_MORPHOLOGY_OPS = ("erosion", "dilation", "opening", "closing")
 
+# Valid structuring-element connectivity ranks, matching the codebase's
+# convention everywhere else (1=faces/6-neighbour, 2=faces+edges/18,
+# 3=faces+edges+corners/26).
+_STRUCTURE_RANKS = (1, 2, 3)
+
 # Targeted removal of diagonal-only ("corner-touching") connections, which
-# otherwise produce spurious skeleton branches. Connectivity is implied by the
-# op name.
+# otherwise produce spurious skeleton branches. The number names the
+# connectivity that is *enforced* (what counts as connected), which is the
+# 6/18 convention remove_unbridged_adjacencies accepts.
 _CORNER_BRIDGE_OPS = {
     "remove_corner_bridges_6": 6,
     "remove_corner_bridges_18": 18,
@@ -168,12 +170,13 @@ _CORNER_BRIDGE_OPS = {
 def _binary_structure(connectivity):
     from scipy.ndimage import generate_binary_structure
 
-    if connectivity not in _CONNECTIVITY_TO_RANK:
+    if connectivity not in _STRUCTURE_RANKS:
         raise ValueError(
-            f"connectivity must be one of {sorted(_CONNECTIVITY_TO_RANK)}; "
+            f"connectivity must be one of {list(_STRUCTURE_RANKS)} "
+            f"(1=faces, 2=faces+edges, 3=faces+edges+corners); "
             f"got {connectivity!r}"
         )
-    return generate_binary_structure(3, _CONNECTIVITY_TO_RANK[connectivity])
+    return generate_binary_structure(3, connectivity)
 
 
 def normalize_morphological_operations(operations):
@@ -184,8 +187,10 @@ def normalize_morphological_operations(operations):
     - a string: ``"erosion"``, ``"dilation"``, ``"opening"``, ``"closing"``,
       or a corner-bridge removal (``"remove_corner_bridges_6"``/``"6"``,
       ``"remove_corner_bridges_18"``/``"18"``); or
-    - a dict ``{"operation": ..., "iterations": int, "connectivity": 6|18|26}``
-      (``iterations``/``connectivity`` optional; default 1 and 6).
+    - a dict ``{"operation": ..., "iterations": int, "connectivity": 1|2|3}``
+      (``iterations``/``connectivity`` optional; default 1 and 1). The
+      ``connectivity`` rank matches the rest of the codebase: 1=faces (6),
+      2=faces+edges (18), 3=faces+edges+corners (26).
     """
     if operations is None:
         return []
@@ -220,7 +225,7 @@ def normalize_morphological_operations(operations):
         iterations = int(op.get("iterations", 1))
         if iterations < 1:
             raise ValueError("iterations must be at least 1")
-        connectivity = int(op.get("connectivity", 6))
+        connectivity = int(op.get("connectivity", 1))
         _binary_structure(connectivity)  # validate connectivity early
         normalized.append(
             {
@@ -338,8 +343,10 @@ class Skeletonize(ComputeConfigMixin):
                          ``"remove_corner_bridges_18"``) -- remove diagonal-only
                          connections that spawn spurious branches;
                        - ``{"operation": <name>, "iterations": <int>,
-                         "connectivity": 6|18|26}`` for control over the
-                         structuring element and repeat count.
+                         "connectivity": 1|2|3}`` for control over the
+                         structuring element (rank: 1=faces, 2=+edges,
+                         3=+corners; default 1, matching the legacy erosion)
+                         and repeat count.
                      E.g. ``["closing", "6"]`` fills small holes then strips
                      corner bridges; ``[{"operation": "opening",
                      "iterations": 2}]`` removes thin protrusions. Radii are

@@ -304,7 +304,7 @@ def test_normalize_morphological_operations():
     assert normalize_morphological_operations(None) == []
     # single string is wrapped; defaults applied
     assert normalize_morphological_operations("closing") == [
-        {"operation": "closing", "iterations": 1, "connectivity": 6}
+        {"operation": "closing", "iterations": 1, "connectivity": 1}
     ]
     # corner-bridge shorthands map to remove_corner_bridges with fixed conn
     assert normalize_morphological_operations(["6", "18"]) == [
@@ -313,15 +313,16 @@ def test_normalize_morphological_operations():
     ]
     # dict form passes through iterations/connectivity
     assert normalize_morphological_operations(
-        [{"operation": "opening", "iterations": 2, "connectivity": 18}]
-    ) == [{"operation": "opening", "iterations": 2, "connectivity": 18}]
+        [{"operation": "opening", "iterations": 2, "connectivity": 2}]
+    ) == [{"operation": "opening", "iterations": 2, "connectivity": 2}]
 
     import pytest as _pytest
 
     with _pytest.raises(ValueError):
         normalize_morphological_operations(["not_an_op"])
     with _pytest.raises(ValueError):
-        normalize_morphological_operations([{"operation": "erosion", "connectivity": 7}])
+        # connectivity is a rank 1/2/3; 6 is out of range
+        normalize_morphological_operations([{"operation": "erosion", "connectivity": 6}])
 
 
 def test_apply_morphological_operations_closing_fills_hole():
@@ -365,7 +366,7 @@ def test_skeletonize_closing_morphological_operation(tmp_zarr, tmp_skeletonize_c
         sharded=False,
     )
     assert sk.morphological_operations == [
-        {"operation": "closing", "iterations": 1, "connectivity": 6}
+        {"operation": "closing", "iterations": 1, "connectivity": 1}
     ]
     sk.skeletonize()
     for id_val in [1, 2, 3, 4, 5, 6, 7, 8]:
@@ -1047,7 +1048,7 @@ def test_skeletonize_backward_compat_erosion_true(tmp_zarr, tmp_skeletonize_csv)
     )
 
     assert skeletonizer.morphological_operations == [
-        {"operation": "erosion", "iterations": 1, "connectivity": 6}
+        {"operation": "erosion", "iterations": 1, "connectivity": 1}
     ]
     skeletonizer.skeletonize()
 
