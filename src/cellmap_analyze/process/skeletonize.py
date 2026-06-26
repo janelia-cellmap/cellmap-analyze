@@ -168,6 +168,7 @@ class Skeletonize(ComputeConfigMixin):
         memory_safety_multiplier=2.0,
         memory_fraction=0.60,
         skeleton_properties=True,
+        write_vertex_radius=False,
     ):
         """
         Skeletonize a segmentation, parallelized over IDs.
@@ -222,6 +223,12 @@ class Skeletonize(ComputeConfigMixin):
                      where you want maximum throughput.
             memory_fraction: Fraction of per-slot memory considered usable
                      when planning waves (rest is dask/OS/library overhead).
+            write_vertex_radius: When True, write the EDT-sampled per-vertex
+                     radius as a float32 ``radius`` vertex attribute on the
+                     full skeletons (declared in the full ``info`` so
+                     neuroglancer can color by it). Default False keeps the
+                     full skeletons geometry-only. The simplified skeletons
+                     never carry it regardless.
         """
         super().__init__(num_workers)
         self.segmentation_path = segmentation_path
@@ -266,6 +273,7 @@ class Skeletonize(ComputeConfigMixin):
         self.skeleton_properties = self._normalize_skeleton_properties(
             skeleton_properties
         )
+        self.write_vertex_radius = bool(write_vertex_radius)
         # Per-instance suffix so concurrent runs sharing output_path don't
         # collide on the wave merge dirs.
         self._run_id = uuid.uuid4().hex[:8]
@@ -336,6 +344,7 @@ class Skeletonize(ComputeConfigMixin):
         min_branch_length_nm: float,
         tolerance_nm: float,
         sharded: bool = False,
+        write_vertex_radius: bool = False,
     ):
         """
         Process a single ID: extract, skeletonize, prune, simplify, and emit.
@@ -351,7 +360,13 @@ class Skeletonize(ComputeConfigMixin):
         result: dict = dict(Skeletonize._empty_metrics())
 
         def emit(subdir: str, skel_obj: CustomSkeleton):
-            encoded = skel_obj.encode_neuroglancer_bytes()
+            # Per-vertex radii are written only on the "full" skeleton, and
+            # only when requested. The "simplified" geometry stays
+            # attribute-free (its decimated vertices no longer align with the
+            # sampled radii, and its info declares no vertex attributes).
+            encoded = skel_obj.encode_neuroglancer_bytes(
+                include_radii=(subdir == "full" and write_vertex_radius)
+            )
             if sharded:
                 result[f"{subdir}_bytes"] = encoded
             else:
@@ -468,6 +483,11 @@ class Skeletonize(ComputeConfigMixin):
                         vertices=[seed_vertex],
                         edges=np.zeros((0, 2), dtype=np.uint32),
                     )
+                    # Keep the full skeleton's radius attribute populated even
+                    # for the single seed vertex (set directly to dodge
+                    # add_vertex's falsy-radius skip).
+                    if write_vertex_radius:
+                        seed_skel.radii = [peak_radius_nm]
                     emit("full", seed_skel)
                     emit("simplified", seed_skel)
                     result["radius_mean_nm"] = peak_radius_nm
@@ -571,6 +591,13 @@ class Skeletonize(ComputeConfigMixin):
             else:
                 simplified.edges = np.array(simplified.edges, dtype=np.uint32)
 
+            # Attach the per-vertex radii (sampled from the EDT in the same
+            # np.argwhere voxel order that produced the skeleton vertices) to
+            # the full skeleton. Set here, after prune/simplify, so those
+            # derived skeletons stay radius-free.
+            if write_vertex_radius:
+                skeleton.radii = list(radii)
+
             emit("full", skeleton)
             emit("simplified", simplified)
             return result
@@ -604,6 +631,19 @@ class Skeletonize(ComputeConfigMixin):
                 ],  # Identity transform since we're using physical coordinates
                 "segment_properties": "segment_properties",
             }
+
+            # The full skeletons carry a per-vertex radius (sampled from the
+            # EDT) when write_vertex_radius is set; declare it so neuroglancer
+            # can read and color by it. The simplified skeletons are
+            # geometry-only.
+            if subdir == "full" and self.write_vertex_radius:
+                info["vertex_attributes"] = [
+                    {
+                        "id": "radius",
+                        "data_type": "float32",
+                        "num_components": 1,
+                    }
+                ]
 
             if self.sharded:
                 from cellmap_analyze.util.sharded_skeleton import make_sharding_spec
@@ -890,6 +930,7 @@ class Skeletonize(ComputeConfigMixin):
             self.min_branch_length_nm,
             self.tolerance_nm,
             sharded=self.sharded,
+            write_vertex_radius=self.write_vertex_radius,
         )
         if result is None:
             result = Skeletonize._empty_metrics()
