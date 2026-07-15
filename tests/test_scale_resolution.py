@@ -15,7 +15,7 @@ def _make_multiscale_group(path, levels):
     """
     g = zarr.open_group(path, mode="w")
     for name, _ in levels:
-        g.create_dataset(name, shape=(10, 10, 10), dtype="uint8")
+        g.create_array(name, shape=(10, 10, 10), dtype="uint8")
     g.attrs.update(
         {
             "multiscales": [
