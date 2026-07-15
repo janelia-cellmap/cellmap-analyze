@@ -13,7 +13,7 @@ from cellmap_analyze.util.voxel_size_utils import (
     read_raw_offset,
     scale_voxel_size_to_integers,
 )
-from cellmap_analyze.util.zarr_io import open_dataset
+from cellmap_analyze.util.zarr_io import open_dataset, resolve_scale_path
 from scipy.ndimage import zoom, map_coordinates
 import time
 import random
@@ -523,6 +523,7 @@ class ImageDataInterface:
         max_retries=10,
         timeout=5,
         interpolation_order=0,
+        target_voxel_size=None,
     ):
         # Don't resolve remote URIs / precomputed URLs as local paths --
         # ``Path("s3://...").resolve()`` collapses the double slash and
@@ -542,6 +543,10 @@ class ImageDataInterface:
         # tensorstore reopen in ``to_ndarray_ts`` doesn't pay the cost
         # of stripping it again on every block.
         self.path = strip_precomputed_prefix(dataset_path)
+        # If the path points at a multiscale group rather than a scale-level
+        # array, resolve it to a concrete level: the finest (s0) by default,
+        # or the level matching ``target_voxel_size`` when one is given.
+        self.path = resolve_scale_path(self.path, target_voxel_size, logger)
         filename, dataset = split_dataset_path(self.path)
         self.ds = open_dataset(filename, dataset, mode=mode)
         # Content-based detection (probes for info / zarr.json / .zarray /

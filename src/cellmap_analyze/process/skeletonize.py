@@ -10,7 +10,7 @@ from cellmap_analyze.util.skeleton_util import (
     skimage_to_custom_skeleton_fast,
 )
 from scipy.ndimage import zoom
-from skimage.morphology import skeletonize, binary_erosion
+from skimage.morphology import skeletonize
 from tqdm import tqdm
 import logging
 import os
@@ -147,6 +147,145 @@ def remove_unbridged_adjacencies(data, connectivity=6):
     return data & ~to_remove
 
 
+# Standard binary morphology applied with a structuring element + iterations.
+_STANDARD_MORPHOLOGY_OPS = ("erosion", "dilation", "opening", "closing")
+
+# Valid structuring-element connectivity ranks, matching the codebase's
+# convention everywhere else (1=faces/6-neighbour, 2=faces+edges/18,
+# 3=faces+edges+corners/26).
+_STRUCTURE_RANKS = (1, 2, 3)
+
+# Targeted removal of diagonal-only ("corner-touching") connections, which
+# otherwise produce spurious skeleton branches. The number names the
+# connectivity that is *enforced* (what counts as connected), which is the
+# 6/18 convention remove_unbridged_adjacencies accepts.
+_CORNER_BRIDGE_OPS = {
+    "remove_corner_bridges_6": 6,
+    "remove_corner_bridges_18": 18,
+    "6": 6,
+    "18": 18,
+}
+
+
+def _binary_structure(connectivity):
+    from scipy.ndimage import generate_binary_structure
+
+    if connectivity not in _STRUCTURE_RANKS:
+        raise ValueError(
+            f"connectivity must be one of {list(_STRUCTURE_RANKS)} "
+            f"(1=faces, 2=faces+edges, 3=faces+edges+corners); "
+            f"got {connectivity!r}"
+        )
+    return generate_binary_structure(3, connectivity)
+
+
+def normalize_morphological_operations(operations):
+    """Normalize a morphological-operations spec into a list of
+    ``{operation, iterations, connectivity}`` dicts.
+
+    Accepts a single op or a list, where each op is either:
+    - a string: ``"erosion"``, ``"dilation"``, ``"opening"``, ``"closing"``,
+      or a corner-bridge removal (``"remove_corner_bridges_6"``/``"6"``,
+      ``"remove_corner_bridges_18"``/``"18"``); or
+    - a dict ``{"operation": ..., "iterations": int, "connectivity": 1|2|3}``
+      (``iterations``/``connectivity`` optional; default 1 and 1). The
+      ``connectivity`` rank matches the rest of the codebase: 1=faces (6),
+      2=faces+edges (18), 3=faces+edges+corners (26).
+    """
+    if operations is None:
+        return []
+    if isinstance(operations, (str, dict)):
+        operations = [operations]
+
+    normalized = []
+    for op in operations:
+        if isinstance(op, str):
+            op = {"operation": op}
+        elif not isinstance(op, dict):
+            raise TypeError(
+                f"each morphological operation must be a str or dict; got "
+                f"{type(op).__name__}"
+            )
+        name = op.get("operation")
+        if name in _CORNER_BRIDGE_OPS:
+            # Connectivity is fixed by the op name; iterations don't apply.
+            normalized.append(
+                {
+                    "operation": "remove_corner_bridges",
+                    "connectivity": _CORNER_BRIDGE_OPS[name],
+                    "iterations": 1,
+                }
+            )
+            continue
+        if name not in _STANDARD_MORPHOLOGY_OPS:
+            raise ValueError(
+                f"unknown morphological operation {name!r}; valid: "
+                f"{list(_STANDARD_MORPHOLOGY_OPS) + list(_CORNER_BRIDGE_OPS)}"
+            )
+        iterations = int(op.get("iterations", 1))
+        if iterations < 1:
+            raise ValueError("iterations must be at least 1")
+        connectivity = int(op.get("connectivity", 1))
+        _binary_structure(connectivity)  # validate connectivity early
+        normalized.append(
+            {
+                "operation": name,
+                "iterations": iterations,
+                "connectivity": connectivity,
+            }
+        )
+    return normalized
+
+
+def apply_morphological_operations(data, operations):
+    """Apply a sequence of normalized morphological operations to a boolean
+    mask, in order, returning the resulting boolean mask."""
+    from scipy.ndimage import (
+        binary_closing,
+        binary_dilation,
+        binary_erosion,
+        binary_opening,
+    )
+
+    funcs = {
+        "erosion": binary_erosion,
+        "dilation": binary_dilation,
+        "opening": binary_opening,
+        "closing": binary_closing,
+    }
+    for op in operations:
+        name = op["operation"]
+        if name == "remove_corner_bridges":
+            data = remove_unbridged_adjacencies(
+                data, connectivity=op["connectivity"]
+            )
+        else:
+            data = funcs[name](
+                data,
+                structure=_binary_structure(op["connectivity"]),
+                iterations=op["iterations"],
+            )
+    return data
+
+
+def _erosion_to_operations(erosion):
+    """Map the legacy ``erosion`` argument to a morphological-operations spec.
+
+    ``True``/``"full"`` -> a single 6-connectivity erosion; ``6``/``18`` ->
+    the corresponding corner-bridge removal; ``False``/``None`` -> no ops.
+    """
+    if erosion is True or erosion == "full":
+        return ["erosion"]
+    if erosion is False or erosion is None:
+        return []
+    if erosion in (6, 18, "6", "18"):
+        return [str(erosion)]
+    raise ValueError(
+        f"erosion must be True, False, None, 'full', 6, 18, '6', or '18', "
+        f"got {erosion!r}"
+    )
+
+
 class Skeletonize(ComputeConfigMixin):
     def __init__(
         self,
@@ -154,6 +293,7 @@ class Skeletonize(ComputeConfigMixin):
         output_path,
         csv_path=None,
         erosion=True,
+        morphological_operations=None,
         min_branch_length_nm=100,
         tolerance_nm=50,
         num_workers=10,
@@ -168,6 +308,8 @@ class Skeletonize(ComputeConfigMixin):
         memory_safety_multiplier=2.0,
         memory_fraction=0.60,
         skeleton_properties=True,
+        write_vertex_radius=False,
+        prune_only=False,
     ):
         """
         Skeletonize a segmentation, parallelized over IDs.
@@ -184,11 +326,34 @@ class Skeletonize(ComputeConfigMixin):
                      path to skip the auto-measure step. A path that does
                      not exist raises ``FileNotFoundError`` rather than
                      silently auto-generating to that exact location.
-            erosion: Controls pre-skeletonization erosion.
-                     True or "full": standard binary erosion with 6-connectivity cross SE.
+            erosion: Legacy shorthand for pre-skeletonization morphology
+                     (used only when ``morphological_operations`` is None).
+                     True or "full": one 6-connectivity binary erosion.
                      6: targeted removal of edge/vertex-only bridges (keep face-connected).
                      18: targeted removal of vertex-only bridges (keep face+edge-connected).
-                     False or None: no erosion.
+                     False or None: no operation.
+            morphological_operations: Sequence of morphological operations
+                     applied (in order) to each object's binary mask before
+                     skeletonization. Supersedes ``erosion`` when provided.
+                     Each item is a string or a dict:
+                       - ``"erosion"`` / ``"dilation"`` / ``"opening"`` /
+                         ``"closing"`` -- standard binary morphology;
+                       - ``"6"`` / ``"18"`` (a.k.a.
+                         ``"remove_corner_bridges_6"`` /
+                         ``"remove_corner_bridges_18"``) -- remove diagonal-only
+                         connections that spawn spurious branches;
+                       - ``{"operation": <name>, "iterations": <int>,
+                         "connectivity": 1|2|3}`` for control over the
+                         structuring element (rank: 1=faces, 2=+edges,
+                         3=+corners; default 1, matching the legacy erosion)
+                         and repeat count.
+                     E.g. ``["closing", "6"]`` fills small holes then strips
+                     corner bridges; ``[{"operation": "opening",
+                     "iterations": 2}]`` removes thin protrusions. Radii are
+                     measured on the union of the original and processed masks,
+                     so shrinking ops (erosion/opening) keep true-object radii
+                     while growing ops (dilation/closing) reflect the
+                     grown/filled structure.
             min_branch_length_nm: Minimum branch length for pruning (in nm)
             tolerance_nm: Tolerance for simplification (in nm)
             num_workers: Number of parallel workers
@@ -222,6 +387,24 @@ class Skeletonize(ComputeConfigMixin):
                      where you want maximum throughput.
             memory_fraction: Fraction of per-slot memory considered usable
                      when planning waves (rest is dask/OS/library overhead).
+            write_vertex_radius: When True, write the EDT-sampled per-vertex
+                     radius as a float32 ``radius`` vertex attribute on the
+                     full skeletons (declared in the full ``info`` so
+                     neuroglancer can color by it). Default False keeps the
+                     full skeletons geometry-only. The geometrically-simplified
+                     skeletons never carry it (simplify drops vertices, so the
+                     radii would be lossy); the prune-only output does (see
+                     ``prune_only``).
+            prune_only: When True, the second output is a *prune-only*
+                     skeleton (short terminal branches removed, but every
+                     surviving original vertex kept -- no geometric
+                     simplification), written to a ``pruned/`` directory
+                     instead of ``simplified/``. ``tolerance_nm`` is ignored.
+                     Because no vertices move or merge, each surviving node
+                     keeps its exact original EDT radius, so this output also
+                     carries the per-vertex radius when ``write_vertex_radius``
+                     is set. Default False preserves the prune+simplify
+                     ``simplified/`` output.
         """
         super().__init__(num_workers)
         self.segmentation_path = segmentation_path
@@ -237,20 +420,15 @@ class Skeletonize(ComputeConfigMixin):
                 f"existing CSV (the kind Measure produces)."
             )
         self.csv_path = csv_path
-        # Normalize erosion parameter
-        if erosion is True:
-            erosion = "full"
-        elif erosion is False or erosion is None:
-            erosion = None
-        elif erosion in (6, 18):
-            erosion = str(erosion)
-        elif erosion in ("full", "6", "18"):
-            pass
+        # Resolve the pre-skeletonization morphological operations. The newer
+        # ``morphological_operations`` (a sequence of ops) supersedes the
+        # legacy ``erosion`` shorthand when provided; otherwise ``erosion`` is
+        # mapped into the equivalent op list.
+        if morphological_operations is None:
+            ops_spec = _erosion_to_operations(erosion)
         else:
-            raise ValueError(
-                f"erosion must be True, False, None, 'full', 6, 18, '6', or '18', got {erosion!r}"
-            )
-        self.erosion = erosion
+            ops_spec = morphological_operations
+        self.morphological_operations = normalize_morphological_operations(ops_spec)
         self.min_branch_length_nm = min_branch_length_nm
         self.tolerance_nm = tolerance_nm
         self.num_workers = num_workers
@@ -266,6 +444,12 @@ class Skeletonize(ComputeConfigMixin):
         self.skeleton_properties = self._normalize_skeleton_properties(
             skeleton_properties
         )
+        self.write_vertex_radius = bool(write_vertex_radius)
+        self.prune_only = bool(prune_only)
+        # The second output is either prune+simplify ("simplified") or, when
+        # prune_only is set, prune-only ("pruned"). Named honestly so the
+        # neuroglancer layer reflects what it actually contains.
+        self.second_subdir = "pruned" if self.prune_only else "simplified"
         # Per-instance suffix so concurrent runs sharing output_path don't
         # collide on the wave merge dirs.
         self._run_id = uuid.uuid4().hex[:8]
@@ -275,11 +459,15 @@ class Skeletonize(ComputeConfigMixin):
         self.ids = self.bbox_df.index.tolist()
 
         # Create output directories
-        # Each output directory (full and simplified) needs its own structure
+        # Each output directory (full and the second output) needs its own
+        # structure. The second is 'simplified' or, in prune_only mode,
+        # 'pruned'.
         os.makedirs(f"{output_path}/full", exist_ok=True)
         os.makedirs(f"{output_path}/full/segment_properties", exist_ok=True)
-        os.makedirs(f"{output_path}/simplified", exist_ok=True)
-        os.makedirs(f"{output_path}/simplified/segment_properties", exist_ok=True)
+        os.makedirs(f"{output_path}/{self.second_subdir}", exist_ok=True)
+        os.makedirs(
+            f"{output_path}/{self.second_subdir}/segment_properties", exist_ok=True
+        )
 
         logger.info(f"Loaded {len(self.ids)} IDs from {csv_path}")
         logger.info(f"Output will be written to {output_path}")
@@ -332,26 +520,41 @@ class Skeletonize(ComputeConfigMixin):
         segmentation_idi: ImageDataInterface,
         bbox_df: pd.DataFrame,
         output_path: str,
-        erosion: str,
+        morphological_operations: list,
         min_branch_length_nm: float,
         tolerance_nm: float,
         sharded: bool = False,
+        write_vertex_radius: bool = False,
+        prune_only: bool = False,
+        second_subdir: str = "simplified",
     ):
         """
-        Process a single ID: extract, skeletonize, prune, simplify, and emit.
+        Process a single ID: extract, skeletonize, prune, (simplify,) and emit.
+
+        Emits two skeletons: ``full`` (raw) and ``second_subdir`` -- either
+        ``simplified`` (prune+simplify) or, when ``prune_only`` is set,
+        ``pruned`` (prune only, all surviving original vertices kept).
 
         When ``sharded=True``, encoded skeleton bytes are returned in the
-        result dict under ``"full_bytes"``/``"simplified_bytes"`` so the
+        result dict under ``"full_bytes"``/``"{second_subdir}_bytes"`` so the
         driver can pack them into shard files via the existing pickle merge
         path — no per-ID NRS write happens. When ``sharded=False``, per-ID
-        files are written under ``{output_path}/{full,simplified}/{id}``.
+        files are written under ``{output_path}/{full,<second_subdir>}/{id}``.
         """
         from funlib.geometry import Roi
 
         result: dict = dict(Skeletonize._empty_metrics())
 
         def emit(subdir: str, skel_obj: CustomSkeleton):
-            encoded = skel_obj.encode_neuroglancer_bytes()
+            # Radii are written on the full skeleton and on the prune-only
+            # output (both keep every original vertex, so radii stay exact and
+            # aligned). The geometrically-simplified output stays attribute-free
+            # -- simplify drops vertices, so its radii would be lossy and its
+            # info declares no vertex attributes.
+            include_radii = write_vertex_radius and (
+                subdir == "full" or prune_only
+            )
+            encoded = skel_obj.encode_neuroglancer_bytes(include_radii=include_radii)
             if sharded:
                 result[f"{subdir}_bytes"] = encoded
             else:
@@ -363,7 +566,7 @@ class Skeletonize(ComputeConfigMixin):
         def emit_empty():
             empty = CustomSkeleton(vertices=[], edges=[])
             emit("full", empty)
-            emit("simplified", empty)
+            emit(second_subdir, empty)
 
         try:
             # Get bounding box for this ID
@@ -408,29 +611,34 @@ class Skeletonize(ComputeConfigMixin):
             else:
                 isotropic_voxel_size = np.array(original_vs)
 
-            # Compute EDT on pre-erosion mask for approximate radii
-            distance_transform = edt_module.edt(data, anisotropy=tuple(isotropic_voxel_size))
-
-            # Apply erosion if requested
-            if erosion == "full":
-                # Define a 3D cross-shaped structuring element (6-connectivity)
-                cross_3d = np.array(
-                    [
-                        [[0, 0, 0], [0, 1, 0], [0, 0, 0]],
-                        [[0, 1, 0], [1, 1, 1], [0, 1, 0]],
-                        [[0, 0, 0], [0, 1, 0], [0, 0, 0]],
-                    ],
-                    dtype=bool,
+            # Apply the requested morphological operations (in order) to the
+            # mask that gets skeletonized.
+            original_mask = data
+            if morphological_operations:
+                data = apply_morphological_operations(
+                    data, morphological_operations
                 )
-                data = binary_erosion(data, cross_3d)
-            elif erosion == "6":
-                data = remove_unbridged_adjacencies(data, connectivity=6)
-            elif erosion == "18":
-                data = remove_unbridged_adjacencies(data, connectivity=18)
 
-            if erosion is not None and not np.any(data):
+            # Compute EDT for radii on the union of the original and processed
+            # masks. For shrinking ops (erosion/opening) the processed mask is
+            # a subset, so the union is the original -- radii reflect the true
+            # object thickness (unchanged from the pre-erosion behavior). For
+            # growing ops (dilation/closing) the union is the processed mask,
+            # so radii reflect the grown/hole-filled structure that was
+            # actually skeletonized.
+            edt_mask = (
+                np.logical_or(original_mask, data)
+                if morphological_operations
+                else data
+            )
+            distance_transform = edt_module.edt(
+                edt_mask, anisotropy=tuple(isotropic_voxel_size)
+            )
+
+            if morphological_operations and not np.any(data):
                 logger.warning(
-                    f"Erosion removed all voxels for ID {id_value}, emitting empty skeleton"
+                    f"Morphological operations removed all voxels for ID "
+                    f"{id_value}, emitting empty skeleton"
                 )
                 emit_empty()
                 return result
@@ -468,8 +676,14 @@ class Skeletonize(ComputeConfigMixin):
                         vertices=[seed_vertex],
                         edges=np.zeros((0, 2), dtype=np.uint32),
                     )
+                    # Keep the radius attribute populated even for the single
+                    # seed vertex (set directly to dodge add_vertex's
+                    # falsy-radius skip) so the full / prune-only outputs stay
+                    # consistent with their declared vertex attribute.
+                    if write_vertex_radius:
+                        seed_skel.radii = [peak_radius_nm]
                     emit("full", seed_skel)
-                    emit("simplified", seed_skel)
+                    emit(second_subdir, seed_skel)
                     result["radius_mean_nm"] = peak_radius_nm
                     result["radius_std_nm"] = 0.0
                     return result
@@ -513,6 +727,16 @@ class Skeletonize(ComputeConfigMixin):
             g = skeleton.skeleton_to_graph()
             skeleton.polylines = skeleton.get_polylines_positions_from_graph(g)
 
+            # Attach the per-vertex radii (sampled from the EDT in the same
+            # np.argwhere voxel order that produced the skeleton vertices)
+            # before pruning. prune() carries each surviving node's exact
+            # original radius through (graph_to_skeleton rebuilds vertices and
+            # radii from the same node set), so the pruned skeleton's radii are
+            # available both for the prune-only output and for the radius
+            # stats below. This is independent of write_vertex_radius, which
+            # only controls whether radii are written into the skeleton bytes.
+            skeleton.radii = list(radii)
+
             # Prune
             if min_branch_length_nm > 0:
                 pruned = skeleton.prune(min_branch_length_nm)
@@ -541,18 +765,26 @@ class Skeletonize(ComputeConfigMixin):
                         longest_shortest_path, component_diameter
                     )
 
+            # Radius stats describe the pruned skeleton, consistent with
+            # num_branches / longest_shortest_path above. Fall back to the
+            # full sampled radii if pruning somehow dropped them.
+            pruned_radii = pruned.radii if pruned.radii else radii
             result["longest_shortest_path_nm"] = longest_shortest_path
             result["num_branches"] = num_branches
-            result["radius_mean_nm"] = float(np.mean(radii))
-            result["radius_std_nm"] = float(np.std(radii))
+            result["radius_mean_nm"] = float(np.mean(pruned_radii))
+            result["radius_std_nm"] = float(np.std(pruned_radii))
 
-            # Simplify
-            if tolerance_nm > 0:
-                simplified = pruned.simplify(tolerance_nm)
+            # Build the second output: prune-only keeps every surviving
+            # vertex (and its exact radius); otherwise simplify the pruned
+            # skeleton. tolerance_nm is ignored in prune_only mode.
+            if prune_only:
+                second_skel = pruned
+            elif tolerance_nm > 0:
+                second_skel = pruned.simplify(tolerance_nm)
             else:
-                simplified = pruned
+                second_skel = pruned
 
-            if len(simplified.vertices) == 0:
+            if len(second_skel.vertices) == 0:
                 logger.warning(
                     f"Pruning/simplification removed all vertices for ID {id_value}, emitting empty skeleton"
                 )
@@ -566,13 +798,13 @@ class Skeletonize(ComputeConfigMixin):
             else:
                 skeleton.edges = np.array(skeleton.edges, dtype=np.uint32)
 
-            if len(simplified.edges) == 0:
-                simplified.edges = np.zeros((0, 2), dtype=np.uint32)
+            if len(second_skel.edges) == 0:
+                second_skel.edges = np.zeros((0, 2), dtype=np.uint32)
             else:
-                simplified.edges = np.array(simplified.edges, dtype=np.uint32)
+                second_skel.edges = np.array(second_skel.edges, dtype=np.uint32)
 
             emit("full", skeleton)
-            emit("simplified", simplified)
+            emit(second_subdir, second_skel)
             return result
 
         except Exception as e:
@@ -583,8 +815,9 @@ class Skeletonize(ComputeConfigMixin):
         """
         Write the neuroglancer info file and segment_properties info file for both full and simplified directories.
         """
-        # Write info files for both 'full' and 'simplified' directories
-        for subdir in ["full", "simplified"]:
+        # Write info files for the 'full' and second ('simplified'/'pruned')
+        # output directories.
+        for subdir in ["full", self.second_subdir]:
             # Write main info file for skeletons
             info = {
                 "@type": "neuroglancer_skeletons",
@@ -604,6 +837,19 @@ class Skeletonize(ComputeConfigMixin):
                 ],  # Identity transform since we're using physical coordinates
                 "segment_properties": "segment_properties",
             }
+
+            # The full and prune-only skeletons carry a per-vertex radius
+            # (sampled from the EDT) when write_vertex_radius is set; declare
+            # it so neuroglancer can read and color by it. The
+            # geometrically-simplified skeletons are geometry-only.
+            if self.write_vertex_radius and (subdir == "full" or self.prune_only):
+                info["vertex_attributes"] = [
+                    {
+                        "id": "radius",
+                        "data_type": "float32",
+                        "num_components": 1,
+                    }
+                ]
 
             if self.sharded:
                 from cellmap_analyze.util.sharded_skeleton import make_sharding_spec
@@ -855,7 +1101,7 @@ class Skeletonize(ComputeConfigMixin):
         # as sortable columns in the neuroglancer side panel.
         if self.skeleton_properties:
             metrics_by_id = {int(m["id"]): m for m in all_metrics}
-            for subdir in ("full", "simplified"):
+            for subdir in ("full", self.second_subdir):
                 self._write_segment_properties_info(subdir, metrics_by_id)
 
         logger.info("Skeletonization complete")
@@ -886,10 +1132,13 @@ class Skeletonize(ComputeConfigMixin):
             self.segmentation_idi,
             self.bbox_df,
             self.output_path,
-            self.erosion,
+            self.morphological_operations,
             self.min_branch_length_nm,
             self.tolerance_nm,
             sharded=self.sharded,
+            write_vertex_radius=self.write_vertex_radius,
+            prune_only=self.prune_only,
+            second_subdir=self.second_subdir,
         )
         if result is None:
             result = Skeletonize._empty_metrics()
@@ -900,7 +1149,7 @@ class Skeletonize(ComputeConfigMixin):
         """Pack encoded skeleton bytes (already in memory via pickle merge)
         into precomputed sharded shard files.
 
-        Pops ``full_bytes``/``simplified_bytes`` from each metric dict in
+        Pops ``full_bytes``/``{second_subdir}_bytes`` from each metric dict in
         ``metrics_list`` so subsequent CSV writing sees only metric columns.
         No NRS read/unlink work — the bytes were carried back on the dask
         merge path that runs for every job regardless.
@@ -908,7 +1157,10 @@ class Skeletonize(ComputeConfigMixin):
         import time
         from cellmap_analyze.util.sharded_skeleton import pack_sharded_skeletons
 
-        for subdir, bytes_key in [("full", "full_bytes"), ("simplified", "simplified_bytes")]:
+        for subdir, bytes_key in [
+            ("full", "full_bytes"),
+            (self.second_subdir, f"{self.second_subdir}_bytes"),
+        ]:
             dir_path = f"{self.output_path}/{subdir}"
 
             t0 = time.time()

@@ -189,6 +189,244 @@ def test_skeletonize_single_worker(tmp_zarr, tmp_skeletonize_csv):
         assert os.path.exists(simplified_path), f"Simplified skeleton missing for ID {id_val}"
 
 
+def test_skeletonize_resolves_group_path_to_s0(tmp_zarr, tmp_skeletonize_csv):
+    """A bare multiscale group path (no scale level) auto-resolves to s0."""
+    sk = Skeletonize(
+        segmentation_path=f"{tmp_zarr}/segmentation_for_skeleton",
+        output_path=tmp_zarr + "/test_skeletonize_autoscale",
+        csv_path=tmp_skeletonize_csv,
+        num_workers=1,
+        sharded=False,
+    )
+    assert sk.segmentation_idi.path.endswith("/segmentation_for_skeleton/s0")
+
+
+def _parse_skeleton_bytes(buf, n_radius_components=0):
+    """Decode a neuroglancer skeleton chunk into (vertices, edges, radii)."""
+    import struct
+
+    off = 0
+    n_vertices, n_edges = struct.unpack_from("<II", buf, off)
+    off += 8
+    vp = np.frombuffer(buf, "<f4", n_vertices * 3, off)
+    off += vp.nbytes
+    ed = np.frombuffer(buf, "<u4", n_edges * 2, off)
+    off += ed.nbytes
+    radii = None
+    if n_radius_components:
+        radii = np.frombuffer(buf, "<f4", n_vertices * n_radius_components, off)
+        off += radii.nbytes
+    assert off == len(buf), f"trailing bytes: parsed {off} of {len(buf)}"
+    return vp.reshape((n_vertices, 3)), ed.reshape((n_edges, 2)), radii
+
+
+def test_skeletonize_radius_off_by_default(tmp_zarr, tmp_skeletonize_csv):
+    """With write_vertex_radius unset, full skeletons declare no vertex
+    attributes and their bytes carry no radii."""
+    output_path = tmp_zarr + "/test_skeletonize_radius_off"
+
+    skeletonizer = Skeletonize(
+        segmentation_path=f"{tmp_zarr}/segmentation_for_skeleton/s0",
+        output_path=output_path,
+        csv_path=tmp_skeletonize_csv,
+        erosion=True,
+        min_branch_length_nm=0,
+        tolerance_nm=0,
+        num_workers=1,
+        sharded=False,
+    )
+    skeletonizer.skeletonize()
+
+    with open(f"{output_path}/full/info") as f:
+        assert "vertex_attributes" not in json.load(f)
+
+    for id_val in [1, 2, 3, 4, 5, 6, 7, 8]:
+        with open(f"{output_path}/full/{id_val}", "rb") as f:
+            buf = f.read()
+        # Parsing with zero radius components must consume the whole buffer.
+        _parse_skeleton_bytes(buf, n_radius_components=0)
+
+
+def test_skeletonize_writes_per_vertex_radius(tmp_zarr, tmp_skeletonize_csv):
+    """With write_vertex_radius=True, the full skeletons carry a per-vertex
+    radius attribute (declared in the info and aligned with the vertices); the
+    simplified ones do not."""
+    output_path = tmp_zarr + "/test_skeletonize_radius"
+
+    skeletonizer = Skeletonize(
+        segmentation_path=f"{tmp_zarr}/segmentation_for_skeleton/s0",
+        output_path=output_path,
+        csv_path=tmp_skeletonize_csv,
+        erosion=True,
+        min_branch_length_nm=0,
+        tolerance_nm=0,
+        num_workers=1,
+        sharded=False,
+        write_vertex_radius=True,
+    )
+    skeletonizer.skeletonize()
+
+    # full info declares the radius vertex attribute; simplified does not.
+    with open(f"{output_path}/full/info") as f:
+        full_info = json.load(f)
+    assert full_info["vertex_attributes"] == [
+        {"id": "radius", "data_type": "float32", "num_components": 1}
+    ]
+    with open(f"{output_path}/simplified/info") as f:
+        assert "vertex_attributes" not in json.load(f)
+
+    # At least one non-empty full skeleton, and every non-empty one has a
+    # positive radius per vertex; the simplified twin parses with no radii.
+    saw_non_empty = False
+    for id_val in [1, 2, 3, 4, 5, 6, 7, 8]:
+        with open(f"{output_path}/full/{id_val}", "rb") as f:
+            full_buf = f.read()
+        verts, _, radii = _parse_skeleton_bytes(full_buf, n_radius_components=1)
+        if len(verts) == 0:
+            continue
+        saw_non_empty = True
+        assert radii is not None and len(radii) == len(verts)
+        assert np.all(radii > 0)
+
+        with open(f"{output_path}/simplified/{id_val}", "rb") as f:
+            simp_buf = f.read()
+        # Parsing with zero radius components must consume the whole buffer.
+        _parse_skeleton_bytes(simp_buf, n_radius_components=0)
+
+    assert saw_non_empty
+
+
+def test_normalize_morphological_operations():
+    from cellmap_analyze.process.skeletonize import (
+        normalize_morphological_operations,
+    )
+
+    assert normalize_morphological_operations(None) == []
+    # single string is wrapped; defaults applied
+    assert normalize_morphological_operations("closing") == [
+        {"operation": "closing", "iterations": 1, "connectivity": 1}
+    ]
+    # corner-bridge shorthands map to remove_corner_bridges with fixed conn
+    assert normalize_morphological_operations(["6", "18"]) == [
+        {"operation": "remove_corner_bridges", "connectivity": 6, "iterations": 1},
+        {"operation": "remove_corner_bridges", "connectivity": 18, "iterations": 1},
+    ]
+    # dict form passes through iterations/connectivity
+    assert normalize_morphological_operations(
+        [{"operation": "opening", "iterations": 2, "connectivity": 2}]
+    ) == [{"operation": "opening", "iterations": 2, "connectivity": 2}]
+
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError):
+        normalize_morphological_operations(["not_an_op"])
+    with _pytest.raises(ValueError):
+        # connectivity is a rank 1/2/3; 6 is out of range
+        normalize_morphological_operations([{"operation": "erosion", "connectivity": 6}])
+
+
+def test_apply_morphological_operations_closing_fills_hole():
+    from cellmap_analyze.process.skeletonize import (
+        apply_morphological_operations,
+        normalize_morphological_operations,
+    )
+
+    # Solid cube with a single interior background voxel (a hole).
+    data = np.ones((5, 5, 5), dtype=bool)
+    data[2, 2, 2] = False
+    assert not data[2, 2, 2]
+
+    closed = apply_morphological_operations(
+        data, normalize_morphological_operations(["closing"])
+    )
+    assert closed[2, 2, 2]  # hole filled
+
+    # Opening removes a small isolated object while keeping the bulk.
+    data2 = np.zeros((9, 9, 9), dtype=bool)
+    data2[2:7, 2:7, 2:7] = True  # solid bulk
+    data2[0, 0, 0] = True  # lone voxel, not connected to the bulk
+    opened = apply_morphological_operations(
+        data2, normalize_morphological_operations(["opening"])
+    )
+    assert not opened[0, 0, 0]  # isolated voxel removed
+    assert opened[4, 4, 4]  # bulk core survives
+
+
+def test_skeletonize_closing_morphological_operation(tmp_zarr, tmp_skeletonize_csv):
+    """A non-erosion op (closing) runs end-to-end and supersedes erosion."""
+    output_path = tmp_zarr + "/test_skeletonize_closing"
+    sk = Skeletonize(
+        segmentation_path=f"{tmp_zarr}/segmentation_for_skeleton/s0",
+        output_path=output_path,
+        csv_path=tmp_skeletonize_csv,
+        morphological_operations=["closing"],
+        min_branch_length_nm=0,
+        tolerance_nm=0,
+        num_workers=1,
+        sharded=False,
+    )
+    assert sk.morphological_operations == [
+        {"operation": "closing", "iterations": 1, "connectivity": 1}
+    ]
+    sk.skeletonize()
+    for id_val in [1, 2, 3, 4, 5, 6, 7, 8]:
+        assert os.path.exists(f"{output_path}/full/{id_val}")
+
+
+def test_skeletonize_prune_only_keeps_nodes_and_radii(tmp_zarr, tmp_skeletonize_csv):
+    """prune_only writes a `pruned/` output (not `simplified/`) that keeps the
+    full skeleton's vertices except pruned branches, and carries faithful
+    per-vertex radii when write_vertex_radius is set."""
+    output_path = tmp_zarr + "/test_skeletonize_prune_only"
+
+    skeletonizer = Skeletonize(
+        segmentation_path=f"{tmp_zarr}/segmentation_for_skeleton/s0",
+        output_path=output_path,
+        csv_path=tmp_skeletonize_csv,
+        erosion=True,
+        min_branch_length_nm=0,
+        tolerance_nm=200,  # ignored in prune_only mode
+        num_workers=1,
+        sharded=False,
+        write_vertex_radius=True,
+        prune_only=True,
+    )
+    skeletonizer.skeletonize()
+
+    # The second output is named `pruned`, not `simplified`.
+    assert os.path.isdir(f"{output_path}/pruned")
+    assert not os.path.exists(f"{output_path}/simplified")
+
+    # Both full and pruned declare the radius vertex attribute.
+    radius_attr = [{"id": "radius", "data_type": "float32", "num_components": 1}]
+    with open(f"{output_path}/full/info") as f:
+        assert json.load(f)["vertex_attributes"] == radius_attr
+    with open(f"{output_path}/pruned/info") as f:
+        assert json.load(f)["vertex_attributes"] == radius_attr
+
+    # With min_branch_length_nm=0 nothing is pruned, so pruned == full: same
+    # vertices and the same per-vertex radii (each surviving node keeps its
+    # original radius verbatim, since prune never moves or merges vertices).
+    saw_non_empty = False
+    for id_val in [1, 2, 3, 4, 5, 6, 7, 8]:
+        with open(f"{output_path}/full/{id_val}", "rb") as f:
+            full_verts, _, full_radii = _parse_skeleton_bytes(
+                f.read(), n_radius_components=1
+            )
+        with open(f"{output_path}/pruned/{id_val}", "rb") as f:
+            pruned_verts, _, pruned_radii = _parse_skeleton_bytes(
+                f.read(), n_radius_components=1
+            )
+        if len(full_verts) == 0:
+            continue
+        saw_non_empty = True
+        assert np.array_equal(np.sort(full_radii), np.sort(pruned_radii))
+        assert np.all(pruned_radii > 0)
+        assert len(pruned_verts) == len(full_verts)
+
+    assert saw_non_empty
+
+
 def test_skeletonize_produces_reasonable_skeletons(
     tmp_zarr, tmp_skeletonize_csv, voxel_size
 ):
@@ -809,7 +1047,9 @@ def test_skeletonize_backward_compat_erosion_true(tmp_zarr, tmp_skeletonize_csv)
         sharded=False,
     )
 
-    assert skeletonizer.erosion == "full"
+    assert skeletonizer.morphological_operations == [
+        {"operation": "erosion", "iterations": 1, "connectivity": 1}
+    ]
     skeletonizer.skeletonize()
 
     for id_val in [1, 2, 3, 4, 5, 6, 7, 8]:
@@ -1030,7 +1270,7 @@ def test_skeletonize_backward_compat_erosion_false(tmp_zarr, tmp_skeletonize_csv
         sharded=False,
     )
 
-    assert skeletonizer.erosion is None
+    assert skeletonizer.morphological_operations == []
     skeletonizer.skeletonize()
 
     for id_val in [1, 2, 3, 4, 5, 6, 7, 8]:

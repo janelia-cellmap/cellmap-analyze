@@ -101,6 +101,123 @@ def _read_zarr_or_n5_attrs(full_path):
     return {}
 
 
+def list_multiscale_levels(group_path):
+    """List the scale levels of an OME-NGFF multiscale group.
+
+    Reads the group's ``multiscales`` metadata (works over local paths and
+    remote URIs via :func:`_read_zarr_or_n5_attrs`) and returns the per-level
+    name and voxel size in the order they are declared (OME convention:
+    finest first, i.e. ``s0`` at index 0).
+
+    Args:
+        group_path: Path/URI to a zarr/n5 group.
+
+    Returns:
+        ``[(level_name, voxel_size_tuple), ...]`` for a multiscale group, or
+        ``None`` when ``group_path`` is not a multiscale group (e.g. it is
+        already a scale-level array, a precomputed volume, or a non-OME
+        layout). Levels missing a name or scale transform are dropped.
+    """
+    from cellmap_analyze.util.voxel_size_utils import get_multiscales
+
+    attrs = _read_zarr_or_n5_attrs(group_path)
+    multiscales = get_multiscales(attrs)
+    if not multiscales:
+        return None
+    try:
+        datasets = multiscales[0]["datasets"]
+    except (KeyError, IndexError, TypeError):
+        return None
+
+    levels = []
+    for d in datasets:
+        scale = None
+        for t in d.get("coordinateTransformations", []):
+            if t.get("type") == "scale":
+                scale = tuple(float(v) for v in t["scale"])
+                break
+        path = d.get("path")
+        if path and scale:
+            levels.append((path, scale))
+    return levels or None
+
+
+def _voxel_size_sort_key(voxel_size):
+    """Order-independent key for comparing voxel sizes across datasets that
+    may differ in axis order (e.g. zarr ZYX vs n5 XYZ)."""
+    return tuple(sorted(float(v) for v in voxel_size))
+
+
+def resolve_scale_path(dataset_path, target_voxel_size=None, logger=None):
+    """Resolve a multiscale group path to a specific scale-level array path.
+
+    When ``dataset_path`` points at a scale-level array already (or at a
+    precomputed volume / non-OME layout), it is returned unchanged. When it
+    points at an OME multiscale group, a scale level is selected:
+
+    - ``target_voxel_size is None``: the finest level (``s0`` by convention)
+      is chosen. This makes a bare group path default to full resolution.
+    - ``target_voxel_size`` given: the coarsest level that is still at or
+      finer than the target is chosen, so the source is only ever
+      downsampled onto the target grid -- never upsampled (which would
+      fabricate detail by repetition). When every level is coarser than the
+      target, the finest available level is used as the least-bad fallback.
+      Used so an intensity/raw source lines up with the segmentation it is
+      measured against.
+
+    The selection is logged so it is never silent.
+    """
+    levels = list_multiscale_levels(dataset_path)
+    if not levels:
+        return dataset_path
+
+    def volume(level_vs):
+        v = 1.0
+        for c in level_vs:
+            v *= c
+        return v
+
+    if target_voxel_size is None:
+        chosen_path, chosen_vs = levels[0]
+        reason = "defaulting to finest scale (s0)"
+    else:
+        target_key = _voxel_size_sort_key(target_voxel_size)
+
+        def is_finer_or_equal(level_vs):
+            return all(
+                a <= b * (1 + 1e-6)
+                for a, b in zip(_voxel_size_sort_key(level_vs), target_key)
+            )
+
+        finer = [lv for lv in levels if is_finer_or_equal(lv[1])]
+        if finer:
+            # Coarsest level that still doesn't require upsampling -- closest
+            # to the target from the finer side, so the least downsampling.
+            chosen_path, chosen_vs = max(finer, key=lambda lv: volume(lv[1]))
+            reason = (
+                f"coarsest level at or finer than target voxel size "
+                f"{tuple(target_voxel_size)} (downsample only, no upsampling)"
+            )
+        else:
+            # Every level is coarser than the target; nothing avoids
+            # upsampling, so use the finest available.
+            chosen_path, chosen_vs = min(levels, key=lambda lv: volume(lv[1]))
+            reason = (
+                f"finest available -- all levels coarser than target voxel "
+                f"size {tuple(target_voxel_size)}"
+            )
+
+    from cellmap_analyze.util.io_util import path_join
+
+    resolved = path_join(dataset_path, chosen_path)
+    if logger is not None:
+        logger.info(
+            f"{dataset_path} is a multiscale group; selected level "
+            f"'{chosen_path}' (voxel size {chosen_vs}) -- {reason}."
+        )
+    return resolved
+
+
 def _open_precomputed_dataset(full_path, mode):
     """Open a neuroglancer precomputed volume as a CellMapArray.
 

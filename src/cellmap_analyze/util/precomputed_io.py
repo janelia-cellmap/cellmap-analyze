@@ -88,6 +88,11 @@ def parse_precomputed_path(path):
                 f"scale key {scale_key!r} not found in info "
                 f"(available keys: {[s.get('key') for s in scales]})"
             )
+    elif len(scales) > 1:
+        logger.info(
+            f"{inner} is a multiscale precomputed volume with no scale key; "
+            f"defaulting to scale 0 ('{scales[0].get('key')}', highest resolution)."
+        )
 
     return kvstore, base_path, info, scale_index
 
