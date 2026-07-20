@@ -13,11 +13,12 @@ from cellmap_analyze.util.io_util import (
 )
 
 import logging
-import networkx as nx
 import itertools
 import fastremap
 import os
 import uuid
+from scipy.sparse import coo_matrix
+from scipy.sparse.csgraph import connected_components as csgraph_connected_components
 from cellmap_analyze.util.mask_util import MasksFromConfig
 from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
@@ -327,10 +328,33 @@ class ConnectedComponents(ComputeConfigMixin):
 
     @staticmethod
     def get_connected_ids(nodes, edges):
-        G = nx.Graph()
-        G.add_nodes_from(nodes)
-        G.add_edges_from(edges)
-        connected_ids = list(nx.connected_components(G))
+        nodes = np.fromiter(nodes, dtype=np.uint64)
+        edges = np.fromiter(
+            itertools.chain.from_iterable(edges), dtype=np.uint64
+        ).reshape(-1, 2)
+
+        # matches networkx's add_edges_from behavior of implicitly adding any
+        # edge endpoints that aren't already present as nodes
+        all_ids = np.unique(np.concatenate([nodes, edges.ravel()]))
+        if all_ids.size == 0:
+            return []
+
+        row = np.searchsorted(all_ids, edges[:, 0])
+        col = np.searchsorted(all_ids, edges[:, 1])
+        graph = coo_matrix(
+            (np.ones(row.size, dtype=np.int8), (row, col)),
+            shape=(all_ids.size, all_ids.size),
+        )
+        _, labels = csgraph_connected_components(graph, directed=False)
+
+        order = np.argsort(labels, kind="stable")
+        sorted_labels = labels[order]
+        sorted_ids = all_ids[order]
+        group_boundaries = np.flatnonzero(np.diff(sorted_labels)) + 1
+        connected_ids = [
+            set(group.tolist())
+            for group in np.split(sorted_ids, group_boundaries)
+        ]
         connected_ids = sorted(connected_ids, key=min)
         return connected_ids
 
