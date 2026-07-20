@@ -4,6 +4,7 @@ from skimage import measure
 from cellmap_analyze.process.connected_components import ConnectedComponents
 from scipy.ndimage import gaussian_filter
 import numpy as np
+import networkx as nx
 
 from cellmap_analyze.util.image_data_interface import (
     ImageDataInterface,
@@ -11,6 +12,54 @@ from cellmap_analyze.util.image_data_interface import (
 
 import cc3d
 import os
+
+
+def _networkx_ground_truth(nodes, edges):
+    # oracle for get_connected_ids, kept independent of the production
+    # (scipy-based) implementation under test
+    G = nx.Graph()
+    G.add_nodes_from(nodes)
+    G.add_edges_from(edges)
+    connected_ids = list(nx.connected_components(G))
+    return sorted(connected_ids, key=min)
+
+
+@pytest.mark.parametrize(
+    "nodes, edges",
+    [
+        ([], []),
+        ([1, 2, 3], []),  # no edges, all isolated
+        ([1, 2], [(1, 2)]),  # single edge
+        ([1, 2, 3], [(1, 1)]),  # self-loop
+        ([1, 2, 3], [(1, 2), (1, 2), (1, 2)]),  # duplicate edges
+        ([1, 2, 3, 4], [(1, 2), (3, 4)]),  # two disjoint pairs
+        ([1, 2, 3], [(1, 5)]),  # edge endpoint not present in nodes
+        ([5], []),  # single isolated node
+    ],
+)
+def test_get_connected_ids_edge_cases(nodes, edges):
+    expected = _networkx_ground_truth(nodes, edges)
+    actual = ConnectedComponents.get_connected_ids(nodes, edges)
+    assert actual == expected
+
+
+@pytest.mark.parametrize("seed", range(10))
+@pytest.mark.parametrize("num_nodes", [10, 500, 5000])
+def test_get_connected_ids_random(seed, num_nodes):
+    rng = np.random.default_rng(seed)
+    # sparse, non-contiguous ids, mirroring real blockwise-component labels
+    nodes = rng.choice(num_nodes * 4, size=num_nodes, replace=False) + 1
+    num_edges = int(num_nodes * rng.uniform(0.1, 1.5))
+    edges = list(
+        zip(
+            rng.choice(nodes, size=num_edges),
+            rng.choice(nodes, size=num_edges),
+        )
+    )
+
+    expected = _networkx_ground_truth(nodes.tolist(), edges)
+    actual = ConnectedComponents.get_connected_ids(nodes, edges)
+    assert actual == expected
 
 
 @pytest.mark.parametrize(
