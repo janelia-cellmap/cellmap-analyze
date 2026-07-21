@@ -693,6 +693,49 @@ def delete_chunks(block_index, get_delete_path_fn, idi_or_location, depth):
                 pass
 
 
+# Rough heuristic for choosing local vs. distributed deletion: estimate
+# wall-clock time for each (local: num_blocks / local cores; distributed:
+# cluster startup + num_blocks / num_workers) and pick whichever is lower,
+# rather than only comparing local time against startup overhead alone -
+# that ignored the actual distributed deletion work and so ignored
+# num_workers entirely. Neither rate/overhead constant below is measured
+# against real NRS throughput - both are deliberately conservative
+# (pessimistic about local, optimistic about distributed) so uncertainty
+# pushes towards the distributed path already proven for zarr, rather than
+# risk underestimating how slow many small-file deletes can be locally.
+ESTIMATED_CLUSTER_STARTUP_SECONDS = 30  # ~3 cluster spin-ups worth of overhead
+ESTIMATED_LOCAL_DELETES_PER_SEC_PER_CORE = 200
+
+
+def _estimated_local_seconds(num_blocks, local_cores):
+    return num_blocks / (local_cores * ESTIMATED_LOCAL_DELETES_PER_SEC_PER_CORE)
+
+
+def _estimated_distributed_seconds(num_blocks, num_workers):
+    return ESTIMATED_CLUSTER_STARTUP_SECONDS + num_blocks / (
+        num_workers * ESTIMATED_LOCAL_DELETES_PER_SEC_PER_CORE
+    )
+
+
+def _delete_blocks_locally(get_delete_path_fn, idi_or_location, num_blocks, threads=None):
+    with Pool(threads) as pool:
+        for depth in range(3, 0, -1):
+            list(
+                tqdm(
+                    pool.imap_unordered(
+                        lambda i, depth=depth: delete_chunks(
+                            i, get_delete_path_fn, idi_or_location, depth
+                        ),
+                        range(num_blocks),
+                    ),
+                    total=num_blocks,
+                    miniters=max(1, num_blocks // 10),
+                    maxinterval=120,
+                    desc=f"Deleting tmp files (depth {depth})",
+                )
+            )
+
+
 def delete_tmp_dir_blockwise(
     idi_or_location: ImageDataInterface | str,
     num_workers,
@@ -700,23 +743,38 @@ def delete_tmp_dir_blockwise(
     is_zarr=True,
     num_blocks=None,
 ):
-    # Pickle-merge tmp dirs are small (hundreds to a few thousand tiny
-    # files in a 3-level tree); a direct rmtree finishes in <1s and avoids
-    # spinning up 3 successive dask clusters per cleanup. That overhead
-    # was visible between every wave in the wave-scheduling path.
-    if not is_zarr:
-        shutil.rmtree(idi_or_location, ignore_errors=True)
+    if is_zarr:
+        if type(idi_or_location) is str:
+            idi = ImageDataInterface(idi_or_location)
+        else:
+            idi = idi_or_location
+        get_delete_path_fn = get_zarr_chunk_path_from_block_index
+        num_blocks = get_num_blocks(idi, idi.roi)
+        idi_or_location = idi
+        basepath, _ = split_dataset_path(idi.path)
+        top_level_dir = f"{basepath}/{get_name_from_path(idi.path)}"
+    else:
+        get_delete_path_fn = get_merge_file_path_from_block_index
+        top_level_dir = idi_or_location
+
+    if num_blocks is None:
+        with TimingMessager(f"Deleting tmp dir at {top_level_dir}", logger):
+            shutil.rmtree(top_level_dir, ignore_errors=True)
         return
 
-    if type(idi_or_location) is str:
-        idi = ImageDataInterface(idi_or_location)
-    else:
-        idi = idi_or_location
-    get_delete_path_fn = get_zarr_chunk_path_from_block_index
-    num_blocks = get_num_blocks(idi, idi.roi)
-    idi_or_location = idi
-    basepath, _ = split_dataset_path(idi.path)
-    top_level_dir = f"{basepath}/{get_name_from_path(idi.path)}"
+    local_cores = _available_cpu_count()
+    local_seconds = _estimated_local_seconds(num_blocks, local_cores)
+    distributed_seconds = _estimated_distributed_seconds(num_blocks, num_workers)
+
+    if local_seconds <= distributed_seconds:
+        with TimingMessager(
+            f"Deleting {num_blocks} tmp files locally at {top_level_dir}", logger
+        ):
+            _delete_blocks_locally(
+                get_delete_path_fn, idi_or_location, num_blocks, threads=local_cores
+            )
+        shutil.rmtree(top_level_dir, ignore_errors=True)
+        return
 
     for depth in range(3, 0, -1):
         compute_blockwise_partitions(
@@ -748,10 +806,15 @@ def get_merge_file_path_from_block_index(block_index, output_dir, depth=3):
 def get_zarr_chunk_path_from_block_index(block_index, idi, depth):
     block = create_block_from_index(idi, block_index)
     # can have duplicates eg 0/0/0 and 0/0/1 go produce the same coords[:2]
-    block_coords = block.coords[:depth]
-    block_coords_string = "/".join([str(c) for c in block_coords])
-    desired_path = f"{idi.path}/{block_coords_string}"
-    return desired_path
+    block_coords = tuple(block.coords[:depth])
+    # Zarr v3's default chunk-key encoding prefixes keys with "c/" (e.g.
+    # "c/0/10/0"); hand-joining coords without it silently pointed at
+    # nonexistent paths for v3 arrays, making every distributed delete call
+    # a no-op and leaving 100% of real cleanup to the final rmtree.
+    # encode_chunk_key handles v2 (no prefix) too, so this covers both.
+    chunk_key_encoding = idi.ds.data.metadata.chunk_key_encoding
+    key = chunk_key_encoding.encode_chunk_key(block_coords)
+    return f"{idi.path}/{key}"
 
 
 def write_dask_result_to_pkl(block_index, output_dir, fn, *fn_args, **fn_kwargs):
