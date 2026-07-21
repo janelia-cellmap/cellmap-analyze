@@ -40,7 +40,9 @@ def _networkx_ground_truth(nodes, edges):
 def test_get_connected_ids_edge_cases(nodes, edges):
     expected = _networkx_ground_truth(nodes, edges)
     actual = ConnectedComponents.get_connected_ids(nodes, edges)
-    assert actual == expected
+    # get_connected_ids returns lists (ids within a group are already
+    # unique, so set-ness isn't needed); compare as sets of members
+    assert [set(group) for group in actual] == expected
 
 
 @pytest.mark.parametrize("seed", range(10))
@@ -59,7 +61,7 @@ def test_get_connected_ids_random(seed, num_nodes):
 
     expected = _networkx_ground_truth(nodes.tolist(), edges)
     actual = ConnectedComponents.get_connected_ids(nodes, edges)
-    assert actual == expected
+    assert [set(group) for group in actual] == expected
 
 
 @pytest.mark.parametrize(

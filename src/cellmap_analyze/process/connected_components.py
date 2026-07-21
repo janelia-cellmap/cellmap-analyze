@@ -347,15 +347,22 @@ class ConnectedComponents(ComputeConfigMixin):
         )
         _, labels = csgraph_connected_components(graph, directed=False)
 
+        # stable sort on an already-ascending id array means each group is
+        # internally ascending too, so a group's first element is its min
         order = np.argsort(labels, kind="stable")
         sorted_labels = labels[order]
-        sorted_ids = all_ids[order]
-        group_boundaries = np.flatnonzero(np.diff(sorted_labels)) + 1
+        sorted_ids = all_ids[order].tolist()
+        group_boundaries = (np.flatnonzero(np.diff(sorted_labels)) + 1).tolist()
+        bounds = [0] + group_boundaries + [len(sorted_ids)]
+
+        # groups in ascending order of their min id, without calling min()
+        # on every group individually (cheap since num_components << num_ids)
+        group_mins = [sorted_ids[start] for start in bounds[:-1]]
+        group_order = np.argsort(group_mins)
+
         connected_ids = [
-            set(group.tolist())
-            for group in np.split(sorted_ids, group_boundaries)
+            sorted_ids[bounds[i] : bounds[i + 1]] for i in group_order
         ]
-        connected_ids = sorted(connected_ids, key=min)
         return connected_ids
 
     @staticmethod
