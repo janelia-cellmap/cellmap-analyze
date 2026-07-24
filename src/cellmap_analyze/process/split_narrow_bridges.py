@@ -6,11 +6,13 @@ from abc import ABC, abstractmethod
 
 import edt as edt_module
 import fastremap
+import networkx as nx
 import numpy as np
 import pandas as pd
 from funlib.geometry import Roi
 from scipy.ndimage import binary_dilation
 from skimage.feature import peak_local_max
+from skimage.morphology import skeletonize
 from skimage.segmentation import watershed
 
 from cellmap_analyze.util import dask_util, io_util
@@ -18,6 +20,7 @@ from cellmap_analyze.util.dask_util import create_block_from_index
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.io_util import get_output_path_from_input_path
 from cellmap_analyze.util.mixins import ComputeConfigMixin
+from cellmap_analyze.util.skeleton_util import skimage_to_custom_skeleton_fast
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
 
 logging.basicConfig(
@@ -135,21 +138,180 @@ class EDTWatershedSplit(SplitStrategy):
 
 
 class SkeletonGraphSplit(SplitStrategy):
-    """Skeleton/graph-based splitting for thin, branched objects (e.g.
-    mitochondria) where a bare radius threshold can't distinguish a normal
-    tubule from a merge artifact.
+    """Skeleton/graph-based splitting.
 
-    Not implemented yet -- see docs/split_narrow_bridges_plan.md.
+    Not specific to any organelle type -- it's a general strategy, just one
+    better suited than EDTWatershedSplit when an object is thin and branched
+    (e.g. mitochondria networks), where a bare local-radius threshold can't
+    distinguish a normal tubule from a merge artifact. It works fine on
+    simple blobs too (a single sphere skeletonizes to ~1 point and finds no
+    candidate cuts, same as EDTWatershedSplit would report "no split").
+
+    Builds the object's skeleton, samples the EDT radius at each skeleton
+    node, and looks for candidate necks: nodes whose radius is a genuine
+    local minimum (thinner than every neighbor, below ``neck_radius_voxels``)
+    -- not just nodes below the threshold. A bare threshold would also flag
+    an ordinary monotonic taper (e.g. a cube with a thin spur has radius
+    shrinking steadily to the spur's tip -- thin all the way, but never
+    dipping and rising again, so there's no second object on the far side).
+    A true bridge looks like thick-thin-thick. Candidate necks are cut
+    thinnest-first: a cut is only kept if it actually disconnects the graph,
+    and (when ``minimum_subregion_volume_voxels`` is set) if every resulting
+    side clears the size gate -- this is the topology-aware check that lets
+    a real branch point survive while a genuine bridge gets cut. Every mask
+    voxel is then assigned to its nearest skeleton node via a geodesic
+    (mask-respecting) watershed to produce the final per-voxel subpieces
+    array.
     """
 
     def find_subpieces(
         self, mask, voxel_size, neck_radius_voxels, minimum_subregion_volume_voxels
     ):
-        raise NotImplementedError(
-            "SkeletonGraphSplit is not implemented yet -- see "
-            "docs/split_narrow_bridges_plan.md for the design. Use "
-            "strategy='edt_watershed' for now."
+        if not np.any(mask):
+            return np.zeros(mask.shape, dtype=np.uint8)
+
+        distance = edt_module.edt(mask, anisotropy=tuple(voxel_size))
+        skel = skeletonize(mask)
+        if not np.any(skel):
+            return mask.astype(np.uint8)
+
+        skel_coords = np.argwhere(skel)
+        radii = distance[skel_coords[:, 0], skel_coords[:, 1], skel_coords[:, 2]]
+
+        skeleton = skimage_to_custom_skeleton_fast(skel, spacing=voxel_size)
+        # Must be set before skeleton_to_graph() -- that's when node "radius"
+        # attributes get populated (see CustomSkeleton.skeleton_to_graph).
+        skeleton.radii = list(radii)
+        g = skeleton.skeleton_to_graph()
+
+        if g.number_of_nodes() <= 1:
+            return mask.astype(np.uint8)
+
+        # neck_radius_voxels is an isotropic voxel-count approximation
+        # (neck_radius_nm / min(voxel_size), computed once in the driver);
+        # round-trip it back to physical nm to compare against the EDT-based
+        # (physical) node radii.
+        neck_radius_nm = neck_radius_voxels * min(voxel_size)
+
+        # Assign every mask voxel to its nearest skeleton node, respecting
+        # the mask's actual shape/connectivity (a marker-based watershed on a
+        # flat field is a geodesic, through-the-mask nearest-seed assignment
+        # -- unlike a straight-line Euclidean nearest neighbor, it can't leak
+        # across a bend or a concavity onto the "wrong" side of a shape).
+        # Node identities/positions don't change as candidate edges are tried
+        # below, only which nodes end up grouped together, so this is done
+        # once up front: it gives an exact per-node voxel count, and summing
+        # counts over a candidate component is real voxel accounting, not a
+        # geometric proxy (a pi*r^2*length tube estimate was tried first and
+        # overestimated a 3-voxel stub as ~6 voxels, enough to slip past the
+        # size gate; a straight-line nearest neighbor was tried second and
+        # leaked most of a compact cube's volume onto a thin stub's nodes).
+        num_nodes = g.number_of_nodes()
+        markers = np.zeros(mask.shape, dtype=np.int32)
+        markers[skel_coords[:, 0], skel_coords[:, 1], skel_coords[:, 2]] = np.arange(
+            1, num_nodes + 1
         )
+        node_assignment = watershed(np.zeros(mask.shape), markers, mask=mask)
+        mask_coords = np.argwhere(mask)
+        nearest_node_idx = (
+            node_assignment[mask_coords[:, 0], mask_coords[:, 1], mask_coords[:, 2]] - 1
+        )
+        node_voxel_counts = np.bincount(nearest_node_idx, minlength=num_nodes)
+
+        def component_voxel_count(component_nodes):
+            return int(node_voxel_counts[list(component_nodes)].sum())
+
+        # A candidate cut point is a NODE, not an edge -- and only a node
+        # whose radius is a genuine local minimum (a dip that's thinner than
+        # *every* neighbor) qualifies. Radius alone (without the local-min
+        # check) was tried first: it also flags ordinary monotonic tapers --
+        # e.g. a solid cube with a thin spur has EDT radius shrinking
+        # steadily from the cube's core down to the spur's tip, so nearly
+        # every point along that taper is "thin" relative to a fixed
+        # threshold, even though there's no dip-then-rise anywhere (no
+        # second object on the far side -- it's one shape, tapering to a
+        # point). A true bridge instead looks like thick-thin-thick: the
+        # radius dips at the neck and rises again on both sides. Skeleton
+        # endpoints (degree < 2, nothing continues past them) are excluded
+        # outright since there's no "far side" to speak of.
+        original_neighbors = {n: list(g.neighbors(n)) for n in g.nodes}
+
+        def is_neck_node(n):
+            neighbors = original_neighbors[n]
+            if len(neighbors) < 2:
+                return False
+            r = g.nodes[n]["radius"]
+            return r < neck_radius_nm and all(
+                r <= g.nodes[nb]["radius"] for nb in neighbors
+            )
+
+        candidate_nodes = sorted(
+            (n for n in g.nodes if is_neck_node(n)),
+            key=lambda n: g.nodes[n]["radius"],
+        )
+
+        for n in candidate_nodes:
+            if n not in g:
+                continue
+            node_attrs = dict(g.nodes[n])
+            incident_edges = [(n, nb, dict(data)) for nb, data in g[n].items()]
+            g.remove_node(n)
+            components = list(nx.connected_components(g))
+            if len(components) < 2:
+                # Didn't actually separate anything (e.g. part of a cycle).
+                g.add_node(n, **node_attrs)
+                for _, nb, data in incident_edges:
+                    g.add_edge(n, nb, **data)
+                continue
+
+            if minimum_subregion_volume_voxels and not all(
+                component_voxel_count(c) >= minimum_subregion_volume_voxels
+                for c in components
+            ):
+                g.add_node(n, **node_attrs)
+                for _, nb, data in incident_edges:
+                    g.add_edge(n, nb, **data)
+                continue
+            # else: accepted (node n stays removed), or no size gate --
+            # accept every candidate cut that actually separates the graph.
+            # A disabled gate can over-split heavily-branched objects; set
+            # minimum_subregion_volume_nm_3 to guard against that (see
+            # docs/split_narrow_bridges_plan.md).
+
+        final_components = list(nx.connected_components(g))
+        num_pieces = len(final_components)
+        if num_pieces <= 1:
+            return mask.astype(np.uint8)
+
+        node_to_piece = np.zeros(num_nodes, dtype=np.int32)
+        for piece_index, component in enumerate(final_components, start=1):
+            node_to_piece[list(component)] = piece_index
+
+        # Nodes that were cut out (genuine necks) have no piece of their own
+        # -- resolve each to whichever side of the cut its nearest surviving
+        # original neighbor ended up on. It's a handful of voxels right at
+        # the pinch point either way, so which side they land on doesn't
+        # materially matter.
+        for n in range(num_nodes):
+            if node_to_piece[n] != 0:
+                continue
+            visited = {n}
+            queue = list(original_neighbors[n])
+            while queue:
+                cur = queue.pop(0)
+                if cur in visited:
+                    continue
+                visited.add(cur)
+                if node_to_piece[cur] != 0:
+                    node_to_piece[n] = node_to_piece[cur]
+                    break
+                queue.extend(original_neighbors[cur])
+
+        labels = np.zeros(mask.shape, dtype=np.int32)
+        labels[mask_coords[:, 0], mask_coords[:, 1], mask_coords[:, 2]] = (
+            node_to_piece[nearest_node_idx]
+        )
+        return labels
 
 
 _STRATEGY_REGISTRY = {
@@ -180,9 +342,12 @@ class SplitNarrowBridges(ComputeConfigMixin):
         Args:
             segmentation_path: Path to the input segmentation zarr dataset.
             output_path: Path to the output segmentation dataset.
-            strategy: "edt_watershed" (blob-like objects: nuclei, cells) or
-                "skeleton_graph" (thin/branched objects: mitochondria; not
-                yet implemented).
+            strategy: "edt_watershed" (distance-transform watershed -- the
+                simpler, standard choice for blob-like objects: nuclei,
+                cells) or "skeleton_graph" (topology-aware; general-purpose,
+                but the one to reach for when objects are thin/branched --
+                e.g. mitochondria -- where a bare local-radius threshold
+                can't tell a normal tubule from a merge artifact).
             neck_radius_nm: Candidate-cut threshold, in nm. Converted to
                 voxels using the finest voxel axis (isotropic approximation).
             minimum_subregion_volume_nm_3: Optional accept-gate -- a

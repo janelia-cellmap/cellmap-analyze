@@ -1,7 +1,10 @@
 # Splitting accidentally-merged objects at narrow bridges — design plan
 
-Status: design discussion, not yet implemented. Written up so the next session
-doesn't have to re-derive the reasoning.
+Status: implemented on branch `split-narrow-bridges`
+(`src/cellmap_analyze/process/split_narrow_bridges.py`), both strategies
+(`edt_watershed` and `skeleton_graph`) working and tested
+(`tests/operations/test_split_narrow_bridges.py`). Written up so the next
+session doesn't have to re-derive the reasoning.
 
 ## Goal
 
@@ -13,24 +16,67 @@ step that:
 - Splits true bridges (two large masses joined by a thin connection).
 - Avoids over-splitting from boundary noise, wobble, or small spurs.
 
-## Two object regimes need two strategies
+## Two strategies, not two organelle-specific tools
 
-A single fixed-radius "thin neck" rule doesn't work uniformly:
+Neither strategy is specific to any organelle type — both are general-purpose
+and both run on any object shape. The reason to have two is that a single
+fixed-radius "thin neck" rule doesn't work well across very different
+morphologies:
 
-- **Nuclei / cells**: blob-like, not normally branched. A local narrowing is
-  almost always a merge artifact. A classic **distance-transform watershed**
-  (EDT + seeded watershed on local maxima) is the standard, simplest reliable
-  approach here.
-- **Mitochondria**: thin and branched everywhere, so raw local thickness can't
-  distinguish "normal tubule" from "merge artifact" — a segment can be thin
-  and totally legitimate. This needs a **skeleton/graph** approach that reasons
-  about topology (does cutting this edge separate two branch-heavy, high-mass
-  subtrees, or just prune a small twig?), not just a per-voxel radius check.
+- **`edt_watershed`**: the classic distance-transform watershed (EDT + seeded
+  watershed on local maxima). Simplest, most standard, and the natural
+  default — works well whenever an object is blob-like (not normally
+  branched), where a local narrowing is almost always a merge artifact.
+  Nuclei and cells are the common case, but nothing about it assumes that.
+- **`skeleton_graph`**: topology-aware — builds the object's skeleton graph
+  and only treats a point as a candidate neck if it's a genuine **local
+  minimum** of radius (thinner than every neighbor), not merely "thin." This
+  matters most for thin/branched shapes (mitochondria networks are the
+  motivating case) where raw local thickness can't distinguish "normal
+  tubule" from "merge artifact" — but it works fine on simple blobs too (see
+  "what we learned" below), so it's a reasonable strategy to reach for
+  whenever topology, not just local radius, should decide the cut.
 
 Both strategies share the same outer scaffolding (read object → find candidate
 subpieces → gate by size → relabel) and only differ in how candidate cuts are
-identified. Plan is to implement them as pluggable strategies behind one driver
-class rather than as two disconnected tools.
+identified — implemented as pluggable strategies behind one driver class
+rather than as two disconnected tools.
+
+## What we learned while implementing `skeleton_graph` (important)
+
+The first version compared each skeleton node's radius against a flat
+`neck_radius` threshold and cut any qualifying edge. That's wrong: a solid
+blob with a thin spur/protrusion has EDT radius shrinking *monotonically*
+from the blob's core down to the spur's tip — thin nearly everywhere along
+that taper, even though there's no second object on the far side (no
+dip-then-rise, just a shape narrowing to a point). A bare threshold flagged
+these constantly, which is exactly the over-splitting failure mode this
+project set out to avoid.
+
+The fix: a candidate neck must be a genuine **local minimum** — a node whose
+radius is less than or equal to *every* neighbor's, with degree ≥ 2 (skeleton
+endpoints are excluded outright — nothing continues past them, so there's no
+"far side"). This correctly separates a real bridge (thick-thin-thick) from
+an ordinary taper (monotonically thin-to-a-point). Cutting happens by
+removing the neck *node* (not an edge) from the skeleton graph, since the
+neck is conceptually a point, not a specific connection.
+
+The size-gate accounting also went through two wrong attempts before landing
+on an accurate one:
+1. A `pi * r^2 * length` tube-volume estimate per skeletal edge — overestimated
+   a real 3-voxel stub as ~6 "voxels" (radius-1 cross-sections aren't disks of
+   area π), enough to slip past the gate.
+2. Straight-line Euclidean nearest-skeleton-node assignment for every mask
+   voxel — leaked most of a compact cube's own volume onto a thin stub's
+   skeleton nodes, because straight-line distance ignores the mask's actual
+   shape/connectivity.
+
+What actually works: assign every mask voxel to its nearest skeleton node via
+a **marker-based watershed on a flat field, restricted to the mask**
+(`skimage.segmentation.watershed(np.zeros(mask.shape), markers, mask=mask)`)
+— a geodesic, through-the-mask nearest-seed assignment. Summing the resulting
+per-node voxel counts over a candidate component gives an exact voxel count,
+not a geometric proxy.
 
 ## Open design questions (unresolved — flag before implementing)
 
@@ -93,21 +139,34 @@ class SplitNarrowBridges(ComputeConfigMixin):
 - **Driver method** `split_objects()`: one dask task per object ID via
   `dask_util.plan_memory_waves` + `run_with_oom_retry` (same pattern as
   `Skeletonize`, for the same reason — per-object memory cost varies a lot).
-- **Per-object static worker** `split_id(id_value, bbox_row, segmentation_idi,
-  output_idi, strategy, neck_radius_voxels, min_subregion_voxels)`:
+- **Per-object static worker** `split_id(id_value, segmentation_idi, bbox_df,
+  strategy, neck_radius_voxels, minimum_subregion_volume_voxels,
+  max_pieces_per_object, scratch_dir)`:
   1. Read padded bbox ROI, `mask = data == id_value`.
-  2. `subpieces = strategy.find_subpieces(mask, voxel_size, neck_radius_voxels,
-     min_subregion_voxels)` → 0/1..k label array, same shape as mask.
-  3. `k <= 1`: no-op (output already has the original label from the copy step).
-  4. `k >= 2`: assign `new_id = id_value * MAX_SUBPIECES + subpiece_index`
-     (same global-offset trick used in `ConnectedComponents`/`MutexWatershed`
-     for block IDs), read-modify-write only voxels where `mask` is true within
-     the bbox (avoids clobbering neighboring objects sharing the same padded
-     box), write to `output_idi`.
-- **Final compaction**: new IDs never collide (deterministic offset per parent
-  ID), so no union-find merge pass is needed. Optionally run `fastremap.renumber`
-  for compact IDs, or reuse `ConnectedComponents.relabel_dataset` machinery
-  directly rather than reimplementing.
+  2. `subpieces = strategy.find_subpieces(mask, original_voxel_size,
+     neck_radius_voxels, minimum_subregion_volume_voxels)` → 0/1..k label
+     array, same shape as mask.
+  3. `k <= 1`: no-op, return `{"split": False}`.
+  4. `k >= 2`: persist the local `subpieces` array to a small per-object
+     scratch `.npz` and return its path + bbox roi. **Actual writing is
+     deferred** — see below for why.
+- **Why two phases, not a direct write**: writing per-object results straight
+  into a shared zarr array from concurrent per-object workers would race —
+  two objects with overlapping padded bboxes can share a chunk, and a
+  concurrent partial-chunk read-modify-write is a real data race (last
+  writer wins, silently dropping the other's edit). Fixed by splitting into:
+  **phase 1** (per-object, as above) computes into scratch files only;
+  **phase 2** is a single blockwise pass, spatially disjoint per block (same
+  tiling discipline as `ConnectedComponents`), applying all accepted splits
+  by reading `segmentation_idi` (never the not-yet-written output) block by
+  block and overlaying any split object's scratch labeling that intersects
+  that block.
+- **Final ID assignment**: rather than an `id_value`-derived offset (risk of
+  collision with an untouched object's real ID, since IDs aren't necessarily
+  dense/sequential), each split object gets a block of `max_pieces_per_object`
+  new IDs starting strictly above `max(all_original_ids)` — computed
+  driver-side, after all objects are scanned, so no union-find merge pass is
+  needed and new IDs can never collide with an untouched object's ID.
 
 #### Strategy interface (pluggable, single method)
 
@@ -117,32 +176,35 @@ class SplitStrategy(ABC):
                         min_subregion_voxels) -> np.ndarray: ...
 ```
 
-**`EDTWatershedSplit`** (nuclei / cells):
+**`EDTWatershedSplit`**:
 - `edt.edt(mask, anisotropy=voxel_size)` (same call already used in
   `Skeletonize.calculate_id_skeleton`).
 - `peak_local_max` on the EDT, `min_distance` derived from `neck_radius_voxels`,
-  markers via `ndimage.label`.
-- `skimage.segmentation.watershed(-distance, markers, mask=mask)`.
-- Shared helper `merge_small_fragments(labels, min_subregion_voxels)`:
-  iteratively dissolves any fragment below the volume gate into its
-  largest-bordering neighbor (via `fastremap`/`ndimage`) until stable — this
-  *is* the "only accept a cut if both sides are large" gate, applied
-  post-hoc instead of during neck detection. No-op if the gate is disabled.
+  markers via manual seeding, `skimage.segmentation.watershed(-distance,
+  markers, mask=mask)`.
+- Helper `_merge_small_fragments(labels, min_volume_voxels)`: iteratively
+  dissolves the smallest fragment below the gate into its largest-bordering
+  neighbor (via `fastremap`/`scipy.ndimage.binary_dilation`) until every
+  surviving fragment clears it — this *is* the "only accept a cut if both
+  sides are large" gate, applied post-hoc instead of during neck detection.
+  No-op if the gate is disabled (`None`).
 
-**`SkeletonGraphSplit`** (mitochondria):
-- Reuses the shared prefix of `Skeletonize.calculate_id_skeleton` (isotropic
-  resample, `edt`, `skimage.skeletonize`, `skimage_to_custom_skeleton_fast`)
-  through `skeleton.skeleton_to_graph()` — factor that prefix into a shared
-  helper used by both `Skeletonize` and this strategy, rather than duplicating it.
-- New logic on `CustomSkeleton`: find candidate cut-edges where node radius
-  `< neck_radius_voxels`; for each, check whether removing it splits the graph
-  into ≥2 components that each clear the size gate (reuse
-  `find_branchpoints_and_endpoints` for topology + a per-subgraph size
-  estimate); accept/reject accordingly.
-- Voxel assignment: nearest-skeleton-node labeling (KDTree over surviving
-  subgraph node positions) turns the pruned graph back into a per-voxel label
-  array — this is the "propagate labels back through the mask" step, done via
-  nearest-neighbor rather than a bespoke flood-fill.
+**`SkeletonGraphSplit`**:
+- `edt.edt` + `skimage.morphology.skeletonize` + `skimage_to_custom_skeleton_fast`
+  + `CustomSkeleton.skeleton_to_graph()` to get a graph with per-node radius.
+- Candidate necks are **nodes** (not edges) that are a genuine local minimum
+  of radius among their neighbors (degree ≥ 2, radius < threshold, radius ≤
+  every neighbor's) — see "what we learned" above for why a bare threshold
+  doesn't work. Candidates are tried thinnest-first: temporarily remove the
+  node, check `networkx.connected_components`, and (if the gate is set)
+  require every resulting component's voxel count to clear it; otherwise
+  restore the node and move on.
+- Voxel accounting/assignment: one marker-based `watershed` call (flat field,
+  restricted to the mask, markers at every skeleton voxel) assigns each mask
+  voxel to its nearest node geodesically. Per-node voxel counts from this are
+  summed per candidate component for the size gate, and the final label array
+  reuses the same assignment (nodes cut out get resolved to whichever
+  surviving neighbor's side they're topologically closest to).
 
 ### Reuse map (avoid reimplementing)
 
@@ -166,12 +228,24 @@ Follows the exact template every other step uses:
   `strategy: skeleton_graph` for mito, via the same `run-config.yaml`
   convention as every other process class.
 
-## Next steps
+## Status / next steps
 
-1. Decide (or defer/experiment with) the threshold questions above.
-2. Implement `EDTWatershedSplit` first (simpler, more standard, unblocks
-   nuc/cell testing).
-3. Implement `SkeletonGraphSplit`, factoring the shared skeleton-building
-   prefix out of `Skeletonize` rather than duplicating it.
-4. Wire up CLI + pyproject entry point.
-5. Test on real merged nuc/cell/mito instances before locking in defaults.
+Done: both strategies implemented and unit-tested on synthetic geometries
+(dumbbells, a compact cube, a cube-with-spurious-stub); CLI (`split-narrow-bridges`)
+and `pyproject.toml` entry wired up.
+
+Not done yet:
+1. Never run on real merged nuc/cell/mito data — only synthetic smoke tests
+   so far. Needed before trusting any default threshold values.
+2. `split_objects()` dispatches per-object work via a single
+   `compute_blockwise_partitions` call, not `dask_util.plan_memory_waves` +
+   `run_with_oom_retry` (the memory-aware wave scheduling `Skeletonize` uses
+   for the same per-object-size-variance problem). Worth adding if large
+   objects (e.g. big mitochondria networks) OOM in practice.
+3. The threshold questions from "Open design questions" are still open —
+   adaptive/relative thresholds haven't been explored; `neck_radius_nm` is
+   still one fixed value per run.
+4. `SkeletonGraphSplit`'s per-candidate-neck connectivity check is
+   O(candidates × graph size) in the worst case (full `connected_components`
+   recomputed per trial) — fine for per-object bbox-sized skeletons, but
+   worth revisiting if very large branched networks turn out to be slow.
