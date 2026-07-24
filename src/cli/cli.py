@@ -171,6 +171,19 @@ def fit_lines_to_segmentations():
             fit_lines.get_fit_lines_to_segmentations()
 
 
+def compute_edt():
+    from cellmap_analyze.process.compute_edt import ComputeEDT
+
+    rp = RunProperties()
+    with io_util.tee_streams(rp.logpath):
+        os.chdir(rp.execution_directory)
+        with io_util.TimingMessager(
+            "ComputeEDT", logger, final_message="Complete success"
+        ):
+            cedt = ComputeEDT(**rp.run_config)
+            cedt.calculate_edt()
+
+
 def split_narrow_bridges():
     from cellmap_analyze.process.split_narrow_bridges import SplitNarrowBridges
 

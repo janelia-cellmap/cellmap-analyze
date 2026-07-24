@@ -95,16 +95,120 @@ def _merge_small_fragments(labels, min_volume_voxels):
     return labels
 
 
+def _merge_thick_boundaries(labels, distance, neck_radius_nm):
+    """Reject any watershed split whose boundary isn't actually thin.
+
+    Two peaks sitting in one continuously-fat, irregularly-shaped blob (a
+    lumpy real nucleus, not two merged objects) can each seed their own
+    watershed basin even with no real neck between them -- a size gate alone
+    doesn't catch this. This finds, for every pair of adjacent regions, the
+    widest point along their shared boundary (the "pass" between the two
+    basins); if it isn't meaningfully thinner than ``neck_radius_nm``, the
+    regions get merged back together (worst -- thickest -- offender first)
+    until every remaining boundary is thin enough.
+
+    A first version of this recomputed every region's mask + dilation +
+    neighbor boundaries from scratch after every single merge -- fine for a
+    handful of small fragments, but on a real ~100M-voxel merged-nucleus
+    object with ~50 initial peaks it took 2.4 *hours*, because most of that
+    work (whole-array boolean ops and dilations) was redone from a cold
+    start for every one of the ~20 merges needed to converge. Fixed by
+    separating the (expensive, but one-time) voxel-array work from the
+    (cheap, iterative) decision-making: find every touching pair of labels
+    and the max EDT radius at their shared boundary in a single pass over
+    the array, then do all the merging on that small label-adjacency graph
+    (tens of entries, not tens of millions of voxels) via union-find,
+    folding a merged region's neighbor list into its surviving root instead
+    of rescanning the array.
+    """
+    ids = fastremap.unique(labels[labels > 0])
+    if len(ids) <= 1:
+        return labels
+
+    # Single pass over the array: for every face-adjacent pair of touching,
+    # differing labels, record the largest EDT radius seen at that junction
+    # (the widest point along their shared boundary).
+    pass_radius = {}
+    for axis in range(labels.ndim):
+        lo_slice = [slice(None)] * labels.ndim
+        hi_slice = [slice(None)] * labels.ndim
+        lo_slice[axis] = slice(0, -1)
+        hi_slice[axis] = slice(1, None)
+        lo_slice, hi_slice = tuple(lo_slice), tuple(hi_slice)
+        a, b = labels[lo_slice], labels[hi_slice]
+        touching = (a > 0) & (b > 0) & (a != b)
+        if not np.any(touching):
+            continue
+        la, lb = a[touching], b[touching]
+        radii = np.maximum(distance[lo_slice][touching], distance[hi_slice][touching])
+        lo_id, hi_id = np.minimum(la, lb), np.maximum(la, lb)
+        for l, h, r in zip(lo_id.tolist(), hi_id.tolist(), radii.tolist()):
+            key = (l, h)
+            if r > pass_radius.get(key, -1.0):
+                pass_radius[key] = r
+
+    if not pass_radius:
+        return labels
+
+    # adjacency[a][b] = widest boundary radius between current regions a, b.
+    # Keys are always *current* union-find roots -- merging folds b's entries
+    # into a's and fixes up any of b's former neighbors to point at a.
+    adjacency = {}
+    for (lo_id, hi_id), radius in pass_radius.items():
+        adjacency.setdefault(lo_id, {})[hi_id] = radius
+        adjacency.setdefault(hi_id, {})[lo_id] = radius
+
+    parent = {int(i): int(i) for i in ids}
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    while True:
+        worst_pair, worst_radius = None, -1.0
+        for a, neighbors in adjacency.items():
+            for b, radius in neighbors.items():
+                if radius > worst_radius:
+                    worst_radius, worst_pair = radius, (a, b)
+        if worst_pair is None or worst_radius < neck_radius_nm:
+            break
+        a, b = worst_pair
+        parent[b] = a
+        b_neighbors = adjacency.pop(b)
+        a_neighbors = adjacency[a]
+        del a_neighbors[b]
+        for other, radius in b_neighbors.items():
+            if other == a:
+                continue
+            adjacency[other].pop(b, None)
+            merged_radius = max(radius, a_neighbors.get(other, -1.0))
+            a_neighbors[other] = merged_radius
+            adjacency[other][a] = merged_radius
+
+    remap = {i: find(i) for i in parent if find(i) != i}
+    if not remap:
+        return labels
+    labels = labels.copy()
+    fastremap.remap(labels, remap, preserve_missing_labels=True, in_place=True)
+    return labels
+
+
 class EDTWatershedSplit(SplitStrategy):
     """Distance-transform watershed: standard approach for splitting
     blob-like objects (nuclei, cells) joined by a thin neck.
 
-    ``neck_radius_voxels`` sets the minimum separation between watershed
-    seeds (an isotropic approximation using the finest voxel axis -- see the
-    open question in docs/split_narrow_bridges_plan.md about anisotropic
-    handling). ``minimum_subregion_volume_voxels`` is an optional post-hoc
-    gate: fragments below it are dissolved into their largest neighbor
-    rather than kept as separate objects.
+    ``neck_radius_voxels`` does double duty: it sets the minimum separation
+    between watershed seeds (an isotropic approximation using the finest
+    voxel axis -- see the open question in docs/split_narrow_bridges_plan.md
+    about anisotropic handling), *and* it's the maximum boundary width for a
+    watershed split to be accepted as a genuine neck (see
+    ``_merge_thick_boundaries``) -- this is the "thin, between two thicker
+    things" check. ``minimum_subregion_volume_voxels`` is an optional
+    second, independent gate: fragments below it are dissolved into their
+    largest neighbor regardless of boundary thinness (catches tiny noise
+    fragments that happen to sit behind a technically-thin boundary).
     """
 
     def find_subpieces(
@@ -130,6 +234,12 @@ class EDTWatershedSplit(SplitStrategy):
 
         labels = watershed(-distance, markers, mask=mask)
 
+        # neck_radius_voxels is an isotropic voxel-count approximation
+        # (neck_radius_nm / min(voxel_size)); round-trip it back to physical
+        # nm to compare against the EDT-based (physical) boundary radii.
+        neck_radius_nm = neck_radius_voxels * min(voxel_size)
+        labels = _merge_thick_boundaries(labels, distance, neck_radius_nm)
+
         if minimum_subregion_volume_voxels:
             labels = _merge_small_fragments(labels, minimum_subregion_volume_voxels)
 
@@ -148,13 +258,16 @@ class SkeletonGraphSplit(SplitStrategy):
     candidate cuts, same as EDTWatershedSplit would report "no split").
 
     Builds the object's skeleton, samples the EDT radius at each skeleton
-    node, and looks for candidate necks: nodes whose radius is a genuine
-    local minimum (thinner than every neighbor, below ``neck_radius_voxels``)
-    -- not just nodes below the threshold. A bare threshold would also flag
-    an ordinary monotonic taper (e.g. a cube with a thin spur has radius
-    shrinking steadily to the spur's tip -- thin all the way, but never
-    dipping and rising again, so there's no second object on the far side).
-    A true bridge looks like thick-thin-thick. Candidate necks are cut
+    node, and looks for candidate necks: maximal connected runs of nodes
+    whose radius is below ``neck_radius_voxels`` ("thin segments") that are
+    flanked by thicker material on *every* side -- not just any node below
+    the threshold. A bare threshold would also flag an ordinary monotonic
+    taper (e.g. a blob with a thin spur has radius shrinking steadily to the
+    spur's tip -- thin all the way, but never bounded by thick material on
+    the far side, since there's no second object out there). A thin segment
+    that runs all the way to a skeleton endpoint is exactly that case and is
+    excluded outright; a thin segment must be "thin, between two thicker
+    things" on every side to qualify. Candidate segments are cut
     thinnest-first: a cut is only kept if it actually disconnects the graph,
     and (when ``minimum_subregion_volume_voxels`` is set) if every resulting
     side clears the size gate -- this is the topology-aware check that lets
@@ -221,58 +334,60 @@ class SkeletonGraphSplit(SplitStrategy):
         def component_voxel_count(component_nodes):
             return int(node_voxel_counts[list(component_nodes)].sum())
 
-        # A candidate cut point is a NODE, not an edge -- and only a node
-        # whose radius is a genuine local minimum (a dip that's thinner than
-        # *every* neighbor) qualifies. Radius alone (without the local-min
-        # check) was tried first: it also flags ordinary monotonic tapers --
-        # e.g. a solid cube with a thin spur has EDT radius shrinking
-        # steadily from the cube's core down to the spur's tip, so nearly
-        # every point along that taper is "thin" relative to a fixed
-        # threshold, even though there's no dip-then-rise anywhere (no
-        # second object on the far side -- it's one shape, tapering to a
-        # point). A true bridge instead looks like thick-thin-thick: the
-        # radius dips at the neck and rises again on both sides. Skeleton
-        # endpoints (degree < 2, nothing continues past them) are excluded
-        # outright since there's no "far side" to speak of.
+        # A candidate cut is a maximal connected run of nodes below the
+        # threshold ("thin segment"), not a single node -- and only a
+        # segment flanked by thicker material on *every* side qualifies.
+        # Nodes below threshold alone (without the flanking check) was tried
+        # first: it also flags ordinary monotonic tapers -- e.g. a solid
+        # cube with a thin spur has EDT radius shrinking steadily from the
+        # cube's core down to the spur's tip, so the whole taper reads as
+        # "thin," even though nothing bounds it on the far side (no second
+        # object out there -- it's one shape, ending in free space). A
+        # per-node "local minimum vs. immediate neighbors only" check was
+        # tried second: too fragile near branch points and noisy single-voxel
+        # radius jitter, and it missed a real, visually obvious neck on real
+        # cerebellum nucleus data. A thin segment that touches a skeleton
+        # endpoint (degree < 2) is exactly the monotonic-taper case and is
+        # excluded outright; every other thin segment is, by construction,
+        # bounded by >= threshold-radius material on every side it connects
+        # to (any lower-radius neighbor would already be part of the same
+        # segment) -- this is the "thin, between two thicker things" check.
         original_neighbors = {n: list(g.neighbors(n)) for n in g.nodes}
 
-        def is_neck_node(n):
-            neighbors = original_neighbors[n]
-            if len(neighbors) < 2:
-                return False
-            r = g.nodes[n]["radius"]
-            return r < neck_radius_nm and all(
-                r <= g.nodes[nb]["radius"] for nb in neighbors
-            )
-
-        candidate_nodes = sorted(
-            (n for n in g.nodes if is_neck_node(n)),
-            key=lambda n: g.nodes[n]["radius"],
+        thin_nodes = {
+            n for n in g.nodes if g.nodes[n]["radius"] < neck_radius_nm
+        }
+        thin_components = list(nx.connected_components(g.subgraph(thin_nodes)))
+        candidate_segments = sorted(
+            (
+                segment
+                for segment in thin_components
+                if not any(len(original_neighbors[n]) < 2 for n in segment)
+            ),
+            key=lambda segment: min(g.nodes[n]["radius"] for n in segment),
         )
 
-        for n in candidate_nodes:
-            if n not in g:
-                continue
-            node_attrs = dict(g.nodes[n])
-            incident_edges = [(n, nb, dict(data)) for nb, data in g[n].items()]
-            g.remove_node(n)
+        for segment in candidate_segments:
+            node_attrs = {n: dict(g.nodes[n]) for n in segment}
+            saved_edges = list(g.edges(segment, data=True))
+            g.remove_nodes_from(segment)
             components = list(nx.connected_components(g))
             if len(components) < 2:
                 # Didn't actually separate anything (e.g. part of a cycle).
-                g.add_node(n, **node_attrs)
-                for _, nb, data in incident_edges:
-                    g.add_edge(n, nb, **data)
+                for n, attrs in node_attrs.items():
+                    g.add_node(n, **attrs)
+                g.add_edges_from(saved_edges)
                 continue
 
             if minimum_subregion_volume_voxels and not all(
                 component_voxel_count(c) >= minimum_subregion_volume_voxels
                 for c in components
             ):
-                g.add_node(n, **node_attrs)
-                for _, nb, data in incident_edges:
-                    g.add_edge(n, nb, **data)
+                for n, attrs in node_attrs.items():
+                    g.add_node(n, **attrs)
+                g.add_edges_from(saved_edges)
                 continue
-            # else: accepted (node n stays removed), or no size gate --
+            # else: accepted (segment stays removed), or no size gate --
             # accept every candidate cut that actually separates the graph.
             # A disabled gate can over-split heavily-branched objects; set
             # minimum_subregion_volume_nm_3 to guard against that (see
