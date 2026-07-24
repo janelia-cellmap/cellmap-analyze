@@ -59,6 +59,7 @@ def with_tqdm(fn):
                 lst,
                 total=N,
                 miniters=max(1, N // 10),
+                mininterval=5,
                 maxinterval=120,
                 desc=fn.__name__,
             ),
@@ -679,17 +680,24 @@ def setup_execution_directory(config_path, logger):
 
 
 def delete_chunks(block_index, get_delete_path_fn, idi_or_location, depth):
-    delete_path = get_delete_path_fn(block_index, idi_or_location, depth)
-    if os.path.exists(delete_path):
-        if os.path.isfile(delete_path):
-            os.remove(delete_path)
+    delete_path(get_delete_path_fn(block_index, idi_or_location, depth))
+
+
+def delete_path(path):
+    if os.path.exists(path):
+        if os.path.isfile(path):
+            os.remove(path)
         else:
             try:
-                if os.listdir(delete_path) == []:
-                    shutil.rmtree(delete_path, ignore_errors=True)
-            except FileNotFoundError:
-                # then already removed
-                # TODO: Be smarter about deletions
+                if os.listdir(path) == []:
+                    shutil.rmtree(path, ignore_errors=True)
+            except OSError:
+                # Already removed (ENOENT), or another worker raced us onto
+                # the same directory - duplicate block coords collapse onto
+                # one path at shallow depth - and hit a stale NFS handle
+                # (ESTALE) mid-listdir/rmtree. delete_tmp_dir_blockwise does
+                # a final ignore_errors rmtree of the whole tree regardless,
+                # so leaving a stray directory here is harmless.
                 pass
 
 
@@ -720,16 +728,22 @@ def _estimated_distributed_seconds(num_blocks, num_workers):
 def _delete_blocks_locally(get_delete_path_fn, idi_or_location, num_blocks, threads=None):
     with Pool(threads) as pool:
         for depth in range(3, 0, -1):
+            # block_coords[:depth] collapses many block indices onto the
+            # same directory at shallow depth (e.g. depth 1 keeps only the
+            # first coord), so dedupe paths before dispatching - otherwise
+            # dozens of threads race to listdir/rmtree the identical
+            # directory, which is both wasted work and the source of
+            # ENOENT/ESTALE errors when one thread's rmtree empties a
+            # directory out from under another's listdir.
+            paths = list(
+                {get_delete_path_fn(i, idi_or_location, depth) for i in range(num_blocks)}
+            )
             list(
                 tqdm(
-                    pool.imap_unordered(
-                        lambda i, depth=depth: delete_chunks(
-                            i, get_delete_path_fn, idi_or_location, depth
-                        ),
-                        range(num_blocks),
-                    ),
-                    total=num_blocks,
-                    miniters=max(1, num_blocks // 10),
+                    pool.imap_unordered(delete_path, paths),
+                    total=len(paths),
+                    miniters=max(1, len(paths) // 10),
+                    mininterval=5,
                     maxinterval=120,
                     desc=f"Deleting tmp files (depth {depth})",
                 )
@@ -868,6 +882,7 @@ def read_results_to_merge(output_dir, num_blocks, threads=None):
                 pool.imap(_load, range(num_blocks)),
                 total=num_blocks,
                 miniters=max(1, num_blocks // 10),
+                mininterval=5,
                 maxinterval=120,  # 120 seconds between updates
                 desc="Loading blocks",
             )
