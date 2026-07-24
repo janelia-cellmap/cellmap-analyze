@@ -171,6 +171,19 @@ def fit_lines_to_segmentations():
             fit_lines.get_fit_lines_to_segmentations()
 
 
+def split_narrow_bridges():
+    from cellmap_analyze.process.split_narrow_bridges import SplitNarrowBridges
+
+    rp = RunProperties()
+    with io_util.tee_streams(rp.logpath):
+        os.chdir(rp.execution_directory)
+        with io_util.TimingMessager(
+            "SplitNarrowBridges", logger, final_message="Complete success"
+        ):
+            snb = SplitNarrowBridges(**rp.run_config)
+            snb.split_objects()
+
+
 def assign_to_organelles():
     from cellmap_analyze.analyze.assign_to_organelles import AssignToOrganelles
 
