@@ -5,13 +5,29 @@ from cellmap_analyze.process.connected_components import ConnectedComponents
 from scipy.ndimage import gaussian_filter
 import numpy as np
 import networkx as nx
+from funlib.geometry import Coordinate, Roi
 
 from cellmap_analyze.util.image_data_interface import (
     ImageDataInterface,
 )
+from cellmap_analyze.util.zarr_util import create_multiscale_dataset
 
 import cc3d
 import os
+
+
+def _write_channel(path, arr, voxel_size=(1.0, 1.0, 1.0)):
+    total_roi = Roi((0, 0, 0), Coordinate(arr.shape) * Coordinate(voxel_size))
+    ds = create_multiscale_dataset(
+        path,
+        dtype=arr.dtype,
+        voxel_size=voxel_size,
+        total_roi=total_roi,
+        write_size=Coordinate(10, 10, 10) * Coordinate(voxel_size),
+        original_voxel_size=voxel_size,
+    )
+    ds.data[:] = arr
+    return f"{path}/s0"
 
 
 def _networkx_ground_truth(nodes, edges):
@@ -322,3 +338,105 @@ def test_gaussian_smoothing(
         test_data,
         ground_truth,
     )
+
+
+def test_connected_components_consensus_config_majority_vote(tmp_path):
+    # Nested inside one .zarr container -- matching every other test in this
+    # file (via the tmp_zarr fixture) -- since create_multiscale_dataset's
+    # "root dataset" path (a bare, non-.zarr-nested output path) has a
+    # pre-existing, unrelated bug creating a fresh top-level zarr store.
+    container = str(tmp_path / "consensus.zarr")
+    shape = (12, 12, 12)
+    input_a = np.zeros(shape, dtype=np.uint8)
+    input_b = np.zeros(shape, dtype=np.uint8)
+    input_c = np.zeros(shape, dtype=np.uint8)
+
+    # all three inputs agree here
+    input_a[2:8, 2:8, 2:8] = 1
+    input_b[2:8, 2:8, 2:8] = 1
+    input_c[2:8, 2:8, 2:8] = 1
+
+    # only two of three inputs agree here -- should still pass a 2-of-3 vote
+    input_a[9:11, 9:11, 9:11] = 1
+    input_b[9:11, 9:11, 9:11] = 1
+
+    path_a = _write_channel(f"{container}/input_a", input_a)
+    path_b = _write_channel(f"{container}/input_b", input_b)
+    path_c = _write_channel(f"{container}/input_c", input_c)
+
+    cc = ConnectedComponents(
+        output_path=f"{container}/consensus_out",
+        consensus_config=[
+            {"path": path_a, "intensity_threshold_minimum": 1},
+            {"path": path_b, "intensity_threshold_minimum": 1},
+            {"path": path_c, "intensity_threshold_minimum": 1},
+        ],
+        minimum_consensus_count=2,
+        num_workers=1,
+        connectivity=1,
+    )
+    cc.get_connected_components()
+
+    result = ImageDataInterface(f"{container}/consensus_out/s0").to_ndarray_ts()
+    expected_mask = np.zeros(shape, dtype=bool)
+    expected_mask[2:8, 2:8, 2:8] = True
+    expected_mask[9:11, 9:11, 9:11] = True
+
+    assert np.array_equal(result > 0, expected_mask)
+    assert len(np.unique(result[result > 0])) == 2
+
+
+def test_connected_components_consensus_config_unanimous_default(tmp_path):
+    container = str(tmp_path / "consensus_unanimous.zarr")
+    shape = (12, 12, 12)
+    input_a = np.zeros(shape, dtype=np.uint8)
+    input_b = np.zeros(shape, dtype=np.uint8)
+
+    input_a[2:8, 2:8, 2:8] = 1
+    input_b[2:6, 2:6, 2:6] = 1  # input_b only agrees on a sub-region
+
+    path_a = _write_channel(f"{container}/input_a", input_a)
+    path_b = _write_channel(f"{container}/input_b", input_b)
+
+    cc = ConnectedComponents(
+        output_path=f"{container}/consensus_out",
+        consensus_config=[
+            {"path": path_a, "intensity_threshold_minimum": 1},
+            {"path": path_b, "intensity_threshold_minimum": 1},
+        ],
+        # minimum_consensus_count left at default -> unanimous (2 of 2)
+        num_workers=1,
+        connectivity=1,
+    )
+    cc.get_connected_components()
+
+    result = ImageDataInterface(f"{container}/consensus_out/s0").to_ndarray_ts()
+    expected_mask = np.zeros(shape, dtype=bool)
+    expected_mask[2:6, 2:6, 2:6] = True
+
+    assert np.array_equal(result > 0, expected_mask)
+
+
+def test_connected_components_consensus_config_mutually_exclusive_with_input_path(
+    tmp_path,
+):
+    container = str(tmp_path / "consensus_bad.zarr")
+    path_a = _write_channel(f"{container}/input_a", np.zeros((4, 4, 4), dtype=np.uint8))
+    with pytest.raises(Exception):
+        ConnectedComponents(
+            output_path=f"{container}/bad_out",
+            input_path=path_a,
+            consensus_config=[{"path": path_a}],
+        )
+
+
+def test_connected_components_consensus_config_invalid_minimum_consensus(tmp_path):
+    container = str(tmp_path / "consensus_bad2.zarr")
+    path_a = _write_channel(f"{container}/input_a", np.zeros((4, 4, 4), dtype=np.uint8))
+    path_b = _write_channel(f"{container}/input_b", np.zeros((4, 4, 4), dtype=np.uint8))
+    with pytest.raises(Exception):
+        ConnectedComponents(
+            output_path=f"{container}/bad_out",
+            consensus_config=[{"path": path_a}, {"path": path_b}],
+            minimum_consensus_count=3,
+        )
