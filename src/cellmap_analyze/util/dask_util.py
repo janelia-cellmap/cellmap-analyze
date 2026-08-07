@@ -21,16 +21,83 @@ from yaml.loader import SafeLoader
 
 
 def _available_cpu_count() -> int:
-    """Cross-platform process CPU count.
+    """CPU count actually available to this process.
 
-    Prefers ``os.sched_getaffinity`` on linux to respect cgroup / LSF /
-    Slurm CPU pinning (more accurate than total physical cores under
-    those schedulers). Falls back to ``os.cpu_count()`` everywhere
-    sched_getaffinity isn't exposed (macOS, Windows).
+    Delegates to ``dask.system.cpu_count()``, which takes the *minimum* of
+    the host's total CPU count, ``psutil`` CPU affinity (respects cpuset-
+    based cgroup pinning -- what LSF/Slurm/SGE typically use), and a
+    cgroup v1/v2 CPU quota reading (respects quota/shares-based limiting,
+    which affinity alone would miss). Falls back to ``os.sched_getaffinity``
+    (affinity-only) or ``os.cpu_count()`` if dask's helper is unavailable.
     """
+    try:
+        from dask.system import cpu_count as _dask_cpu_count
+        return int(_dask_cpu_count())
+    except Exception:
+        pass
     if hasattr(os, "sched_getaffinity"):
         return len(os.sched_getaffinity(0))
     return os.cpu_count() or 1
+
+
+def resolve_concurrency_limit(num_workers, concurrency_limit=None):
+    """Constructor-time ``ImageDataInterface.concurrency_limit`` default.
+
+    Returns ``concurrency_limit`` unchanged when the caller passed one
+    explicitly. Otherwise auto-resolves: ``num_workers <= 1`` means
+    ``dask_util.start_dask`` never spins up a cluster at all (see its
+    early return) -- this process is the only one running, so it's safe
+    to use every CPU actually available to it (``_available_cpu_count()``).
+    ``num_workers > 1`` means a real dask cluster is coming, where sibling
+    worker processes may share a node/job's CPU allocation -- keep the
+    conservative ``1`` (tensorstore's own historical default) rather than
+    risk oversubscription; per-job fair-share rescaling for that case is
+    ``rescale_idi_concurrency``'s job, done inside each worker at runtime.
+    """
+    if concurrency_limit is not None:
+        return concurrency_limit
+    return _available_cpu_count() if num_workers <= 1 else 1
+
+
+def rescale_idi_concurrency(idis, processes_per_job):
+    """Worker-side fair-share rescale of one or more IDIs' concurrency_limit.
+
+    Call this from inside a per-item worker task (e.g. a ``split_id``-style
+    staticmethod), before the first read on any of ``idis``. A single
+    lsf/slurm/sge job's CPU affinity is shared by every dask worker
+    *process* running inside it (cgroup/cpuset affinity isn't divided per
+    sibling process), so each sibling must independently claim only its
+    fair share -- ``_available_cpu_count()`` (this worker's live, real
+    affinity/quota count) // ``processes_per_job`` (how many sibling worker
+    processes run inside this same job -- see ``wave_uses_shared_job_cpuset``
+    and ``WavePlan.processes``). ``processes_per_job`` falsy (None, 0) is a
+    no-op -- leaves whatever concurrency_limit each IDI already has.
+    """
+    if not processes_per_job:
+        return
+    fair_share = max(1, _available_cpu_count() // int(processes_per_job))
+    for idi in idis:
+        if idi is not None:
+            idi.concurrency_limit = fair_share
+
+
+def wave_uses_shared_job_cpuset(config):
+    """Whether ``rescale_idi_concurrency``'s ``processes_per_job`` divisor
+    is meaningful for waves planned from ``config``.
+
+    True only for lsf/slurm/sge: dask-jobqueue submits one job per group of
+    ``processes`` worker processes, and that job's cpuset is what's shared
+    (see ``rescale_idi_concurrency``). "local" runs every worker directly
+    via ``LocalCluster(n_workers=...)`` with no such per-job grouping (see
+    ``start_dask``), so a wave's ``processes`` count isn't the right
+    sibling divisor there -- and neither is any other value we could derive
+    without also knowing how many *other* local clusters share this same
+    machine, which we can't know. None/empty config also returns False
+    (the synchronous/no-cluster path, already handled by
+    ``resolve_concurrency_limit``).
+    """
+    cluster_type, _ = _jobqueue_settings(config)
+    return cluster_type in ("lsf", "slurm", "sge")
 from dataclasses import dataclass
 from funlib.geometry import Coordinate, Roi
 import numpy as np

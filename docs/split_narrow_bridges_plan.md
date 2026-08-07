@@ -228,24 +228,376 @@ Follows the exact template every other step uses:
   `strategy: skeleton_graph` for mito, via the same `run-config.yaml`
   convention as every other process class.
 
+## Boundary-thinness gate, real-data testing, and a 2.4hr perf bug
+
+`EDTWatershedSplit` originally only gated splits by fragment *size*
+(`_merge_small_fragments`); real cerebellum-nucleus data showed this isn't
+enough — two peaks sitting in one continuously-fat, irregularly-shaped blob
+(a lumpy real nucleus, not two merged objects) can each seed their own
+watershed basin with no real neck between them. Added
+`_merge_thick_boundaries`: for every pair of adjacent watershed regions,
+find the widest point along their shared boundary and merge them back
+together (worst offender first) until every remaining boundary is genuinely
+thinner than `neck_radius_nm`. This is the "thin, between two thicker
+things" check for `edt_watershed`, mirroring what `SkeletonGraphSplit`
+already did topologically.
+
+A first version of `_merge_thick_boundaries` recomputed every region's mask
++ dilation + neighbor boundaries from scratch after every single merge —
+fine for a handful of fragments, but on a real ~100M-voxel merged-nucleus
+object with ~50 initial peaks it took **2.4 hours**. Fixed by separating the
+one-time expensive array work (a single pass over the array to find every
+touching label pair and the max EDT radius at their shared boundary) from
+the cheap iterative decision-making (union-find merging on that small
+label-adjacency graph) — same real object now takes 216s, bit-identical
+output (~40x speedup).
+
+Tested on real `jrc_mus-cerebellum-2` nucleus data (ids 2307, 2131).
+`skeleton_graph` reliably under-splits relative to `edt_watershed` on lumpy
+blob shapes: Lee's 3D thinning creates spurious topological loops/cycles on
+bumpy real biological surfaces, letting genuine thin necks be "bypassed"
+(cutting the candidate segment doesn't disconnect the graph, since the loop
+provides another path around it) even when correctly identified as a
+candidate. This is a deeper limitation than neck-detection logic and isn't
+fixed by better thresholds — `skeleton_graph` remains most reliable for
+genuinely tree-like/branched shapes (its motivating mitochondria case), not
+lumpy blobs (nuclei/cells), where `edt_watershed` is the safer default.
+
+## `ComputeEDT` and wiring precomputed EDT into `SplitNarrowBridges`
+
+`edt.edt()` (the Seung-lab package) is multi-label aware: given the raw
+labeled array directly — not a binarized single-instance mask — it computes,
+per voxel, the distance to the nearest voxel with a *different* label
+(background included). That's exactly what each strategy needs per object,
+just computable once for the whole dataset instead of recomputed per object.
+Added `src/cellmap_analyze/process/compute_edt.py`
+(`ComputeEDT(ComputeConfigMixin)`, CLI `compute-edt`): a blockwise pass that
+persists this multi-label EDT as its own dataset. Windowed/truncated EDT can
+only *overestimate* the true distance (a min over a smaller candidate set),
+so a fixed `padding_nm` only needs to comfortably exceed whatever thinness
+threshold downstream consumers care about, not the physical scale of any
+object — validated on real id 2307 data (100% agreement with the true
+per-object EDT on the actual "<500nm" threshold decision that
+`SplitNarrowBridges` makes, despite raw value differences up to 253.5nm deep
+in thick interiors).
+
+`SplitNarrowBridges` now takes an optional `edt_path`: when given, each
+object reads its EDT window from there (`ImageDataInterface.to_ndarray_ts`
+over the same roi used to read the segmentation) instead of calling
+`edt.edt(mask, ...)` itself — the expensive part for very large merged
+objects (e.g. the 97M-voxel id 2131). `SplitStrategy.find_subpieces` grew an
+optional `distance=None` parameter threaded through both strategies; `None`
+falls back to the original per-object computation.
+
+When `edt_path` is *not* given, `precompute_edt` (**default `False`** — see
+below for why this flipped from the original `True`) controls whether
+`SplitNarrowBridges` auto-runs `ComputeEDT` once, up front, into a scratch
+dataset (named/cleaned up the same way the other scratch files/dirs already
+are, via `_run_id`/`delete_tmp`) instead of the bare per-object recompute —
+the same "auto-run the expensive prerequisite if not supplied" pattern
+already used for `csv_path=None` auto-running `Measure`. `edt_padding_nm`
+(default `max(neck_radius_nm, one voxel)`) controls the padding for that
+auto-run. Set `precompute_edt=True` if you're iterating on thresholds
+across many runs over the same segmentation and want to amortize the EDT
+cost (better: run `compute-edt` yourself once and pass the result via
+`edt_path`, reused every run). A per-object shape mismatch between the
+precomputed dataset and the segmentation crop raises rather than silently
+misaligning (should never happen if `edt_path` was produced by `ComputeEDT`
+run over the same `segmentation_path`).
+
+**`precompute_edt` default flipped `True` → `False` after a real production
+failure.** A real run on `jrc_mus-cerebellum-3`'s `nuc` dataset (32nm voxels,
+256³ chunks, `neck_radius_nm=1000` → `edt_padding_nm=1000`) OOM'd during the
+`precompute_edt=True` `ComputeEDT` blockwise pass: `block_multiplier=4` gives
+1024³-voxel native blocks, plus 32 voxels of padding on every axis/side (from
+`ceil(1000nm / 32nm)`) → a padded read of 1088³ ≈ 1.29B voxels per block —
+against a 240GB/16-process ≈ 14GB per-slot budget in `dask-config.yaml`.
+Unlike `SplitNarrowBridges`'s own per-object dispatch (`_estimate_peak_bytes`
++ `plan_memory_waves`), `ComputeEDT.calculate_edt()` has **no memory-aware
+wave planning at all** — every block gets the same fixed per-slot budget
+regardless of how big `block_multiplier`/`padding_nm` make it, and
+`calculate_block_edt` (`compute_edt.py:110`) never `del`s the raw `data`
+array and does a redundant `.astype(np.float32)` copy even though
+`edt.edt()` already returns float32 for both boolean-mask and multi-label
+integer input (confirmed empirically — not float64, as this doc's own
+per-object estimator assumed elsewhere). Combined, the per-block peak
+(~12GB) left almost no margin, and cross-block allocator fragmentation
+within the same long-lived worker process (see the "Bytes stored"/unmanaged-
+memory investigation below) was enough to tip it over — 4 different workers
+died on the same block before dask gave up.
+
+Root cause is structural, not a tunable-away fluke: `ComputeEDT` dispatches
+on a *fixed grid*, so every block pays the same `neck_radius_nm`-scaled
+padding regardless of whether it's actually near a real object boundary —
+deep-interior blocks of a huge merged blob cost exactly as much padding as
+blocks that are genuinely thin. Per-object dispatch doesn't have this
+problem: `_object_roi`'s crop is tight around each object's *own* real
+extent, so equivalent padding is comparatively cheap, and it already flows
+through the proven-safe per-object wave machinery for free. Rather than
+build memory-aware wave planning for `ComputeEDT` too (feasible — since
+every block is ~uniform size here, unlike per-object bbox variance, it would
+reduce to a single upfront sizing decision, not true multi-wave scheduling —
+but still new code, new surface area), the fix was simply to default to the
+path that's already safe: `precompute_edt=False`, per-object. `ComputeEDT`
+remains available (`precompute_edt=True`, or run standalone + `edt_path=`)
+for the genuine amortization use case, with its memory-safety caveat now
+documented above and in its own docstring.
+
+**Bug found while validating this wiring**: `_object_roi`'s "1 voxel
+padding in each direction" was silently asymmetric. Measure's
+`"MIN/MAX (nm)"` CSV columns are voxel-*center* coordinates, not edges. The
+original code did `MIN*sf - padding` / `MAX*sf + padding`: since `MIN*sf` is
+already half a voxel *inside* the object's true bounding box, subtracting a
+full voxel of padding correctly lands a full voxel past the low edge — but
+`MAX*sf` is likewise half a voxel *inside* the box, so adding a full voxel
+only reached the far edge of the object's own last voxel, giving **~zero**
+real margin on the high side of every axis. This meant the per-object mask
+EDT (`edt.edt(mask, ...)` on the tightly-cropped bbox) silently lost
+accuracy for voxels near the high-coordinate faces of every object — an
+edge-truncation artifact, invisible until compared against `ComputeEDT`'s
+globally-correct output (max diff up to 5 voxels' worth of distance on a
+20³ synthetic test). Fixed in `_object_roi` by shifting both bounds by
+`voxel_size/2` before applying padding, landing them exactly on grid edges
+regardless of rounding downstream.
+
+The identical high-side bug existed in `Skeletonize.calculate_id_skeleton`
+(`skeletonize.py:573-588`, same variable names, same `- padding`/`+ padding`
+structure) and was fixed there too -- but *not* with the same symmetric
+shift-both-bounds approach. Skeletonize's final vertex coordinates are
+computed as `index * spacing + start_point_nm` (`skeletonize.py:~717-728`),
+where `index * spacing` is an edge-relative local coordinate from
+`skimage_to_custom_skeleton_fast`. It turns out `start_point`'s *un-shifted*
+form (`MIN*sf - padding`, sitting exactly `voxel_size/2` below the true low
+edge) is not a bug for that call site — it's exactly the correction needed
+to convert the edge-relative local coordinate into an absolute voxel
+*center* coordinate, and an existing regression test
+(`test_skeletonize_nonzero_translation_shifts_by_translation`) encodes this
+as a correctness requirement. Symmetrically "fixing" the low side there
+broke that test (vertices landed half a voxel low). So the Skeletonize fix
+only touches `end_point` (`MAX*sf + voxel_size/2 + padding`) — that side only
+controls how much extra background the read grabs, not any coordinate
+offset used later, so it was safe to correct without touching `start_point`.
+
+## Skipping ginormous false-positive objects (removed)
+
+Originally added a `max_object_volume_nm_3` pre-filter to skip objects above
+a volume threshold entirely, before any per-object work was dispatched —
+intended for segmentation noise/artifacts connected into one enormous blob,
+not a real merged nucleus/cell/mito.
+
+**Removed.** In practice, "this ConnectedComponents object is too large"
+usually means it's several *real* objects legitimately merged via thin
+bridges — exactly what this tool exists to split. Pre-filtering by size
+before splitting throws out precisely the objects most in need of it,
+before they get a chance. The right place for a volume cap is *after*
+splitting, not before: `minimum_volume_nm_3`/`maximum_volume_nm_3` (deferred
+`CleanConnectedComponents` pass) let an oversized merged blob split into
+properly-sized real pieces first, and only drop what's *still* oversized
+afterward — at which point it really is a strong signal of genuine noise,
+not a legitimate object discarded prematurely. For a standalone size-based
+cull with no splitting involved at all, use `filter_ids`/
+`CleanConnectedComponents` directly on the `ConnectedComponents` output.
+
 ## Status / next steps
 
 Done: both strategies implemented and unit-tested on synthetic geometries
-(dumbbells, a compact cube, a cube-with-spurious-stub); CLI (`split-narrow-bridges`)
-and `pyproject.toml` entry wired up.
+(dumbbells, a compact cube, a cube-with-spurious-stub, an oversized-object
+skip, precomputed-EDT wiring); CLI (`split-narrow-bridges`, `compute-edt`)
+and `pyproject.toml` entries wired up; tested against real
+`jrc_mus-cerebellum-2` nucleus data.
 
-Not done yet:
-1. Never run on real merged nuc/cell/mito data — only synthetic smoke tests
-   so far. Needed before trusting any default threshold values.
-2. `split_objects()` dispatches per-object work via a single
-   `compute_blockwise_partitions` call, not `dask_util.plan_memory_waves` +
-   `run_with_oom_retry` (the memory-aware wave scheduling `Skeletonize` uses
-   for the same per-object-size-variance problem). Worth adding if large
-   objects (e.g. big mitochondria networks) OOM in practice.
-3. The threshold questions from "Open design questions" are still open —
-   adaptive/relative thresholds haven't been explored; `neck_radius_nm` is
-   still one fixed value per run.
-4. `SkeletonGraphSplit`'s per-candidate-neck connectivity check is
+Also done:
+1. Adaptive/relative neck threshold: opt-in `neck_radius_mode="adaptive"`
+   Otsu-thresholds each object's own EDT values (floored at the fixed
+   `neck_radius_nm`), so a small and a huge object don't have to share one
+   scale. Default remains `"fixed"` (unchanged behavior). Experimental
+   baseline, not a final answer — see `_adaptive_neck_radius_nm`.
+2. `split_objects()` now dispatches per-object work through
+   `dask_util.plan_memory_waves` + `run_with_oom_retry`, mirroring
+   `Skeletonize`'s memory-aware wave scheduling, via a new
+   `_estimate_peak_bytes` estimator.
+4. Correct pipeline ordering for volume filtering: new
+   `minimum_volume_nm_3`/`maximum_volume_nm_3` params run splitting with
+   filtering deferred, then apply `CleanConnectedComponents` once over the
+   fully-formed result — the same deferred-filtering pattern
+   `MutexWatershed` uses with `do_opening`.
+6. `minimum_subregion_volume_nm_3` now defaults (`None`) to
+   `minimum_volume_nm_3` instead of disabling the accept-gate entirely: a
+   split producing a piece below the final volume filter would just get
+   *deleted* (voxels dropped, not re-merged) by the deferred
+   `CleanConnectedComponents` pass anyway, so reject that split up front
+   instead and keep those voxels attached to the parent object. When
+   `minimum_volume_nm_3` is also left at its own default (0), this derives
+   to 0 (falsy → gate still disabled), so the pure-defaults case is
+   unchanged. Pass `minimum_subregion_volume_nm_3=0` explicitly to disable
+   the gate while still using a real `minimum_volume_nm_3`.
+
+Not done / explicitly out of scope:
+3. `SkeletonGraphSplit`'s per-candidate-neck connectivity check is
    O(candidates × graph size) in the worst case (full `connected_components`
-   recomputed per trial) — fine for per-object bbox-sized skeletons, but
-   worth revisiting if very large branched networks turn out to be slow.
+   recomputed per trial) — fine for per-object bbox-sized skeletons.
+   Dropped from scope: an incremental-connectivity swap is more error-prone
+   to verify than the one-time flat swap `get_connected_ids` did, and it's
+   only worth it if very large branched networks turn out to be slow.
+5. Scaling to ginormous merged objects (see below) — deferred, not built.
+   The "beads on a string" design below is superseded by a simpler
+   decision: item #2's memory-aware wave scheduling already gives an
+   oversized object (e.g. real id 4665, ~4B-voxel bbox) a solo worker with
+   the *entire* per-job memory (`dask_util.plan_memory_waves` floors at
+   `processes=1` rather than an artificially small per-slot share), so it
+   should just run through the existing, already-validated
+   `EDTWatershedSplit` path unchanged. Only worth building the bespoke
+   out-of-core algorithm below if that's tried on real id 4665 and actually
+   proves insufficient (OOMs even on the largest obtainable job memory).
+
+   **Partially validated against the real object.** Ran `split_id` directly
+   against real id 4665 in `jrc_mus-cerebellum-2`'s `nuc` dataset (confirmed
+   present and matching the doc's bbox/volume exactly) on a 93GB
+   workstation: real RSS climbed to ~69GB mid-`edt.edt()` computation
+   (before even reaching the markers/watershed stages) before the OS killed
+   the process — consistent with the ~68GB raw estimate. This confirms the
+   object is genuinely too big for that machine, but does *not* yet confirm
+   whether a real high-memory LSF allocation (150GB+) succeeds -- that
+   needs an actual cluster job (`bsub`), not tested yet. Also surfaced an
+   unrelated prerequisite (since fixed): `ImageDataInterface` defaulting to
+   `concurrency_limit=1` made the initial read of this object's ~23,000-chunk
+   bbox time out entirely (5.5min, 10 retries) before any memory pressure
+   even began. `SplitNarrowBridges`/`Skeletonize` now auto-resolve
+   `concurrency_limit` (`dask_util.resolve_concurrency_limit`): every CPU
+   actually available to the process when running synchronously
+   (`num_workers<=1`, no sibling processes to oversubscribe), or a safe `1`
+   under real multi-worker wave dispatch, further rescaled per-wave inside
+   each worker to its fair share of its *job's* real CPU affinity
+   (`dask_util.rescale_idi_concurrency`) -- since a job's cpuset is shared by
+   every sibling worker process inside it, not divided per-process.
+
+## Scaling to ginormous merged objects: bounded local growth ("beads on a string")
+
+### The concrete problem
+
+Real `jrc_mus-cerebellum-2` nuc data has objects far beyond anything tested so
+far. From the dataset's own bbox CSV, id 4665: volume 12,673.55 µm³, but its
+bounding box is 61 × 49 × 44 µm — roughly **4 billion voxels** at this
+dataset's 32nm voxel size. The object fills only ~9.6% of that bbox (not one
+compact blob — something sprawled across 60µm). The current architecture
+(`split_id` reads the object's full padded bbox, computes EDT and runs
+watershed over the whole thing at once) cannot handle this: the float64 EDT
+array alone would be ~32GB for this one object, on top of the raw read
+(~8GB), mask, markers, and label arrays. This isn't a "slow" case, it's
+likely an outright OOM on typical worker memory.
+
+### Two scaling ideas already considered, and their real costs
+
+- **Erode-at-threshold + blockwise `ConnectedComponents`**: threshold the
+  (already blockwise) `ComputeEDT` output at `neck_radius_nm`, erode those
+  voxels away, run the existing blockwise `ConnectedComponents` on what's
+  left to get separated "cores," then reassign the eroded shell back via a
+  geodesic nearest-core watershed. Fully blockwise/scalable, but rejected in
+  discussion because thresholding-and-discarding voxels outright (rather
+  than a graded, competitive decision) isn't how real watershed reasons
+  about a neck, and the discarded/no-surviving-core edge case is ugly.
+- **Block-tiled local watershed + cross-block region-merge**: this is the
+  *established* pattern in this exact scientific ecosystem — `daisy`
+  (funkelab/HHMI Janelia, same lab as this repo's existing `funlib.geometry`
+  dependency) is a blockwise task scheduler built for precisely this, and
+  real large-scale connectomics pipelines run blockwise watershed for an
+  initial oversegmentation, then blockwise agglomeration (e.g. `waterz`) to
+  merge fragments via a region-adjacency graph. This repo already
+  reimplements daisy's core idea by hand (`dask_util`'s blockwise dispatch +
+  halo/padding), so only the merge-graph step would be new — and we already
+  have that logic (`_merge_thick_boundaries`'s single-pass-boundary-scan +
+  union-find), just scoped to one in-memory array instead of across blocks.
+  Real cost: block boundaries are *arbitrary* relative to the object's own
+  geometry, so a seed near a block edge or a real ridge running along a
+  seam still needs the cross-block reconciliation step to sort out — solved,
+  but it's inherent overhead that has nothing to do with the actual object
+  shape.
+
+### The better idea: bounded local growth ("beads on a string")
+
+The key insight that neither idea above uses: **we only care about
+nucleus-sized (or similarly bounded) pieces**, and a real accidentally-merged
+chain of nuclei looks like beads on a string — a sequence of thick, roughly
+nucleus-sized lobes, each one fully enclosed by genuine thin necks on every
+side that connects it to its neighbors in the chain. If that's the actual
+shape (and it very plausibly is for id 4665, given the low fill fraction and
+elongated bbox), then **growing outward from a single seed and stopping the
+instant the growing region is fully enclosed by neck-walls needs to touch
+only that one bead's own local extent** — not the other 99% of a
+4-billion-voxel object 60µm away that has nothing to do with it. The object
+never needs to be loaded or reasoned about as a whole; each bead is
+discovered, grown, sealed off, and finished independently, one at a time,
+using memory proportional to *one bead's size* (nucleus-scale — thousands to
+tens of thousands of voxels) rather than the whole merged mass.
+
+Sketch of the algorithm:
+
+1. **Cheap seed-finding, no full-object read**: scan the already-persisted,
+   already-blockwise `ComputeEDT` output for local maxima belonging to this
+   object's id — this can be done blockwise/lazily (same padding-can-only-
+   overestimate guarantee `ComputeEDT` already relies on), without ever
+   materializing the full object.
+2. **Grow one bead from a single unclaimed seed**: a priority-flood (the
+   same priority-queue-by-distance-from-seed structure `skimage.watershed`
+   already uses internally), but reading the underlying segmentation/EDT
+   lazily, chunk by chunk, only for whatever the growing frontier currently
+   touches. A frontier voxel with EDT below `neck_radius_nm` is a wall —
+   growth doesn't cross it (this bead's flood stops there), the same "thin
+   between two thicker things" semantics `_merge_thick_boundaries`/
+   `SkeletonGraphSplit` already use, just applied as a stopping rule during
+   growth instead of an after-the-fact merge-back.
+3. **Detect enclosure, declare the bead done**: once every direction the
+   frontier could still expand into is either background or a neck-wall
+   (no further unclaimed, above-threshold voxels reachable), this bead is
+   fully bounded — finalize its label and stop. Nothing beyond this bead's
+   own local footprint was ever touched.
+4. **Move to the next bead**: pick the next unclaimed voxel of this same
+   object id (again via the blockwise EDT/segmentation scan, not a
+   full-object load) and repeat from step 2, walking along the "string" one
+   bead at a time until every voxel of the original object has been
+   claimed.
+
+### Why this beats block-tiling
+
+No arbitrary seams. A block-tiled approach still needs a merge step because
+block boundaries have nothing to do with the object's real geometry — a
+real basin can straddle an arbitrary tile edge. Here there's no tiling at
+all: the "block" *is* the bead, sized exactly to its own true extent by the
+enclosure-detection rule, so there's nothing arbitrary left to reconcile.
+
+### The honest caveat (the user's own "potentially we'd need the whole
+thing, but likely not")
+
+This only pays off if the object actually *is* bead-like — bounded,
+nucleus-sized lobes separated by genuine necks. If it's instead one
+enormous, genuinely continuous mass with no internal neck structure (a true
+segmentation blob artifact, or a single pathologically large real nucleus),
+enclosure never triggers and growth doesn't stop until it has covered the
+whole object anyway — at which point this degrades to exactly the current
+whole-object approach, no worse than today. That's a good property: the
+technique is a strict improvement in the expected/common case (real chains
+of touching nuclei) with a fallback that never underperforms the baseline.
+
+### Open questions before implementing
+
+- **Next-seed discovery without a full scan**: finding "the next unclaimed
+  voxel of this id" cheaply, incrementally, without ever doing an O(full
+  bbox) pass, needs a real data structure (e.g. tracking claimed regions
+  against the object's already-known bbox/chunk list from `ComputeEDT`'s
+  own blockwise pass, so "not yet visited chunks" is always cheap to name).
+- **Hard neck-wall threshold vs. the existing segment/boundary-thinness
+  logic**: growth needs a *local* stopping rule cheap enough to check per
+  frontier voxel, but the existing strategies' more careful "thin between
+  two thicker things" checks operate on a whole candidate region/segment
+  after the fact. Need to work out whether a simple per-voxel EDT threshold
+  during growth is good enough, or whether some bounded lookahead is needed
+  to avoid a bead's growth stopping prematurely at a voxel that's thin but
+  not actually a real neck (e.g. surface noise/wobble).
+- **Where beads meet**: two beads' growth fronts approaching the same neck
+  from opposite sides need to agree that a wall exists there and not double
+  count or leave a gap of unclaimed voxels — needs a clear tie-breaking/
+  hand-off rule right at the neck itself.
+- **Verification plan**: prototype directly against id 2131 (already
+  tested, ~97M voxels, known-good result to compare against) and id 4665
+  (~4B voxels, currently unprocessable) before trusting this on real data
+  more broadly.
