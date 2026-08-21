@@ -3,6 +3,7 @@ import os
 import shutil
 import uuid
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 
 import edt as edt_module
 import fastremap
@@ -403,7 +404,33 @@ class SkeletonGraphSplit(SplitStrategy):
             1, num_nodes + 1
         )
         node_assignment = watershed(np.zeros(mask.shape), markers, mask=mask)
-        mask_coords = np.argwhere(mask)
+        unassigned = mask & (node_assignment == 0)
+        if np.any(unassigned):
+            # Rare on real, jagged/noisy segmentation: some mask voxels
+            # aren't reachable from any skeleton marker at watershed's
+            # default connectivity (e.g. a bridge that's only diagonally
+            # connected). Retry with full connectivity before giving up --
+            # this recovers the common case cheaply (one extra watershed
+            # call only when needed).
+            node_assignment = watershed(
+                np.zeros(mask.shape), markers, mask=mask, connectivity=mask.ndim
+            )
+            unassigned = mask & (node_assignment == 0)
+            if np.any(unassigned):
+                # Even full connectivity couldn't reach every voxel -- most
+                # likely a genuinely separate sub-component sharing this
+                # object's mask/id as a data artifact, not a bug in the
+                # flood itself. Leave these unclaimed (mask_coords below
+                # excludes them) rather than crashing bincount on a -1
+                # index: the caller only overwrites voxels with piece > 0,
+                # so unclaimed voxels simply keep their original label.
+                logger.warning(
+                    "%d/%d mask voxels unreachable from any skeleton node "
+                    "even at full connectivity -- leaving unclaimed (keeps "
+                    "original label) instead of crashing.",
+                    int(unassigned.sum()), int(mask.sum()),
+                )
+        mask_coords = np.argwhere(mask & (node_assignment > 0))
         nearest_node_idx = (
             node_assignment[mask_coords[:, 0], mask_coords[:, 1], mask_coords[:, 2]] - 1
         )
@@ -507,9 +534,378 @@ class SkeletonGraphSplit(SplitStrategy):
         return labels
 
 
+def _principal_axis(points):
+    """Principal axis (unit vector, sign arbitrary) of a point cloud, plus its
+    linearity ``l1 / (l1 + l2 + l3)`` -- 1 for a perfect line, ~1/3 for a blob.
+    Linearity is what lets the direction test recuse itself: the "does the
+    bridge follow the tube's own axis" question is meaningless when the thing
+    on either side isn't tube-shaped to begin with."""
+    p = np.asarray(points, dtype=float)
+    p = p - p.mean(axis=0)
+    if len(p) < 3:
+        return np.array([1.0, 0.0, 0.0]), 0.0
+    eigenvalues, eigenvectors = np.linalg.eigh(np.cov(p.T))
+    total = max(eigenvalues.sum(), 1e-12)
+    return eigenvectors[:, -1], float(eigenvalues[-1] / total)
+
+
+def _grow_sides(g, segment, original_neighbors, positions, fit_nm):
+    """Flood outward from a candidate cut on each side, blocked by the segment
+    itself, out to ``fit_nm`` of arclength. Returns the node lists of the two
+    largest sides (a cut with fewer than two sides isn't a cut).
+
+    Bounded by arclength rather than run to completion on purpose: we want each
+    side's *local* axis at the junction, not the average direction of an entire
+    branched network hanging off it a micron away.
+    """
+    segment_set = set(segment)
+    groups, claimed = [], set()
+    for entry in {
+        nb for n in segment_set for nb in original_neighbors[n] if nb not in segment_set
+    }:
+        if entry in claimed:
+            continue
+        nodes, visited, frontier = [], set(segment_set) | {entry}, [(entry, 0.0)]
+        while frontier:
+            current, arc = frontier.pop(0)
+            if arc > fit_nm:
+                continue
+            nodes.append(current)
+            claimed.add(current)
+            for nb in original_neighbors[current]:
+                if nb not in visited:
+                    visited.add(nb)
+                    frontier.append((nb, arc + g[current][nb]["weight"]))
+        if nodes:
+            groups.append(nodes)
+    groups.sort(key=len, reverse=True)
+    return groups[:2]
+
+
+class TubeDirectionSplit(SkeletonGraphSplit):
+    """Skeleton splitting for *tubular* objects (mitochondria), where the
+    radius-only reasoning both other strategies rely on breaks down.
+
+    Three changes from SkeletonGraphSplit, each forced by a measured failure on
+    a real object (id 1278, jrc_axolotl-heart-1 mito, 6.4um crop -- see
+    docs/split_narrow_bridges_plan.md):
+
+    1. **Simultaneous cutting.** SkeletonGraphSplit removes one thin segment at
+       a time and keeps the cut only if that single removal disconnects the
+       graph. A field of packed mitochondria merges into a *mesh*, not a tree
+       (this object's skeleton has 2117 independent cycles: A touches B touches
+       C touches A), so cutting any one bridge leaves the rest holding it
+       together -- 380 candidate bridges, only 35 of which disconnect anything
+       on their own. All qualifying segments are removed together and the
+       components taken afterwards, which recovered 157 pieces where the
+       one-at-a-time rule found ~35. This also removes the per-candidate whole
+       graph copy, which cost 4 minutes on a 19k-node skeleton.
+
+    2. **Prominence gate** (``prominence_max``): ``r_neck / r_flank``, a
+       scale-free replacement for asking whether ``r_neck`` clears an absolute
+       nm threshold. A uniformly thin tubule has prominence ~1 at every point
+       and never qualifies no matter how far below ``neck_radius_nm`` it sits.
+
+    3. **Direction gate** -- the one that actually does the work here. Compare
+       each side's own principal axis to the direction of the bridge between
+       them::
+
+           axis_align   = |a_L . a_R|                  1 => the tubes are parallel
+           bridge_along = max(|a_L . b|, |a_R . b|)    1 => bridge runs along their axis
+
+       ``bridge_along`` high *and* ``axis_align`` high means one tube narrowing
+       and continuing straight through -- left joined. Low ``bridge_along``
+       with high ``axis_align`` is two parallel tubes joined by a perpendicular
+       stub (the classic side-by-side merge); low ``axis_align`` is two tubes
+       crossing. Both get cut.
+
+    Why direction rather than more radius statistics: measured on the crop
+    above, prominence is *identical* between genuine single-tube continuations
+    (median 0.14) and real side-by-side merges (0.12) at a tight threshold --
+    it has no discriminating power there, because everything that thin is
+    already a one-voxel pinch. The two gates are complementary rather than
+    redundant: at a loose threshold prominence separates cleanly (0.74 vs 0.13)
+    and rescues the bad threshold, and together they hold the piece count flat
+    (82/81/81/71 substantial pieces) across neck_radius_nm = 45..100nm, where
+    the radius test alone swings 157 -> 514. That threshold-independence is the
+    point -- it is the open question in the design doc, answered.
+    """
+
+    def __init__(
+        self,
+        prominence_max=0.35,
+        direction_fit_nm=600.0,
+        linearity_min=0.6,
+        bridge_along_min=0.8,
+        axis_align_min=0.8,
+        bridge_along_max_merge=0.5,
+        axis_align_max_cross=0.5,
+        require_merge_evidence=True,
+    ):
+        """require_merge_evidence: which way the direction test defaults when
+        it can't classify a junction.
+
+        True (default) cuts ONLY on positive evidence of a merge -- both sides
+        tube-like AND either parallel-with-perpendicular-bridge (side-by-side)
+        or non-parallel (crossing). Anything ambiguous or blobby stays joined.
+
+        False cuts unless the junction is positively a straight-through
+        continuation. That was the first version and it over-splits badly: on
+        real data half the candidates (88 ambiguous + 72 non-tube-like out of
+        322) fall in neither class, and defaulting those to "cut" carves lobes
+        and dents off otherwise-fine mitochondria. Kept only for comparison --
+        over-splitting is the failure mode this whole project exists to avoid,
+        so the burden of proof belongs on the cut, not on the join.
+        """
+        self.prominence_max = float(prominence_max)
+        self.direction_fit_nm = float(direction_fit_nm)
+        self.linearity_min = float(linearity_min)
+        self.bridge_along_min = float(bridge_along_min)
+        self.axis_align_min = float(axis_align_min)
+        self.bridge_along_max_merge = float(bridge_along_max_merge)
+        self.axis_align_max_cross = float(axis_align_max_cross)
+        self.require_merge_evidence = bool(require_merge_evidence)
+
+    def find_subpieces(
+        self,
+        mask,
+        voxel_size,
+        neck_radius_voxels,
+        minimum_subregion_volume_voxels,
+        distance=None,
+        neck_radius_mode="fixed",
+    ):
+        if not np.any(mask):
+            return np.zeros(mask.shape, dtype=np.uint8)
+
+        if distance is None:
+            distance = edt_module.edt(mask, anisotropy=tuple(voxel_size))
+        skel = skeletonize(mask)
+        if not np.any(skel):
+            return mask.astype(np.uint8)
+
+        skel_coords = np.argwhere(skel)
+        radii = distance[skel_coords[:, 0], skel_coords[:, 1], skel_coords[:, 2]]
+
+        skeleton = skimage_to_custom_skeleton_fast(skel, spacing=voxel_size)
+        skeleton.radii = list(radii)
+        g = skeleton.skeleton_to_graph()
+        num_nodes = g.number_of_nodes()
+        if num_nodes <= 1:
+            return mask.astype(np.uint8)
+
+        floor_nm = neck_radius_voxels * min(voxel_size)
+        if neck_radius_mode == "adaptive":
+            neck_radius_nm = _adaptive_neck_radius_nm(radii, floor_nm)
+        else:
+            neck_radius_nm = floor_nm
+
+        node_assignment, mask_coords, nearest_node_idx, node_voxel_counts = (
+            self._assign_voxels_to_nodes(mask, skel_coords, num_nodes)
+        )
+
+        original_neighbors = {n: list(g.neighbors(n)) for n in g.nodes}
+        positions = {
+            n: np.asarray(g.nodes[n]["position_nm"], dtype=float) for n in g.nodes
+        }
+
+        thin_nodes = {n for n in g.nodes if g.nodes[n]["radius"] < neck_radius_nm}
+        thin_components = list(nx.connected_components(g.subgraph(thin_nodes)))
+        candidate_segments = [
+            segment
+            for segment in thin_components
+            if not any(len(original_neighbors[n]) < 2 for n in segment)
+        ]
+
+        accepted = []
+        for segment in candidate_segments:
+            sides = _grow_sides(
+                g, segment, original_neighbors, positions, self.direction_fit_nm
+            )
+            if len(sides) < 2 or min(len(s) for s in sides) < 3:
+                continue
+
+            r_neck = min(g.nodes[n]["radius"] for n in segment)
+            r_flank = max(max(g.nodes[n]["radius"] for n in s) for s in sides)
+            if r_neck / max(r_flank, 1e-6) >= self.prominence_max:
+                continue  # dip too shallow relative to what it joins
+
+            left = np.array([positions[n] for n in sides[0]])
+            right = np.array([positions[n] for n in sides[1]])
+            axis_left, linearity_left = _principal_axis(left)
+            axis_right, linearity_right = _principal_axis(right)
+            bridge = right.mean(axis=0) - left.mean(axis=0)
+            bridge_norm = np.linalg.norm(bridge)
+            if bridge_norm <= 1e-6:
+                # Degenerate: no usable bridge direction, so no evidence either way.
+                if self.require_merge_evidence:
+                    continue
+                accepted.append(segment)
+                continue
+
+            bridge /= bridge_norm
+            bridge_along = max(
+                abs(float(axis_left @ bridge)), abs(float(axis_right @ bridge))
+            )
+            axis_align = abs(float(axis_left @ axis_right))
+            tube_like = min(linearity_left, linearity_right) > self.linearity_min
+
+            is_continuation = (
+                tube_like
+                and bridge_along > self.bridge_along_min
+                and axis_align > self.axis_align_min
+            )
+            is_side_by_side = (
+                tube_like
+                and axis_align > self.axis_align_min
+                and bridge_along < self.bridge_along_max_merge
+            )
+            is_crossing = tube_like and axis_align < self.axis_align_max_cross
+
+            if self.require_merge_evidence:
+                if not (is_side_by_side or is_crossing):
+                    continue  # ambiguous or blobby -> leave joined
+            elif is_continuation:
+                continue
+            accepted.append(segment)
+
+        if not accepted:
+            return mask.astype(np.uint8)
+
+        # Simultaneous removal -- see the class docstring for why one-at-a-time
+        # cannot separate a cyclic merge mesh.
+        h = g.copy()
+        for segment in accepted:
+            h.remove_nodes_from(segment)
+        components = list(nx.connected_components(h))
+        if len(components) <= 1:
+            return mask.astype(np.uint8)
+
+        if minimum_subregion_volume_voxels:
+            components = self._dissolve_small_components(
+                components, node_voxel_counts, original_neighbors,
+                minimum_subregion_volume_voxels,
+            )
+            if len(components) <= 1:
+                return mask.astype(np.uint8)
+
+        node_to_piece = np.zeros(num_nodes, dtype=np.int32)
+        for piece_index, component in enumerate(components, start=1):
+            node_to_piece[list(component)] = piece_index
+        self._resolve_cut_nodes(node_to_piece, original_neighbors, num_nodes)
+
+        labels = np.zeros(mask.shape, dtype=np.int32)
+        labels[mask_coords[:, 0], mask_coords[:, 1], mask_coords[:, 2]] = node_to_piece[
+            nearest_node_idx
+        ]
+        return labels
+
+    @staticmethod
+    def _assign_voxels_to_nodes(mask, skel_coords, num_nodes):
+        """Geodesic nearest-skeleton-node assignment (see SkeletonGraphSplit
+        for why a straight-line nearest neighbour is wrong here)."""
+        markers = np.zeros(mask.shape, dtype=np.int32)
+        markers[skel_coords[:, 0], skel_coords[:, 1], skel_coords[:, 2]] = np.arange(
+            1, num_nodes + 1
+        )
+        node_assignment = watershed(np.zeros(mask.shape, np.float32), markers, mask=mask)
+        if np.any(mask & (node_assignment == 0)):
+            node_assignment = watershed(
+                np.zeros(mask.shape, np.float32), markers, mask=mask,
+                connectivity=mask.ndim,
+            )
+        mask_coords = np.argwhere(mask & (node_assignment > 0))
+        nearest_node_idx = (
+            node_assignment[mask_coords[:, 0], mask_coords[:, 1], mask_coords[:, 2]] - 1
+        )
+        node_voxel_counts = np.bincount(nearest_node_idx, minlength=num_nodes)
+        return node_assignment, mask_coords, nearest_node_idx, node_voxel_counts
+
+    @staticmethod
+    def _dissolve_small_components(
+        components, node_voxel_counts, original_neighbors, min_volume_voxels
+    ):
+        """Merge undersized pieces back into the neighbour they were cut from.
+
+        Done on the component graph rather than the voxel array (the label-array
+        version in ``_merge_small_fragments`` costs a full-array dilation per
+        merge, which is fine for a handful of fragments and not for the hundreds
+        a packed mito field produces).
+        """
+        node_component = {}
+        for i, component in enumerate(components):
+            for n in component:
+                node_component[n] = i
+        volumes = [int(node_voxel_counts[list(c)].sum()) for c in components]
+
+        adjacency = {i: set() for i in range(len(components))}
+        for n, neighbors in original_neighbors.items():
+            a = node_component.get(n)
+            if a is None:  # a cut-out node: joins whatever it touched
+                touched = {
+                    node_component[nb] for nb in neighbors if nb in node_component
+                }
+                for x in touched:
+                    adjacency[x] |= touched - {x}
+                continue
+            for nb in neighbors:
+                b = node_component.get(nb)
+                if b is not None and b != a:
+                    adjacency[a].add(b)
+                    adjacency[b].add(a)
+
+        parent = list(range(len(components)))
+
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        while True:
+            roots = {find(i) for i in range(len(components))}
+            if len(roots) <= 1:
+                break
+            small = [r for r in roots if volumes[r] < min_volume_voxels]
+            if not small:
+                break
+            worst = min(small, key=lambda r: volumes[r])
+            options = {find(x) for x in adjacency[worst]} - {worst}
+            if not options:
+                break
+            target = max(options, key=lambda r: volumes[r])
+            parent[worst] = target
+            volumes[target] += volumes[worst]
+            adjacency[target] |= adjacency[worst] - {target}
+
+        merged = {}
+        for i, component in enumerate(components):
+            merged.setdefault(find(i), set()).update(component)
+        return list(merged.values())
+
+    @staticmethod
+    def _resolve_cut_nodes(node_to_piece, original_neighbors, num_nodes):
+        """Cut-out neck nodes have no piece; give each one its nearest surviving
+        neighbour's. A handful of voxels at the pinch point either way."""
+        for n in range(num_nodes):
+            if node_to_piece[n] != 0:
+                continue
+            visited, queue = {n}, list(original_neighbors[n])
+            while queue:
+                current = queue.pop(0)
+                if current in visited:
+                    continue
+                visited.add(current)
+                if node_to_piece[current] != 0:
+                    node_to_piece[n] = node_to_piece[current]
+                    break
+                queue.extend(original_neighbors[current])
+
+
 _STRATEGY_REGISTRY = {
     "edt_watershed": EDTWatershedSplit,
     "skeleton_graph": SkeletonGraphSplit,
+    "tube_direction": TubeDirectionSplit,
 }
 
 
@@ -522,7 +918,7 @@ class SplitNarrowBridges(ComputeConfigMixin):
         neck_radius_nm=0,
         neck_radius_mode="fixed",
         minimum_subregion_volume_nm_3=None,
-        max_pieces_per_object=64,
+        max_pieces_per_object=1024,
         csv_path=None,
         edt_path=None,
         precompute_edt=False,
@@ -540,6 +936,7 @@ class SplitNarrowBridges(ComputeConfigMixin):
         peak_bytes_per_voxel=17.0,
         memory_safety_multiplier=2.0,
         memory_fraction=0.60,
+        subpieces_cache_max_bytes=None,
     ):
         """
         Split accidentally-merged objects at narrow bridges, preserving all
@@ -581,7 +978,18 @@ class SplitNarrowBridges(ComputeConfigMixin):
                 threshold than the final filter.
             max_pieces_per_object: Safety cap on how many subpieces a single
                 object may split into; exceeding it raises rather than
-                silently truncating.
+                silently truncating. Also doubles as the fixed stride
+                reserved for each split object's new IDs (``new_id_base =
+                max_original_id + 1 + rank * max_pieces_per_object``), so it
+                can't be disabled outright (``None``) without reworking ID
+                assignment -- it can only be raised. Default raised from 64
+                to 1024 (was too tight for real data: real id 4665 in
+                jrc_mus-cerebellum-2, plausibly a segmentation-noise blob
+                rather than a real merged-nuclei chain, split into 122
+                pieces -- see docs/split_narrow_bridges_plan.md). Still a
+                real safety net against genuinely pathological runaway
+                fragmentation (thousands of pieces), just not tuned tightly
+                for now.
             csv_path: Optional path to a CSV with per-object bounding boxes
                 (the kind Measure produces). If None, Measure is run on the
                 segmentation to generate one at
@@ -703,6 +1111,20 @@ class SplitNarrowBridges(ComputeConfigMixin):
                 how many markers/pieces a given object splits into.
             memory_fraction: Fraction of per-slot memory considered usable
                 when planning waves (rest is dask/OS/library overhead).
+            subpieces_cache_max_bytes: Byte budget for the write phase's
+                per-worker-process cache of split objects' full ``subpieces``
+                arrays (see ``_load_subpieces_cached``). Loading a split
+                object's array is only needed once per worker no matter how
+                many of its (often many) blocks that worker happens to
+                process -- caching it avoids re-reading the same file from
+                disk repeatedly -- but with no bound, that cache grows for
+                the life of the worker process and a single pathologically
+                large split object (or several moderately large ones
+                accumulating together) can exceed the worker's own
+                ``memory_limit`` and get it killed. None (default) derives a
+                budget from the loaded dask-config's per-worker memory (half
+                of it), falling back to 4GiB if no jobqueue config is
+                available (e.g. synchronous runs).
         """
         super().__init__(num_workers)
         self.concurrency_limit = dask_util.resolve_concurrency_limit(
@@ -821,6 +1243,11 @@ class SplitNarrowBridges(ComputeConfigMixin):
         self.peak_bytes_per_voxel = float(peak_bytes_per_voxel)
         self.memory_safety_multiplier = float(memory_safety_multiplier)
         self.memory_fraction = float(memory_fraction)
+        self.subpieces_cache_max_bytes = (
+            int(subpieces_cache_max_bytes)
+            if subpieces_cache_max_bytes is not None
+            else None
+        )
 
         if self.concurrency_limit > 1 and self.ids:
             # Only worth scaling in the same auto-resolved-concurrency
@@ -1004,45 +1431,164 @@ class SplitNarrowBridges(ComputeConfigMixin):
         return list(list_of_results)
 
     @staticmethod
+    def _build_split_spatial_index(split_lookup):
+        """Precompute a vectorizable bounds index for ``split_lookup`` once,
+        driver-side, instead of re-deriving it per block.
+
+        ``relabel_block_with_splits`` used to loop over every entry of
+        ``split_lookup`` for *every* block (a Python-level
+        ``Roi.intersect()`` call each time) to find the handful that
+        actually overlap -- O(blocks * split objects). On a real production
+        run (jrc_mus-cerebellum-2, 1507 split objects, ~1.74M blocks) this
+        made the write phase run at ~2.8 blocks/sec (measured directly
+        against the output store's growing file count) vs. ~22,000
+        blocks/sec for the structurally similar ``ConnectedComponents``
+        relabel pass over the same dataset shape/chunking -- on pace for
+        multiple *days*, not the minutes every other phase took. Returning
+        plain numpy bounds arrays here lets each block test overlap against
+        every object in one vectorized comparison instead of a Python loop.
+        """
+        ids = list(split_lookup.keys())
+        begins = np.array([split_lookup[i][2].begin for i in ids], dtype=np.float64)
+        ends = np.array(
+            [
+                np.array(split_lookup[i][2].begin) + np.array(split_lookup[i][2].shape)
+                for i in ids
+            ],
+            dtype=np.float64,
+        )
+        return ids, begins, ends
+
+    @staticmethod
+    def _load_subpieces_cached(scratch_path, cache, max_bytes):
+        """Load a split object's scratch ``subpieces`` array, LRU-cached per
+        worker *process* (byte-budgeted, not count-budgeted) for the
+        lifetime of this write phase.
+
+        Without this, a large split object's array gets reloaded from disk
+        from scratch every single time any block overlapping its (often
+        huge) bbox is processed -- for an object spanning thousands of
+        blocks, that's thousands of redundant full re-reads of the same
+        file. dask workers are long-lived processes reused across many
+        block tasks, so a plain dict (passed in explicitly here rather than
+        truly global, so it's easy to reason about/test) persists across
+        those tasks within one worker -- but with no eviction, that cache
+        grows unboundedly for the life of the worker process, and one
+        pathologically large split object (or several moderate ones
+        accumulating together) can exceed the worker's own memory_limit and
+        get it killed (observed in production: a single ~5.8B-voxel object
+        alongside a normal accumulation of smaller ones pushed a worker past
+        its per-process limit, and since the scheduler just reassigns the
+        same task to another similarly-loaded worker, it died the same way
+        repeatedly). Evicting oldest-used entries first keeps the cache
+        within a fixed byte budget while an object whose blocks are being
+        processed back-to-back (the case the cache exists to help) stays
+        hot via ``move_to_end``. A single object larger than the whole
+        budget is still loaded and used for this call -- it's just not
+        retained afterward, so it'll be re-read for its next block instead
+        of wedging the cache permanently over budget.
+        """
+        subpieces = cache.get(scratch_path)
+        if subpieces is not None:
+            cache.move_to_end(scratch_path)
+            return subpieces
+
+        with np.load(scratch_path) as npz:
+            subpieces = npz["subpieces"]
+
+        incoming_bytes = subpieces.nbytes
+        current_bytes = sum(arr.nbytes for arr in cache.values())
+        while cache and current_bytes + incoming_bytes > max_bytes:
+            _, evicted = cache.popitem(last=False)
+            current_bytes -= evicted.nbytes
+        if incoming_bytes <= max_bytes:
+            cache[scratch_path] = subpieces
+        return subpieces
+
+    @staticmethod
     def relabel_block_with_splits(
         block_index,
         segmentation_idi: ImageDataInterface,
         output_idi: ImageDataInterface,
         split_lookup: dict,
+        spatial_index,
         dtype,
+        subpieces_cache_max_bytes,
     ):
         block = create_block_from_index(output_idi, block_index)
         data = segmentation_idi.to_ndarray_ts(block.write_roi).astype(dtype)
 
-        voxel_size = output_idi.voxel_size
-        for id_value, (new_id_base, scratch_path, obj_roi) in split_lookup.items():
-            overlap = block.write_roi.intersect(obj_roi)
-            if overlap.empty:
-                continue
+        ids, begins, ends = spatial_index
+        if ids:
+            block_begin = np.array(block.write_roi.begin, dtype=np.float64)
+            block_end = block_begin + np.array(block.write_roi.shape, dtype=np.float64)
+            # Cheap vectorized bbox-overlap test against every split object
+            # at once; only the (usually zero, rarely more than a handful)
+            # candidates that pass get the exact per-axis slicing below.
+            candidates = np.nonzero(
+                np.all((begins < block_end) & (ends > block_begin), axis=1)
+            )[0]
+        else:
+            candidates = ()
 
-            with np.load(scratch_path) as npz:
-                subpieces = npz["subpieces"]
+        if len(candidates):
+            voxel_size = output_idi.voxel_size
+            cache = SplitNarrowBridges._subpieces_cache
+            for idx in candidates:
+                id_value = ids[idx]
+                new_id_base, scratch_path, obj_roi = split_lookup[id_value]
+                overlap = block.write_roi.intersect(obj_roi)
+                if overlap.empty:
+                    continue
 
-            data_offset = (overlap.begin - block.write_roi.begin) / voxel_size
-            obj_offset = (overlap.begin - obj_roi.begin) / voxel_size
-            shape = overlap.shape / voxel_size
-            data_slice = tuple(
-                slice(int(o), int(o + s)) for o, s in zip(data_offset, shape)
-            )
-            obj_slice = tuple(
-                slice(int(o), int(o + s)) for o, s in zip(obj_offset, shape)
-            )
+                subpieces = SplitNarrowBridges._load_subpieces_cached(
+                    scratch_path, cache, subpieces_cache_max_bytes
+                )
 
-            region = data[data_slice]
-            sub_region = subpieces[obj_slice]
-            piece_mask = (region == id_value) & (sub_region > 0)
-            if np.any(piece_mask):
-                region[piece_mask] = new_id_base + sub_region[piece_mask].astype(dtype)
-                data[data_slice] = region
+                data_offset = (overlap.begin - block.write_roi.begin) / voxel_size
+                obj_offset = (overlap.begin - obj_roi.begin) / voxel_size
+                shape = overlap.shape / voxel_size
+                data_slice = tuple(
+                    slice(int(o), int(o + s)) for o, s in zip(data_offset, shape)
+                )
+                obj_slice = tuple(
+                    slice(int(o), int(o + s)) for o, s in zip(obj_offset, shape)
+                )
+
+                region = data[data_slice]
+                sub_region = subpieces[obj_slice]
+                piece_mask = (region == id_value) & (sub_region > 0)
+                if np.any(piece_mask):
+                    region[piece_mask] = new_id_base + sub_region[piece_mask].astype(
+                        dtype
+                    )
+                    data[data_slice] = region
 
         output_idi.ds[block.write_roi] = data
 
-    def _write_output(self, split_lookup, dtype=None, output_path=None):
+    # Per-worker-process cache for relabel_block_with_splits (see
+    # _load_subpieces_cached) -- a plain class attribute so it persists
+    # across many block tasks handled by the same long-lived dask worker
+    # process, without needing a true module-global. OrderedDict for LRU
+    # eviction (move_to_end/popitem(last=False)).
+    _subpieces_cache = OrderedDict()
+
+    def _resolve_subpieces_cache_max_bytes(self, config):
+        """Byte budget for the write phase's per-worker subpieces cache (see
+        ``_load_subpieces_cached``). Explicit constructor value wins;
+        otherwise derive half of one worker's share of its job's memory from
+        the loaded dask-config, falling back to a fixed 4GiB when no
+        jobqueue config is available (e.g. synchronous/local runs)."""
+        if self.subpieces_cache_max_bytes is not None:
+            return self.subpieces_cache_max_bytes
+        _, settings = dask_util._jobqueue_settings(config)
+        job_memory = dask_util._job_memory_bytes(settings) if settings else None
+        if job_memory:
+            processes = int((settings or {}).get("processes", 1) or 1)
+            return int(0.5 * job_memory / processes)
+        return 4 * 1024**3
+
+    def _write_output(self, split_lookup, dtype=None, output_path=None, base_config=None):
         if dtype is None:
             dtype = self.segmentation_idi.dtype
         if output_path is None:
@@ -1057,18 +1603,38 @@ class SplitNarrowBridges(ComputeConfigMixin):
             original_voxel_size=self.segmentation_idi.original_voxel_size,
         )
 
+        spatial_index = SplitNarrowBridges._build_split_spatial_index(split_lookup)
+        subpieces_cache_max_bytes = self._resolve_subpieces_cache_max_bytes(base_config)
+
         num_blocks = dask_util.get_num_blocks(self.segmentation_idi, roi=self.roi)
-        dask_util.compute_blockwise_partitions(
-            num_blocks,
-            self.num_workers,
-            self.compute_args,
-            logger,
-            f"writing split output to {output_path}",
-            SplitNarrowBridges.relabel_block_with_splits,
-            self.segmentation_idi,
-            output_idi,
-            split_lookup,
-            dtype,
+        write_label = f"writing split output to {output_path}"
+
+        def _phase(workers, config):
+            return dask_util.compute_blockwise_partitions(
+                num_blocks,
+                workers,
+                self.compute_args,
+                logger,
+                write_label,
+                SplitNarrowBridges.relabel_block_with_splits,
+                self.segmentation_idi,
+                output_idi,
+                split_lookup,
+                spatial_index,
+                dtype,
+                subpieces_cache_max_bytes,
+                config=config,
+            )
+
+        # Defense in depth alongside the cache budget above: if a worker
+        # still dies (OOM from something else entirely), halve
+        # processes-per-slot and retry rather than failing the whole write
+        # outright -- the same safety net split-finding already gets.
+        dask_util.run_with_oom_retry(
+            _phase, self.num_workers, write_label, logger,
+            max_retries=self.memory_retry_max,
+            retry_on_oom=self.retry_on_oom,
+            config=base_config,
         )
 
     def _bbox_iso_voxels(self, id_value):
@@ -1224,7 +1790,7 @@ class SplitNarrowBridges(ComputeConfigMixin):
 
         try:
             if not split_results:
-                self._write_output({}, output_path=write_path)
+                self._write_output({}, output_path=write_path, base_config=base_config)
             else:
                 split_results.sort(key=lambda r: r["id"])
                 max_original_id = max(self.ids) if self.ids else 0
@@ -1239,7 +1805,9 @@ class SplitNarrowBridges(ComputeConfigMixin):
                 )
                 new_dtype = np.min_scalar_type(max_new_id)
 
-                self._write_output(split_lookup, new_dtype, output_path=write_path)
+                self._write_output(
+                    split_lookup, new_dtype, output_path=write_path, base_config=base_config
+                )
         finally:
             if self.delete_tmp:
                 shutil.rmtree(scratch_dir, ignore_errors=True)

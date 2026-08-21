@@ -450,21 +450,60 @@ Not done / explicitly out of scope:
    out-of-core algorithm below if that's tried on real id 4665 and actually
    proves insufficient (OOMs even on the largest obtainable job memory).
 
-   **Partially validated against the real object.** Ran `split_id` directly
-   against real id 4665 in `jrc_mus-cerebellum-2`'s `nuc` dataset (confirmed
-   present and matching the doc's bbox/volume exactly) on a 93GB
-   workstation: real RSS climbed to ~69GB mid-`edt.edt()` computation
-   (before even reaching the markers/watershed stages) before the OS killed
-   the process — consistent with the ~68GB raw estimate. This confirms the
-   object is genuinely too big for that machine, but does *not* yet confirm
-   whether a real high-memory LSF allocation (150GB+) succeeds -- that
-   needs an actual cluster job (`bsub`), not tested yet. Also surfaced an
-   unrelated prerequisite (since fixed): `ImageDataInterface` defaulting to
-   `concurrency_limit=1` made the initial read of this object's ~23,000-chunk
-   bbox time out entirely (5.5min, 10 retries) before any memory pressure
-   even began. `SplitNarrowBridges`/`Skeletonize` now auto-resolve
-   `concurrency_limit` (`dask_util.resolve_concurrency_limit`): every CPU
-   actually available to the process when running synchronously
+   **Now fully validated against the real object -- memory is not the
+   blocker.** Ran `split_id` directly against real id 4665 in
+   `jrc_mus-cerebellum-2`'s `nuc` dataset (confirmed present and matching
+   the doc's bbox/volume exactly) twice:
+   - On a 93GB workstation: real RSS climbed to ~69GB mid-`edt.edt()`
+     computation (before even reaching the markers/watershed stages) before
+     the OS killed the process — consistent with the ~68GB raw estimate.
+     Confirmed the object is too big for that machine, but not whether a
+     real high-memory allocation would work.
+   - On a real LSF allocation (`bsub -n 18` on this cluster's slot model =
+     270GB, see `scripts/smoketest_split_id_4665.py`): **ran to completion**
+     in ~22 minutes, peak RSS 108.9GB (comfortably inside the 270GB
+     budget, and in line with the ~kernel bytes/voxel estimate) -- no OOM.
+     `edt.edt()`, `peak_local_max`, `watershed`, and `_merge_thick_boundaries`
+     all completed over the full ~4B-voxel padded bbox in one shot.
+
+   So: given a real 150GB+-class allocation, the existing, unmodified
+   whole-object `EDTWatershedSplit` path handles the largest known real
+   object with no OOM. **"Beads on a string" is not needed on memory
+   grounds** -- the memory-aware wave scheduling (item #2) giving an
+   oversized object a solo worker with a large job's full memory was
+   already sufficient; no bespoke out-of-core algorithm is required.
+
+   **What it hit instead is a different, more informative wall:**
+   `ValueError: Object 4665 split into 122 pieces, exceeding
+   max_pieces_per_object=64`. A real chain of accidentally-merged nuclei
+   ("beads on a string") would split into a handful of nucleus-sized
+   pieces, not 122 -- this is a strong signal that id 4665 specifically
+   is one of the *ginormous false-positive background* blobs flagged at
+   the very start of this effort (segmentation noise merged into one
+   enormous mass), not a real merged-nuclei chain. This validates the
+   deferred-filtering design already in place (splitting first with no
+   pre-filter, then applying `minimum_volume_nm_3`/`maximum_volume_nm_3` via
+   `CleanConnectedComponents` after the fact, see "Skipping ginormous
+   false-positive objects" above): a real run wouldn't hand-tune
+   `max_pieces_per_object` upward for this one object, it would let it
+   split into however many fragments and rely on the final volume filter to
+   drop whatever's still spurious. Re-ran with `max_pieces_per_object=256`
+   so the split actually completes and persists: same 122 pieces, viewed in
+   neuroglancer alongside the original object (see
+   `scripts/smoketest_split_id_4665.py`) -- confirmed by eye to be
+   consistent with a noise/artifact blob, not a real merged-nuclei chain.
+   Default `max_pieces_per_object` raised from 64 -> 1024 in
+   `SplitNarrowBridges.__init__` so real data like this isn't hand-tuned
+   per object; it also doubles as the fixed new-ID stride per split object,
+   so it can only be raised, not disabled outright (`None`), without
+   reworking ID assignment.
+
+   Also surfaced an unrelated prerequisite (since fixed): `ImageDataInterface`
+   defaulting to `concurrency_limit=1` made the initial read of this
+   object's ~23,000-chunk bbox time out entirely (5.5min, 10 retries) before
+   any memory pressure even began. `SplitNarrowBridges`/`Skeletonize` now
+   auto-resolve `concurrency_limit` (`dask_util.resolve_concurrency_limit`):
+   every CPU actually available to the process when running synchronously
    (`num_workers<=1`, no sibling processes to oversubscribe), or a safe `1`
    under real multi-worker wave dispatch, further rescaled per-wave inside
    each worker to its fair share of its *job's* real CPU affinity

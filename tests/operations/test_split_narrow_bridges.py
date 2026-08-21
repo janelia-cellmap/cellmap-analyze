@@ -312,3 +312,54 @@ def test_split_narrow_bridges_uses_precomputed_edt(tmp_path):
     wired = ImageDataInterface(f"{wired_output_path}/s0").to_ndarray_ts()
 
     assert np.array_equal(baseline, wired)
+
+
+def test_load_subpieces_cached_respects_byte_budget(tmp_path):
+    from collections import OrderedDict
+
+    def _write_scratch(name, num_bytes):
+        path = str(tmp_path / f"{name}.npz")
+        arr = np.ones(num_bytes, dtype=np.uint8)
+        np.savez(path, subpieces=arr)
+        return path, arr
+
+    small_a, arr_a = _write_scratch("a", 100)
+    small_b, arr_b = _write_scratch("b", 100)
+    huge, arr_huge = _write_scratch("huge", 1000)
+
+    cache = OrderedDict()
+    max_bytes = 250  # fits both small arrays but not alongside the huge one
+
+    loaded_a = SplitNarrowBridges._load_subpieces_cached(small_a, cache, max_bytes)
+    assert np.array_equal(loaded_a, arr_a)
+    assert list(cache.keys()) == [small_a]
+
+    loaded_b = SplitNarrowBridges._load_subpieces_cached(small_b, cache, max_bytes)
+    assert np.array_equal(loaded_b, arr_b)
+    # both small arrays fit together under the budget
+    assert list(cache.keys()) == [small_a, small_b]
+
+    # a single object larger than the whole budget is still returned
+    # correctly, but doesn't get retained (would otherwise permanently
+    # wedge the cache over budget)
+    loaded_huge = SplitNarrowBridges._load_subpieces_cached(huge, cache, max_bytes)
+    assert np.array_equal(loaded_huge, arr_huge)
+    assert huge not in cache
+    # loading the oversized entry evicted everything else to make room
+    # (even though it ultimately wasn't kept)
+    assert list(cache.keys()) == []
+
+    # re-populate, then confirm re-touching an entry (move_to_end) protects
+    # it from eviction ahead of a colder one
+    SplitNarrowBridges._load_subpieces_cached(small_a, cache, max_bytes)
+    SplitNarrowBridges._load_subpieces_cached(small_b, cache, max_bytes)
+    SplitNarrowBridges._load_subpieces_cached(small_a, cache, max_bytes)  # re-touch a
+
+    third, arr_third = _write_scratch("c", 100)
+    # adding a third 100-byte entry exceeds the 250-byte budget by itself
+    # only when all three are present -- b (least recently touched) should
+    # be evicted, not a (recently re-touched).
+    SplitNarrowBridges._load_subpieces_cached(third, cache, max_bytes)
+    assert small_b not in cache
+    assert small_a in cache
+    assert third in cache
