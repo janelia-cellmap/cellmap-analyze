@@ -148,6 +148,77 @@ def test_split_narrow_bridges_skeleton_graph_respects_min_subregion_gate(tmp_pat
     assert np.array_equal(output, seg)
 
 
+def test_split_narrow_bridges_minimum_object_volume_to_split_gate(tmp_path):
+    # minimum_object_volume_to_split_nm_3 is a pre-filter on the whole
+    # object, checked before any candidate cut is even looked for -- distinct
+    # from minimum_subregion_volume_nm_3, which only gates individual cuts
+    # once splitting is already underway. The dumbbell (436 voxels/nm^3
+    # total) would normally split under these exact settings (see
+    # test_split_narrow_bridges_edt_watershed); a gate set above its total
+    # volume should skip the attempt entirely and leave it untouched.
+    seg = _dumbbell_segmentation()
+    seg_path = _write_segmentation(str(tmp_path / "segmentation.zarr"), seg)
+    output_path = str(tmp_path / "split_output.zarr")
+
+    snb = SplitNarrowBridges(
+        segmentation_path=seg_path,
+        output_path=output_path,
+        strategy="edt_watershed",
+        neck_radius_nm=2,
+        minimum_subregion_volume_nm_3=None,
+        minimum_object_volume_to_split_nm_3=500,
+        num_workers=1,
+    )
+    assert 5 not in snb.ids  # filtered out before any object is even read
+    snb.split_objects()
+
+    output = ImageDataInterface(f"{output_path}/s0").to_ndarray_ts()
+
+    # Nothing changed: the dumbbell (id 5) and control cube (id 7, always
+    # below the gate) both stay exactly as they were.
+    assert np.array_equal(output, seg)
+
+
+def test_split_narrow_bridges_minimum_object_volume_to_split_preserves_new_id_space(
+    tmp_path,
+):
+    # A regression guard for the id-collision trap: new split ids are
+    # assigned starting at max(original id) + 1. If that max were computed
+    # from the post-filter self.ids (only objects actually attempted) rather
+    # than the full bbox table, a filtered-out object with a higher id than
+    # every split candidate could collide with a newly assigned split id.
+    seg = _dumbbell_segmentation()
+    # Give the untouched control cube a higher id than the dumbbell, and set
+    # the gate to filter the control cube out (its volume, 27, is tiny) while
+    # still letting the dumbbell split.
+    seg[seg == 7] = 50
+    seg_path = _write_segmentation(str(tmp_path / "segmentation.zarr"), seg)
+    output_path = str(tmp_path / "split_output.zarr")
+
+    snb = SplitNarrowBridges(
+        segmentation_path=seg_path,
+        output_path=output_path,
+        strategy="edt_watershed",
+        neck_radius_nm=2,
+        minimum_subregion_volume_nm_3=None,
+        minimum_object_volume_to_split_nm_3=100,
+        num_workers=1,
+    )
+    assert 50 not in snb.ids
+    assert 5 in snb.ids
+    snb.split_objects()
+
+    output = ImageDataInterface(f"{output_path}/s0").to_ndarray_ts()
+
+    assert np.array_equal(output > 0, seg > 0)
+    # The control cube keeps its original (higher) id untouched.
+    assert np.array_equal(output[seg == 50], seg[seg == 50])
+    # The dumbbell split into new ids that don't collide with id 50.
+    dumbbell_labels = np.unique(output[seg == 5])
+    assert len(dumbbell_labels) >= 2
+    assert not (set(dumbbell_labels.tolist()) & {50})
+
+
 def test_split_narrow_bridges_final_volume_filter(tmp_path):
     # minimum_volume_nm_3 is a final dataset-level filter, distinct from
     # minimum_subregion_volume_nm_3 (which only gates split acceptance): it

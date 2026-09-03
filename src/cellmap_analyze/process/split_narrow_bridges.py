@@ -918,6 +918,7 @@ class SplitNarrowBridges(ComputeConfigMixin):
         neck_radius_nm=0,
         neck_radius_mode="fixed",
         minimum_subregion_volume_nm_3=None,
+        minimum_object_volume_to_split_nm_3=0,
         max_pieces_per_object=1024,
         csv_path=None,
         edt_path=None,
@@ -976,6 +977,20 @@ class SplitNarrowBridges(ComputeConfigMixin):
                 explicitly to fully disable the gate regardless of
                 ``minimum_volume_nm_3``; pass a value to use a different
                 threshold than the final filter.
+            minimum_object_volume_to_split_nm_3: Optional pre-filter, checked
+                against each object's *total* volume (from ``csv_path``'s
+                "Volume (nm^3)" column) before any mask is even read --
+                objects below this are never handed to ``strategy`` and are
+                written through unchanged. Default 0 disables it (every
+                object is a split candidate, the prior behavior). Distinct
+                from ``minimum_subregion_volume_nm_3``, which gates whether
+                one particular candidate *cut* is accepted once splitting is
+                already underway -- this instead skips the attempt
+                entirely, for objects too small overall to plausibly be two
+                real merged things (e.g. segmentation-noise blobs, where any
+                "neck" found is more likely a shape artifact than a genuine
+                merge, and letting it split just fragments noise into more
+                noise).
             max_pieces_per_object: Safety cap on how many subpieces a single
                 object may split into; exceeding it raises rather than
                 silently truncating. Also doubles as the fixed stride
@@ -1206,6 +1221,26 @@ class SplitNarrowBridges(ComputeConfigMixin):
         self.csv_path = csv_path
         self.bbox_df = pd.read_csv(csv_path, index_col=0)
         self.ids = self.bbox_df.index.tolist()
+
+        self.minimum_object_volume_to_split_nm_3 = float(
+            minimum_object_volume_to_split_nm_3
+        )
+        if self.minimum_object_volume_to_split_nm_3 > 0 and self.ids:
+            too_small = (
+                self.bbox_df.loc[self.ids, "Volume (nm^3)"]
+                < self.minimum_object_volume_to_split_nm_3
+            )
+            num_skipped = int(too_small.sum())
+            if num_skipped:
+                logger.info(
+                    "Skipping split attempts for %d/%d objects below "
+                    "minimum_object_volume_to_split_nm_3=%.4g nm^3 (written "
+                    "through unchanged).",
+                    num_skipped,
+                    len(self.ids),
+                    self.minimum_object_volume_to_split_nm_3,
+                )
+                self.ids = too_small.index[~too_small].tolist()
 
         if neck_radius_mode not in ("fixed", "adaptive"):
             raise ValueError(
@@ -1793,7 +1828,14 @@ class SplitNarrowBridges(ComputeConfigMixin):
                 self._write_output({}, output_path=write_path, base_config=base_config)
             else:
                 split_results.sort(key=lambda r: r["id"])
-                max_original_id = max(self.ids) if self.ids else 0
+                # Deliberately the full bbox_df index, not self.ids -- the
+                # latter may have objects filtered out by
+                # minimum_object_volume_to_split_nm_3 (never split, but
+                # still written through with their original id), and a new
+                # split id must never collide with one of those.
+                max_original_id = (
+                    int(self.bbox_df.index.max()) if len(self.bbox_df) else 0
+                )
                 split_lookup = {}
                 for rank, r in enumerate(split_results):
                     new_id_base = max_original_id + 1 + rank * self.max_pieces_per_object
