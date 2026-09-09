@@ -1,10 +1,13 @@
 # Splitting accidentally-merged objects at narrow bridges — design plan
 
 Status: implemented on branch `split-narrow-bridges`
-(`src/cellmap_analyze/process/split_narrow_bridges.py`), both strategies
-(`edt_watershed` and `skeleton_graph`) working and tested
-(`tests/operations/test_split_narrow_bridges.py`). Written up so the next
-session doesn't have to re-derive the reasoning.
+(`src/cellmap_analyze/process/split_narrow_bridges.py`). Only `edt_watershed`
+ships currently — `skeleton_graph` and `tube_direction` were removed before
+merging (see "skeleton_graph and tube_direction removed" below); the design
+history for them is kept in this doc since the reasoning (thin-segment
+detection, cyclic-mesh handling, direction gates) is worth re-deriving from
+if either comes back with real test/validation coverage. Written up so the
+next session doesn't have to re-derive the reasoning.
 
 ## Goal
 
@@ -418,6 +421,38 @@ existing per-cut gate in the first place). The pre-filter doesn't change
 objects that were always going to fail the existing gate after that work was
 done, and stays independently useful as its own knob if
 `minimum_subregion_volume_nm_3` is explicitly disabled (`0`).
+
+## skeleton_graph and tube_direction removed (insufficiently tested)
+
+Both `SkeletonGraphSplit` and `TubeDirectionSplit` (which subclassed it,
+though it overrode every method and didn't actually rely on inherited
+behavior) were removed before merging this branch.
+
+- `SkeletonGraphSplit` had only two unit tests (a basic dumbbell split and
+  one size-gate rejection on synthetic geometry) — no test of the cyclic
+  topology its own docstring says it handles incorrectly (one-at-a-time
+  cutting can't separate two blobs joined by *two* redundant thin bridges;
+  see `TubeDirectionSplit`'s docstring for the real-data case that motivated
+  its simultaneous-cut design), and no real-dataset validation run recorded
+  anywhere.
+- `TubeDirectionSplit` had **zero** unit tests. Its docstring cites specific
+  numbers from a real object (id 1278, `jrc_axolotl-heart-1` mito, 6.4um
+  crop — 380 candidate bridges, 35 vs. 157 disconnected one-at-a-time vs.
+  simultaneously, piece counts stable at 82/81/81/71 across a
+  `neck_radius_nm` range) that read like a genuine analysis was run during
+  development, but it isn't captured as a reproducible test, so those claims
+  can't be re-verified now and nothing guards against regressing them.
+
+Rather than ship two strategies whose only evidence of correctness is
+synthetic dumbbell tests (`skeleton_graph`) or docstring narrative with no
+test at all (`tube_direction`), both were cut back out. `edt_watershed` is
+the one strategy with real-data validation on record (see
+`jrc_mus-cerebellum-2`/`-3` nucleus data below) and is what ships. If
+thin/branched-object splitting (mitochondria, etc.) is needed again, the
+design reasoning above (thin-segment/flanking detection, prominence and
+direction gates, simultaneous cutting for cyclic meshes) is still valid —
+it just needs unit tests covering the cyclic-topology case and a real
+validation run captured somewhere reproducible before it ships again.
 
 ## Status / next steps
 

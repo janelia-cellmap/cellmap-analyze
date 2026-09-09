@@ -93,61 +93,6 @@ def test_split_narrow_bridges_no_split_when_disconnected_neck(tmp_path):
     assert np.array_equal(output, seg)
 
 
-def test_split_narrow_bridges_skeleton_graph_dumbbell(tmp_path):
-    # skeleton_graph is a general-purpose strategy -- not mito-specific --
-    # so it should handle the same simple dumbbell case EDTWatershedSplit does.
-    seg = _dumbbell_segmentation()
-    seg_path = _write_segmentation(str(tmp_path / "segmentation.zarr"), seg)
-    output_path = str(tmp_path / "split_output.zarr")
-
-    snb = SplitNarrowBridges(
-        segmentation_path=seg_path,
-        output_path=output_path,
-        strategy="skeleton_graph",
-        neck_radius_nm=2,
-        minimum_subregion_volume_nm_3=None,
-        num_workers=1,
-    )
-    snb.split_objects()
-
-    output = ImageDataInterface(f"{output_path}/s0").to_ndarray_ts()
-
-    assert np.array_equal(output > 0, seg > 0)
-    dumbbell_labels = np.unique(output[seg == 5])
-    assert len(dumbbell_labels) >= 2
-    assert np.all(dumbbell_labels > seg.max())
-    assert np.array_equal(output[seg == 7], seg[seg == 7])
-
-
-def test_split_narrow_bridges_skeleton_graph_respects_min_subregion_gate(tmp_path):
-    # A large trunk with a tiny, thin protrusion (not a real merged object,
-    # just a spurious bump/spur). Without a size gate, a topology-blind
-    # radius threshold would happily split the stub off; the
-    # minimum_subregion_volume_nm_3 gate should keep it attached since the
-    # stub is far too small to be a real second object.
-    seg = np.zeros((20, 20, 20), dtype=np.uint32)
-    seg[2:10, 2:10, 2:10] = 9  # 8x8x8 trunk
-    seg[10:13, 5:6, 5:6] = 9  # 1x1x3 stub sticking out of one face
-    seg_path = _write_segmentation(str(tmp_path / "segmentation.zarr"), seg)
-    output_path = str(tmp_path / "split_output.zarr")
-
-    snb = SplitNarrowBridges(
-        segmentation_path=seg_path,
-        output_path=output_path,
-        strategy="skeleton_graph",
-        neck_radius_nm=2,
-        minimum_subregion_volume_nm_3=5,
-        num_workers=1,
-    )
-    snb.split_objects()
-
-    output = ImageDataInterface(f"{output_path}/s0").to_ndarray_ts()
-
-    assert np.array_equal(output > 0, seg > 0)
-    # The stub was too small to clear the size gate, so the object stays whole.
-    assert np.array_equal(output, seg)
-
-
 def test_split_narrow_bridges_minimum_object_volume_to_split_gate(tmp_path):
     # minimum_object_volume_to_split_nm_3 is a pre-filter on the whole
     # object, checked before any candidate cut is even looked for -- distinct
