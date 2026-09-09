@@ -298,6 +298,7 @@ class Skeletonize(ComputeConfigMixin):
         tolerance_nm=50,
         num_workers=10,
         timeout=5,
+        concurrency_limit=None,
         sharded=True,
         shard_bits=1,
         minishard_bits=6,
@@ -358,6 +359,19 @@ class Skeletonize(ComputeConfigMixin):
             tolerance_nm: Tolerance for simplification (in nm)
             num_workers: Number of parallel workers
             timeout: Timeout for ImageDataInterface reads
+            concurrency_limit: tensorstore concurrency limit for
+                ``segmentation_idi`` reads. None (default) auto-resolves via
+                ``dask_util.resolve_concurrency_limit`` (see
+                ``SplitNarrowBridges`` for the full rationale): safe ``1``
+                when ``num_workers > 1`` (sibling worker processes may share
+                a node/job's CPU allocation), or every CPU actually
+                available to this process when ``num_workers <= 1`` (no
+                cluster, no siblings). For real lsf/slurm/sge wave
+                dispatch, ``skeletonize()`` additionally rescales this
+                per-wave inside each worker (``dask_util.
+                rescale_idi_concurrency``) to that worker's fair share of
+                its *job's* real CPU affinity, since a job's cpuset is
+                shared by every worker process inside it.
             sharded: Write outputs as neuroglancer_uint64_sharded_v1 instead of
                      one file per ID. Workers still write per-ID files during
                      the dask phase; the driver repacks them into shards at the
@@ -407,8 +421,15 @@ class Skeletonize(ComputeConfigMixin):
                      ``simplified/`` output.
         """
         super().__init__(num_workers)
+        self.concurrency_limit = dask_util.resolve_concurrency_limit(
+            num_workers, concurrency_limit
+        )
         self.segmentation_path = segmentation_path
-        self.segmentation_idi = ImageDataInterface(segmentation_path, timeout=timeout)
+        self.segmentation_idi = ImageDataInterface(
+            segmentation_path,
+            timeout=timeout,
+            concurrency_limit=self.concurrency_limit,
+        )
         self.output_path = str(output_path).rstrip("/")
 
         if csv_path is None:
@@ -527,6 +548,7 @@ class Skeletonize(ComputeConfigMixin):
         write_vertex_radius: bool = False,
         prune_only: bool = False,
         second_subdir: str = "simplified",
+        processes_per_job: int = None,
     ):
         """
         Process a single ID: extract, skeletonize, prune, (simplify,) and emit.
@@ -540,8 +562,16 @@ class Skeletonize(ComputeConfigMixin):
         driver can pack them into shard files via the existing pickle merge
         path — no per-ID NRS write happens. When ``sharded=False``, per-ID
         files are written under ``{output_path}/{full,<second_subdir>}/{id}``.
+
+        processes_per_job: See ``SplitNarrowBridges.split_id``'s parameter
+            of the same name -- rescales ``segmentation_idi``'s
+            concurrency_limit to this worker's fair share of its job's real
+            CPU affinity (``dask_util.rescale_idi_concurrency``). None
+            (default) leaves it untouched.
         """
         from funlib.geometry import Roi
+
+        dask_util.rescale_idi_concurrency((segmentation_idi,), processes_per_job)
 
         result: dict = dict(Skeletonize._empty_metrics())
 
@@ -579,12 +609,31 @@ class Skeletonize(ComputeConfigMixin):
             max_z = row["MAX Z (nm)"]
 
             # Create ROI with 1-voxel padding
-            # Bounding box coords from CSV are in true nm; convert to scaled coordinates
-            voxel_size = segmentation_idi.voxel_size
+            # Bounding box coords from CSV are in true nm; convert to scaled coordinates.
+            # MIN/MAX (nm) are voxel-*center* coordinates (see measure_util.py), not
+            # edges. `start_point` is deliberately left as `MIN*sf - padding` (not
+            # shifted to the true low edge first): the vertex-coordinate math below
+            # adds this same value directly to `index * spacing`-style local
+            # coordinates from skimage_to_custom_skeleton_fast (an edge-relative
+            # convention), and MIN*sf already sitting half a voxel inside the true
+            # edge is exactly the correction needed to land on voxel *centers*
+            # (see the OME-translation regression test in test_skeletonize.py).
+            # Changing this breaks vertex coordinates, not just the read margin.
+            #
+            # On the high side there's no such coupling (`end_point` only controls
+            # how much extra background the read grabs, not any offset used later),
+            # so it gets the real fix: MAX*sf + padding only reaches the far edge of
+            # the object's own last voxel (MAX is a center coordinate, already half
+            # a voxel inside the true high edge), giving ~zero actual margin there.
+            # Shifting by the missing half voxel first makes it a genuine full
+            # voxel of background beyond the object.
+            voxel_size = np.array(segmentation_idi.voxel_size, dtype=float)
             sf = segmentation_idi.voxel_size_scale_factor
             padding = voxel_size  # 1 voxel in each direction
             start_point = np.array([min_z * sf, min_y * sf, min_x * sf]) - padding
-            end_point = np.array([max_z * sf, max_y * sf, max_x * sf]) + padding
+            end_point = (
+                np.array([max_z * sf, max_y * sf, max_x * sf]) + voxel_size / 2 + padding
+            )
             roi = Roi(start_point, end_point - start_point)
 
             logger.info(f"Processing ID {id_value}: ROI {roi}")
@@ -1050,6 +1099,8 @@ class Skeletonize(ComputeConfigMixin):
         )
         self._log_wave_plan(waves)
 
+        processes_per_job_by_wave = dask_util.wave_uses_shared_job_cpuset(base_config)
+
         tmp_merge_root = (
             f"{self.output_path}/_tmp_skeleton_metrics_to_merge_{self._run_id}"
         )
@@ -1063,9 +1114,10 @@ class Skeletonize(ComputeConfigMixin):
             wave_label = f"skeletonize wave {wave_index}/{len(waves)} ({len(wave.item_ids)} IDs)"
             wave_ids = wave.item_ids
             wave_merge_dir = f"{tmp_merge_root}_wave{wave_index}"
+            processes_per_job = wave.processes if processes_per_job_by_wave else None
 
-            def _wrapper(idx, _wave_ids=wave_ids):
-                return self._skeletonize_id_by_value(_wave_ids[idx])
+            def _wrapper(idx, _wave_ids=wave_ids, _procs=processes_per_job):
+                return self._skeletonize_id_by_value(_wave_ids[idx], _procs)
 
             def _phase(workers, config, _wrapper=_wrapper, _ids=wave_ids,
                        _merge=wave_merge_dir, _label=wave_label):
@@ -1123,7 +1175,7 @@ class Skeletonize(ComputeConfigMixin):
                 len(wave.item_ids), wave.max_estimated_peak_bytes / 1e9,
             )
 
-    def _skeletonize_id_by_value(self, id_value):
+    def _skeletonize_id_by_value(self, id_value, processes_per_job=None):
         """Dispatch one ID to ``calculate_id_skeleton``. Each wave dispatches
         a subset of IDs, so the wrapper takes the ID value directly rather
         than an index into ``self.ids``."""
@@ -1139,6 +1191,7 @@ class Skeletonize(ComputeConfigMixin):
             write_vertex_radius=self.write_vertex_radius,
             prune_only=self.prune_only,
             second_subdir=self.second_subdir,
+            processes_per_job=processes_per_job,
         )
         if result is None:
             result = Skeletonize._empty_metrics()

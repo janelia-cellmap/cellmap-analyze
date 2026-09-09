@@ -441,6 +441,172 @@ class TestCrossDatasetAlignment:
         )
 
 
+class TestBoundaryBlockShapeMatch:
+    """Regression test for an off-by-one at dataset-boundary blocks.
+
+    A remainder ROI (not a multiple of output_voxel_size) must still crop to
+    exactly round(roi.shape / output_voxel_size) after the integer
+    repeat()/slicing fast path. Previously the final crop was computed via
+    funlib.geometry.Coordinate division, which truncates (floors) rather
+    than rounds; offset and end floor independently, so they can disagree
+    with round(shape / ovs) by 1 voxel in either direction whenever the
+    offset isn't voxel-aligned -- exactly the situation at a dataset
+    boundary. This is the class of bug behind `IndexError: boolean index did
+    not match indexed array along axis 0; size of axis is 57 but size of
+    corresponding boolean axis is 56` when masking a raw EM block against a
+    segmentation block.
+    """
+
+    def test_remainder_roi_integer_upsampling_exact_shape(self, tmp_zarr):
+        # A boundary/remainder block whose physical size is NOT an exact
+        # multiple of output_voxel_size: previously the crop was computed as
+        # int(end/ovs) - int(offset/ovs), i.e. two independently truncated
+        # (floored) divisions, which disagreed with round(shape/ovs) by
+        # exactly 1 voxel whenever the offset wasn't voxel-aligned -- exactly
+        # the situation at a dataset boundary. Values found by brute-force
+        # search over (voxel_size, output_voxel_size, begin, size); with the
+        # old code this reproducibly returned one voxel too many. The ratio
+        # voxel_size/output_voxel_size (4) is an exact integer so this
+        # exercises the repeat()-based fast path, not the zoom/interpolation
+        # branch (which already computed its output size via round()).
+        input_voxel_size = Coordinate((32, 1, 1))
+        output_voxel_size = Coordinate((8, 1, 1))
+        begin = 119
+        size = 99  # not a multiple of 8 -> expected 12 output voxels, old code gave 13
+        test_shape = (7, 1, 1)
+        test_data = np.random.randint(1, 10, test_shape, dtype=np.uint8)
+
+        total_roi = Roi((0, 0, 0), test_shape) * input_voxel_size
+        ds_path = f"{tmp_zarr}/test_boundary_block/s0"
+        ds = prepare_ds(
+            tmp_zarr,
+            "test_boundary_block/s0",
+            total_roi=total_roi,
+            voxel_size=input_voxel_size,
+            dtype=test_data.dtype,
+        )
+        ds[total_roi] = test_data
+
+        roi = Roi((begin, 0, 0), (size, 1, 1))
+        idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
+        result = idi.to_ndarray_ts(roi)
+
+        expected_shape = tuple(round(roi.shape[i] / output_voxel_size[i]) for i in range(3))
+        assert expected_shape == (12, 1, 1)
+        assert result.shape == expected_shape
+
+
+class TestRescaleOffsetAlignment:
+    """Regression test for the resampled fast-path crop using the wrong grid
+    anchor when the dataset's own coordinate offset isn't a multiple of its
+    native voxel size.
+
+    Every dataset created with the default OME voxel-center convention and
+    zero translation has offset == -voxel_size/2 (see
+    test_nonzero_translation_center_corner_convention), which is NEVER a
+    multiple of voxel_size. The fast-path crop snapped the ROI to the native
+    grid anchored at 0 instead of at `offset` (unlike the actual read a few
+    lines below it, which already subtracted offset first) -- so the crop
+    window silently returned data from the wrong native voxels, off by a
+    fraction of a native voxel, even though the returned shape was correct.
+    """
+
+    def test_exact_single_native_voxel_roi_returns_that_voxel(self, tmp_zarr):
+        input_voxel_size = Coordinate((32, 1, 1))
+        output_voxel_size = Coordinate((8, 1, 1))
+        test_data = np.arange(10, dtype=np.uint8).reshape(10, 1, 1)
+
+        total_roi = Roi((0, 0, 0), test_data.shape) * input_voxel_size
+        ds_path = f"{tmp_zarr}/test_offset_align/s0"
+        ds = prepare_ds(
+            tmp_zarr,
+            "test_offset_align/s0",
+            total_roi=total_roi,
+            voxel_size=input_voxel_size,
+            dtype=test_data.dtype,
+        )
+        ds[total_roi] = test_data
+
+        idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
+        offset0 = idi.offset[0]
+
+        # Request exactly the physical extent of native voxel 3 -- every
+        # returned output voxel should be the value 3, not a mix of 2 and 3.
+        roi = Roi((offset0 + 3 * 32, 0, 0), (32, 1, 1))
+        result = idi.to_ndarray_ts(roi)
+        assert np.array_equal(result.ravel(), np.full(4, 3))
+
+
+class TestRawValidMask:
+    """Regression coverage for return_valid_mask: voxels that come from
+    padding/no-overlap fill must be reported as invalid rather than left
+    indistinguishable from real (possibly legitimately-zero) data."""
+
+    def _make_dataset(self, tmp_zarr, name, input_voxel_size, shape, fill_start=1):
+        test_data = (
+            np.arange(fill_start, fill_start + np.prod(shape))
+            .reshape(shape)
+            .astype(np.uint16)
+        )
+        total_roi = Roi((0, 0, 0), shape) * input_voxel_size
+        ds_path = f"{tmp_zarr}/{name}/s0"
+        ds = prepare_ds(
+            tmp_zarr,
+            f"{name}/s0",
+            total_roi=total_roi,
+            voxel_size=input_voxel_size,
+            dtype=test_data.dtype,
+        )
+        ds[total_roi] = test_data
+        return ds_path
+
+    def test_no_overlap_roi_is_entirely_invalid(self, tmp_zarr):
+        input_voxel_size = Coordinate((32, 32, 32))
+        output_voxel_size = Coordinate((8, 8, 8))
+        ds_path = self._make_dataset(
+            tmp_zarr, "test_valid_no_overlap", input_voxel_size, (5, 5, 5)
+        )
+        idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
+
+        # Entirely past the dataset's own extent -> no real data anywhere.
+        roi = Roi(tuple(idi.roi.end), (80, 80, 80))
+        data, valid = idi.to_ndarray_ts(roi, return_valid_mask=True)
+        assert data.shape == valid.shape
+        assert not valid.any()
+
+    def test_fully_inside_roi_is_entirely_valid(self, tmp_zarr):
+        input_voxel_size = Coordinate((32, 32, 32))
+        output_voxel_size = Coordinate((8, 8, 8))
+        ds_path = self._make_dataset(
+            tmp_zarr, "test_valid_inside", input_voxel_size, (5, 5, 5)
+        )
+        idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
+
+        roi = idi.roi
+        data, valid = idi.to_ndarray_ts(roi, return_valid_mask=True)
+        assert data.shape == valid.shape
+        assert valid.all()
+
+    def test_partial_overlap_marks_only_the_covered_region_valid(self, tmp_zarr):
+        input_voxel_size = Coordinate((32, 32, 32))
+        output_voxel_size = Coordinate((8, 8, 8))
+        ds_path = self._make_dataset(
+            tmp_zarr, "test_valid_partial", input_voxel_size, (5, 5, 5)
+        )
+        idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
+
+        # Straddle the dataset's far edge on axis 0 only: half real data,
+        # half padding.
+        begin = list(idi.roi.begin)
+        begin[0] = idi.roi.end[0] - 32
+        roi = Roi(tuple(begin), (64, 32, 32))
+        data, valid = idi.to_ndarray_ts(roi, return_valid_mask=True)
+
+        assert data.shape == valid.shape
+        assert valid[:4].all()
+        assert not valid[4:].any()
+
+
 def _create_n5_dataset(base_path, shape, block_size, voxel_size_xyz, data):
     """Create a minimal N5 dataset with raw chunks that tensorstore can read."""
     os.makedirs(base_path, exist_ok=True)

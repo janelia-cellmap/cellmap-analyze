@@ -46,6 +46,8 @@ class ConnectedComponents(ComputeConfigMixin):
         intensity_threshold_minimum=-1,
         intensity_threshold_maximum=np.inf,  # exclusive
         gaussian_smoothing_sigma_nm=None,
+        consensus_config=None,
+        minimum_consensus_count=None,
         mask_config=None,
         connected_components_blockwise_path=None,
         object_labels_path=None,
@@ -62,13 +64,55 @@ class ConnectedComponents(ComputeConfigMixin):
         fill_holes=False,
         chunk_shape=None,
     ):
+        """
+        ``consensus_config``, if provided, is an alternative to ``input_path``:
+        a list of independent inputs (not necessarily channels of the same
+        image -- e.g. three unrelated prediction datasets), each a dict with
+        its own ``path`` and (optionally) its own
+        ``intensity_threshold_minimum``/``intensity_threshold_maximum``/
+        ``gaussian_smoothing_sigma_nm``/``invert``. Every input is thresholded
+        independently per voxel, then combined by a vote: a voxel is
+        foreground if at least ``minimum_consensus_count`` of the inputs agree
+        it's foreground. ``minimum_consensus_count`` defaults to
+        ``len(consensus_config)`` (unanimous agreement, i.e. AND); pass e.g.
+        ``2`` out of 3 inputs for majority-vote consensus. Connected
+        components then runs on that combined mask, exactly as it would on a
+        single thresholded input.
+        """
         super().__init__(num_workers)
-        if input_path and connected_components_blockwise_path:
-            raise Exception("Cannot provide both input_path and tmp_blockwise_path")
-        if not input_path and not connected_components_blockwise_path:
-            raise Exception("Must provide either input_path or tmp_blockwise_path")
+        num_input_modes = sum(
+            bool(x)
+            for x in (input_path, connected_components_blockwise_path, consensus_config)
+        )
+        if num_input_modes > 1:
+            raise Exception(
+                "Provide exactly one of input_path, "
+                "connected_components_blockwise_path, or consensus_config"
+            )
+        if num_input_modes == 0:
+            raise Exception(
+                "Must provide one of input_path, "
+                "connected_components_blockwise_path, or consensus_config"
+            )
+        if consensus_config and calculating_holes:
+            raise Exception("calculating_holes is not supported with consensus_config")
+        if consensus_config and minimum_consensus_count is not None:
+            if not (1 <= minimum_consensus_count <= len(consensus_config)):
+                raise Exception(
+                    f"minimum_consensus_count ({minimum_consensus_count}) must be "
+                    f"between 1 and len(consensus_config) ({len(consensus_config)})"
+                )
 
-        if input_path:
+        self.consensus_idis = None
+        self.consensus_thresholds = None
+        self.minimum_consensus_count = None
+        if consensus_config:
+            self.consensus_idis = [
+                ImageDataInterface(c["path"], chunk_shape=chunk_shape)
+                for c in consensus_config
+            ]
+            template_idi = self.input_idi = self.consensus_idis[0]
+        elif input_path:
             template_idi = self.input_idi = ImageDataInterface(
                 input_path, chunk_shape=chunk_shape
             )
@@ -112,10 +156,27 @@ class ConnectedComponents(ComputeConfigMixin):
         output_ds_basepath = split_dataset_path(output_path)[0]
         os.makedirs(output_ds_basepath, exist_ok=True)
 
-        if input_path:
-            self.input_path = input_path
+        if input_path or consensus_config:
             self.intensity_threshold_minimum = intensity_threshold_minimum
             self.intensity_threshold_maximum = intensity_threshold_maximum
+            if consensus_config:
+                self.input_path = self.consensus_idis[0].path
+                self.consensus_thresholds = [
+                    (
+                        c.get("intensity_threshold_minimum", -1),
+                        c.get("intensity_threshold_maximum", np.inf),
+                        c.get("gaussian_smoothing_sigma_nm"),
+                        c.get("invert", False),
+                    )
+                    for c in consensus_config
+                ]
+                self.minimum_consensus_count = (
+                    minimum_consensus_count
+                    if minimum_consensus_count is not None
+                    else len(consensus_config)
+                )
+            else:
+                self.input_path = input_path
 
             # Use helper function to generate blockwise path (handles root datasets correctly)
             blockwise_path = get_output_path_from_input_path(output_path, "_blockwise")
@@ -173,6 +234,98 @@ class ConnectedComponents(ComputeConfigMixin):
         self._run_id = uuid.uuid4().hex[:8]
 
     @staticmethod
+    def _gaussian_padding_nm(idi: ImageDataInterface, gaussian_smoothing_sigma_nm, truncate=4.0):
+        """Physical, per-axis Gaussian smoothing padding (exact multiples of
+        voxel size, for exact voxel alignment after trimming). Coordinate of
+        all zeros if smoothing is disabled (falsy/all-zero sigma)."""
+        has_gaussian_smoothing = gaussian_smoothing_sigma_nm is not None and (
+            np.isscalar(gaussian_smoothing_sigma_nm) and gaussian_smoothing_sigma_nm > 0
+            or hasattr(gaussian_smoothing_sigma_nm, "__iter__")
+            and np.any(np.array(gaussian_smoothing_sigma_nm) > 0)
+        )
+        if not has_gaussian_smoothing:
+            return Coordinate((0, 0, 0))
+        gaussian_smoothing_sigma_voxels = tuple(
+            gaussian_smoothing_sigma_nm / vs for vs in idi.original_voxel_size
+        )
+        padding_voxels_per_axis = tuple(
+            int(truncate * sigma + 0.5) for sigma in gaussian_smoothing_sigma_voxels
+        )
+        return Coordinate(
+            p * int(vs) for p, vs in zip(padding_voxels_per_axis, idi.voxel_size)
+        )
+
+    @staticmethod
+    def _threshold_consensus_input_data(data, idi, intensity_threshold_minimum, intensity_threshold_maximum, gaussian_smoothing_sigma_nm, invert, padding_nm):
+        gaussian_padding_nm = ConnectedComponents._gaussian_padding_nm(
+            idi, gaussian_smoothing_sigma_nm
+        )
+        if np.any(np.array(tuple(gaussian_padding_nm)) > 0):
+            gaussian_smoothing_sigma_voxels = tuple(
+                gaussian_smoothing_sigma_nm / vs for vs in idi.original_voxel_size
+            )
+            data = gaussian_filter(
+                data.astype(np.float32),
+                sigma=gaussian_smoothing_sigma_voxels,
+                mode="nearest",
+            )
+        # trim with the block's (possibly larger, to accommodate whichever
+        # input needs the most smoothing context) padding, not this input's
+        # own -- every input here was read over the same block
+        data = trim_array_anisotropic(data, padding_nm, idi.voxel_size)
+
+        if invert:
+            return data == 0
+        return (data >= intensity_threshold_minimum) & (data < intensity_threshold_maximum)
+
+    @staticmethod
+    def _calculate_consensus_block_connected_components(
+        block_index,
+        connected_components_blockwise_idi,
+        consensus_idis,
+        consensus_thresholds,
+        minimum_consensus_count,
+        mask: MasksFromConfig = None,
+    ):
+        # Padding must be uniform across inputs since every input is read
+        # over the same block -- use whichever input needs the most
+        # Gaussian-smoothing context.
+        padding_nm = Coordinate((0, 0, 0))
+        for idi, (_, _, sigma_nm, _) in zip(consensus_idis, consensus_thresholds):
+            padding_nm = Coordinate(
+                np.maximum(padding_nm, ConnectedComponents._gaussian_padding_nm(idi, sigma_nm))
+            )
+
+        block = create_block_from_index(
+            connected_components_blockwise_idi, block_index, padding=padding_nm
+        )
+
+        mask_data = None
+        if mask:
+            mask_block = create_block_from_index(
+                connected_components_blockwise_idi, block_index
+            )
+            mask_data = mask.process_block(roi=mask_block.read_roi)
+
+        votes = None
+        for idi, (thresh_min, thresh_max, sigma_nm, input_invert) in zip(
+            consensus_idis, consensus_thresholds
+        ):
+            data = idi.to_ndarray_ts(block.read_roi)
+            input_mask = ConnectedComponents._threshold_consensus_input_data(
+                data, idi, thresh_min, thresh_max, sigma_nm, input_invert, padding_nm
+            )
+            votes = (
+                input_mask.astype(np.uint8) if votes is None else votes + input_mask
+            )
+
+        thresholded = votes >= minimum_consensus_count
+        if mask_data is not None:
+            thresholded &= mask_data.astype(bool)
+
+        return block, thresholded
+
+    @staticmethod
     def calculate_block_connected_components(
         block_index,
         input_idi: ImageDataInterface,
@@ -186,75 +339,24 @@ class ConnectedComponents(ComputeConfigMixin):
         mask: MasksFromConfig = None,
         connectivity=2,
         binarize=True,
+        consensus_idis=None,
+        consensus_thresholds=None,
+        minimum_consensus_count=None,
     ):
         if calculating_holes:
             invert = True
 
-        padding_nm = 0
-        # Check if gaussian_smoothing_sigma_nm is set (handle both scalar and array)
-        has_gaussian_smoothing = (
-            gaussian_smoothing_sigma_nm is not None
-            and (
-                np.isscalar(gaussian_smoothing_sigma_nm) and gaussian_smoothing_sigma_nm > 0
-                or hasattr(gaussian_smoothing_sigma_nm, '__iter__') and np.any(np.array(gaussian_smoothing_sigma_nm) > 0)
-            )
-        )
-        if has_gaussian_smoothing:
-            # Calculate per-axis sigma for anisotropic Gaussian smoothing
-            gaussian_smoothing_sigma_voxels = tuple(
-                gaussian_smoothing_sigma_nm / vs
-                for vs in input_idi.original_voxel_size
-            )
-            truncate = 4.0  # default
-            # Calculate per-axis padding in voxels to ensure exact voxel alignment
-            padding_voxels_per_axis = tuple(
-                int(truncate * sigma + 0.5)
-                for sigma in gaussian_smoothing_sigma_voxels
-            )
-            # Convert to per-axis physical padding (exact multiples of voxel size)
-            padding_nm = Coordinate(
-                p * int(vs)
-                for p, vs in zip(padding_voxels_per_axis, input_idi.voxel_size)
-            )
-
-        block = create_block_from_index(
-            connected_components_blockwise_idi, block_index, padding=padding_nm
-        )
-        if mask:
-            # mask block will always just be the normal size, regardless of smoothing and associated padding
-            mask_block = create_block_from_index(
-                connected_components_blockwise_idi, block_index
-            )
-            mask_data = mask.process_block(roi=mask_block.read_roi)
-
-            if not np.any(mask_data):
-                connected_components_blockwise_idi.ds[block.write_roi] = 0
-                return
-
-        input = input_idi.to_ndarray_ts(block.read_roi)
-
-        if has_gaussian_smoothing:
-            # Apply anisotropic Gaussian filter with per-axis sigma
-            input = gaussian_filter(
-                input.astype(np.float32),
-                sigma=gaussian_smoothing_sigma_voxels,  # tuple for anisotropic
-                mode="nearest",
-            )
-            input = trim_array_anisotropic(input, padding_nm, input_idi.voxel_size)
-
         cc3d_connectivity = 6 + 12 * (connectivity >= 2) + 8 * (connectivity >= 3)
 
-        if binarize:
-            if invert:
-                thresholded = input == 0
-            else:
-                thresholded = (input >= intensity_threshold_minimum) & (
-                    input < intensity_threshold_maximum
-                )
-
-            if mask:
-                thresholded *= mask_data
-
+        if consensus_idis:
+            block, thresholded = ConnectedComponents._calculate_consensus_block_connected_components(
+                block_index,
+                connected_components_blockwise_idi,
+                consensus_idis,
+                consensus_thresholds,
+                minimum_consensus_count,
+                mask,
+            )
             connected_components = cc3d.connected_components(
                 thresholded,
                 connectivity=cc3d_connectivity,
@@ -262,14 +364,67 @@ class ConnectedComponents(ComputeConfigMixin):
                 out_dtype=np.uint64,
             )
         else:
-            if mask:
-                input *= mask_data
-
-            connected_components = cc3d.connected_components(
-                input,
-                connectivity=cc3d_connectivity,
-                out_dtype=np.uint64,
+            padding_nm = ConnectedComponents._gaussian_padding_nm(
+                input_idi, gaussian_smoothing_sigma_nm
             )
+            has_gaussian_smoothing = np.any(np.array(tuple(padding_nm)) > 0)
+            if has_gaussian_smoothing:
+                gaussian_smoothing_sigma_voxels = tuple(
+                    gaussian_smoothing_sigma_nm / vs
+                    for vs in input_idi.original_voxel_size
+                )
+
+            block = create_block_from_index(
+                connected_components_blockwise_idi, block_index, padding=padding_nm
+            )
+            if mask:
+                # mask block will always just be the normal size, regardless of smoothing and associated padding
+                mask_block = create_block_from_index(
+                    connected_components_blockwise_idi, block_index
+                )
+                mask_data = mask.process_block(roi=mask_block.read_roi)
+
+                if not np.any(mask_data):
+                    connected_components_blockwise_idi.ds[block.write_roi] = 0
+                    return
+
+            input = input_idi.to_ndarray_ts(block.read_roi)
+
+            if has_gaussian_smoothing:
+                # Apply anisotropic Gaussian filter with per-axis sigma
+                input = gaussian_filter(
+                    input.astype(np.float32),
+                    sigma=gaussian_smoothing_sigma_voxels,  # tuple for anisotropic
+                    mode="nearest",
+                )
+                input = trim_array_anisotropic(input, padding_nm, input_idi.voxel_size)
+
+            if binarize:
+                if invert:
+                    thresholded = input == 0
+                else:
+                    thresholded = (input >= intensity_threshold_minimum) & (
+                        input < intensity_threshold_maximum
+                    )
+
+                if mask:
+                    thresholded *= mask_data
+
+                connected_components = cc3d.connected_components(
+                    thresholded,
+                    connectivity=cc3d_connectivity,
+                    binary_image=True,
+                    out_dtype=np.uint64,
+                )
+            else:
+                if mask:
+                    input *= mask_data
+
+                connected_components = cc3d.connected_components(
+                    input,
+                    connectivity=cc3d_connectivity,
+                    out_dtype=np.uint64,
+                )
 
         # Calculate offset with per-axis division for anisotropic data
         global_id_offset = block_index * np.prod(
@@ -319,6 +474,9 @@ class ConnectedComponents(ComputeConfigMixin):
             self.mask,
             self.connectivity,
             self.binarize,
+            self.consensus_idis,
+            self.consensus_thresholds,
+            self.minimum_consensus_count,
         )
 
     @staticmethod

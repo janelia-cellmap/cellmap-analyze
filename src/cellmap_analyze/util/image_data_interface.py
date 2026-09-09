@@ -205,6 +205,29 @@ def open_ds_tensorstore(dataset_path: str, mode="r", concurrency_limit=None):
     return dataset_future.result()
 
 
+def _apply_integer_fast_path(
+    arr, rescale_factors, channel_offset, all_up, all_down, interpolation_order
+):
+    """Apply the repeat/slice/zoom fast-path resampling used for integer or
+    close-to-integer rescale factors. Shared by the data array and the
+    (optional) validity mask so the two can never drift apart in shape."""
+    if all_up:
+        return (
+            arr.repeat(int(round(rescale_factors[0])), axis=channel_offset)
+            .repeat(int(round(rescale_factors[1])), axis=channel_offset + 1)
+            .repeat(int(round(rescale_factors[2])), axis=channel_offset + 2)
+        )
+    elif all_down:
+        downsample_factors = tuple(int(round(1 / rf)) for rf in rescale_factors)
+        downsample_slices = (slice(None),) * channel_offset + tuple(
+            slice(None, None, factor) for factor in downsample_factors
+        )
+        return arr[downsample_slices]
+    else:
+        zoom_factors = (1,) * channel_offset + rescale_factors
+        return zoom(arr, zoom=zoom_factors, order=interpolation_order)
+
+
 def to_ndarray_tensorstore(
     dataset,
     roi=None,
@@ -216,6 +239,7 @@ def to_ndarray_tensorstore(
     max_retries=10,
     timeout=5,
     interpolation_order=0,
+    return_valid_mask=False,
 ):
     """Read a region of a tensorstore dataset and return it as a numpy array
 
@@ -232,9 +256,16 @@ def to_ndarray_tensorstore(
         interpolation_order: Order of interpolation for non-integer resampling
             0 = nearest-neighbor (preserves labels, default)
             1 = linear interpolation (for continuous data)
+        return_valid_mask: If True, also return a boolean array (same shape
+            as the returned data) that is False wherever a voxel came from
+            padding/fill rather than a real read from the dataset -- e.g. the
+            ROI extending past the dataset's own bounds. This lets callers
+            (e.g. intensity statistics) exclude fabricated fill values
+            instead of silently treating them as real data.
 
     Returns:
-        Numpy array of the region, resampled to output_voxel_size if specified
+        Numpy array of the region, resampled to output_voxel_size if specified.
+        If return_valid_mask is True, returns a (data, valid_mask) tuple instead.
 
     Note:
         For non-integer scale factors (e.g., 8nm→5nm = 1.6x), uses scipy.ndimage.zoom.
@@ -305,6 +336,10 @@ def to_ndarray_tensorstore(
                     data = zoom(data, zoom=zoom_factors, order=interpolation_order)
         if swap_axes:
             data = np.swapaxes(data, 0 + channel_offset, 2 + channel_offset)
+        if return_valid_mask:
+            # The whole dataset was read with no ROI, so nothing here came
+            # from padding/fill -- every voxel is valid.
+            return data, np.ones(data.shape, dtype=bool)
         return data
 
     if offset is None:
@@ -313,11 +348,29 @@ def to_ndarray_tensorstore(
     if voxel_size != output_voxel_size:
         # in the case where there is a mismatch in voxel sizes, we may need to extra pad to ensure that the output is a multiple of the output voxel size
         original_roi = roi
-        roi = original_roi.snap_to_grid(voxel_size)
-        snapped_offset = (original_roi.begin - roi.begin) / output_voxel_size
-        snapped_end = (original_roi.end - roi.begin) / output_voxel_size
+        # Snap in offset-relative space (matching the actual read below,
+        # which grows to native voxel boundaries (offset, offset+vs, …) not
+        # (0, vs, …)). Without this, whenever offset isn't itself a multiple
+        # of voxel_size -- the common case for any dataset using the default
+        # OME voxel-center convention with zero translation -- the crop
+        # window below would be computed against the wrong grid anchor and
+        # end up reading the wrong native voxels entirely.
+        roi = (original_roi - offset).snap_to_grid(voxel_size) + offset
+        # Coordinate arithmetic truncates to int rather than rounding, which
+        # can crop boundary blocks one voxel short of the expected output
+        # size. Round explicitly and derive the end from the offset plus the
+        # expected size so the slices always match `original_roi.shape /
+        # output_voxel_size`, consistent with the other branches below.
+        snapped_offset = [
+            int(round((original_roi.begin[i] - roi.begin[i]) / output_voxel_size[i]))
+            for i in range(3)
+        ]
+        snapped_size = [
+            int(round(original_roi.shape[i] / output_voxel_size[i])) for i in range(3)
+        ]
         snapped_slices = tuple(
-            slice(snapped_offset[i], snapped_end[i]) for i in range(3)
+            slice(snapped_offset[i], snapped_offset[i] + snapped_size[i])
+            for i in range(3)
         )
 
     # Subtract offset before snapping so snap_to_grid aligns to the
@@ -374,6 +427,8 @@ def to_ndarray_tensorstore(
         data = np.full(output_shape, fv, dtype=dataset.dtype.numpy_dtype)
         if swap_axes:
             data = np.swapaxes(data, 0 + channel_offset, 2 + channel_offset)
+        if return_valid_mask:
+            return data, np.zeros(output_shape, dtype=bool)
         return data
 
     # with ts.Transaction() as txn:
@@ -386,6 +441,11 @@ def to_ndarray_tensorstore(
         raise TimeoutError(
             f"Failed to read dataset {dataset} with slices {valid_slices} after {max_retries} retries."
         )
+    if return_valid_mask:
+        # True for every voxel that came from an actual read below; padded
+        # voxels (regardless of fill mode, including "edge") are never real
+        # data and are marked invalid.
+        valid = np.ones(data.shape, dtype=bool)
     if np.any(np.array(pad_width)):
         if fill_value == "edge":
             data = np.pad(
@@ -400,6 +460,10 @@ def to_ndarray_tensorstore(
                 mode="constant",
                 constant_values=fill_value,
             )
+        if return_valid_mask:
+            valid = np.pad(
+                valid, pad_width=pad_width, mode="constant", constant_values=False
+            )
     # else:
     #     padded_data = (
     #         np.ones(output_shape, dtype=dataset.dtype.numpy_dtype) * fill_value
@@ -412,7 +476,7 @@ def to_ndarray_tensorstore(
     #     # Read the region of interest from the dataset
     #     padded_data[padded_slices] = dataset[valid_slices].read().result()
 
-    # Resample if needed
+    # Resample if needed (if not, `valid` already matches data's shape as read+padded)
     if needs_rescaling:
         # Check if any rescale factor requires interpolation (non-integer)
         if requires_interpolation(rescale_factors):
@@ -453,6 +517,8 @@ def to_ndarray_tensorstore(
             if channel_offset > 0:
                 # Resample each channel separately
                 output_data = np.zeros((data.shape[0],) + num_output_voxels, dtype=data.dtype)
+                if return_valid_mask:
+                    output_valid = np.zeros((valid.shape[0],) + num_output_voxels, dtype=bool)
                 for ch in range(data.shape[0]):
                     resampled = map_coordinates(
                         data[ch],
@@ -462,8 +528,30 @@ def to_ndarray_tensorstore(
                         cval=0
                     )
                     output_data[ch] = resampled.reshape(num_output_voxels)
+                    if return_valid_mask:
+                        # order=0 (nearest) regardless of interpolation_order so
+                        # validity stays a crisp 0/1 decision, not a blend.
+                        resampled_valid = map_coordinates(
+                            valid[ch].astype(np.uint8),
+                            coords_array,
+                            order=0,
+                            mode='constant',
+                            cval=0,
+                        )
+                        output_valid[ch] = resampled_valid.reshape(num_output_voxels) > 0
                 data = output_data
+                if return_valid_mask:
+                    valid = output_valid
             else:
+                if return_valid_mask:
+                    resampled_valid = map_coordinates(
+                        valid.astype(np.uint8),
+                        coords_array,
+                        order=0,
+                        mode='constant',
+                        cval=0,
+                    )
+                    valid = (resampled_valid.reshape(num_output_voxels) > 0)
                 data = map_coordinates(
                     data,
                     coords_array,
@@ -478,36 +566,25 @@ def to_ndarray_tensorstore(
 
             all_up = all(rf >= 1 for rf in rescale_factors)
             all_down = all(rf <= 1 for rf in rescale_factors)
-            if all_up:
-                # Apply per-axis upsampling for anisotropic data
-                # Use round() instead of int() to handle factors like 1.999
-                data = (
-                    data.repeat(int(round(rescale_factors[0])), axis=channel_offset)
-                    .repeat(int(round(rescale_factors[1])), axis=channel_offset + 1)
-                    .repeat(int(round(rescale_factors[2])), axis=channel_offset + 2)
-                )
-            elif all_down:
-                # Use simple slicing for integer downsampling (preserves exact labels)
-                # Calculate per-axis downsampling factors
-                downsample_factors = tuple(int(round(1 / rf)) for rf in rescale_factors)
-
-                # Build slicing tuple for downsampling
-                # For channels: slice(None), for spatial dims: slice(None, None, factor)
-                downsample_slices = (
-                    (slice(None),) * channel_offset +
-                    tuple(slice(None, None, factor) for factor in downsample_factors)
-                )
-                data = data[downsample_slices]
-            else:
-                # Mixed up/down per axis — use zoom for correctness
-                zoom_factors = (1,) * channel_offset + rescale_factors
-                data = zoom(data, zoom=zoom_factors, order=interpolation_order)
-
+            data = _apply_integer_fast_path(
+                data, rescale_factors, channel_offset, all_up, all_down, interpolation_order
+            )
             data = data[slices]
+            if return_valid_mask:
+                # order=0 (nearest, via a uint8 view) regardless of
+                # interpolation_order so validity stays a crisp 0/1 decision.
+                valid_u8 = _apply_integer_fast_path(
+                    valid.astype(np.uint8), rescale_factors, channel_offset, all_up, all_down, 0
+                )
+                valid = valid_u8[slices] > 0
 
     if swap_axes:
         data = np.swapaxes(data, 0 + channel_offset, 2 + channel_offset)
+        if return_valid_mask:
+            valid = np.swapaxes(valid, 0 + channel_offset, 2 + channel_offset)
 
+    if return_valid_mask:
+        return data, valid
     return data
 
 
@@ -662,7 +739,7 @@ class ImageDataInterface:
         self.ds.voxel_size = self.voxel_size
         self.ds.roi = self.roi
 
-    def to_ndarray_ts(self, roi=None):
+    def to_ndarray_ts(self, roi=None, return_valid_mask=False):
         if not self.ts:
             self.ts = open_ds_tensorstore(
                 self.path, concurrency_limit=self.concurrency_limit
@@ -679,6 +756,7 @@ class ImageDataInterface:
             self.max_retries,
             self.timeout,
             self.interpolation_order,
+            return_valid_mask,
         )
         self.ts = None
         return res

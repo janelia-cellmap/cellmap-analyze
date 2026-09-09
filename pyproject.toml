@@ -1,6 +1,6 @@
 [project]
 name = "cellmap-analyze"
-version = "0.4.3"
+version = "0.5.0"
 description = "Code to perform analysis on segmentations like those produced by CellMap"
 readme = "README.md"
 license-files = ["LICENSE"]
@@ -51,6 +51,8 @@ label-with-mask = "cli.cli:label_with_mask"
 measure = "cli.cli:measure"
 fit-lines-to-segmentations = "cli.cli:fit_lines_to_segmentations"
 assign-to-organelles = "cli.cli:assign_to_organelles"
+split-narrow-bridges = "cli.cli:split_narrow_bridges"
+compute-edt = "cli.cli:compute_edt"
 
 [tool.setuptools]
 package-dir = { "" = "src" }

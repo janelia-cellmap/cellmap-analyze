@@ -130,3 +130,59 @@ def test_nonzero_translation_center_corner_convention(tmp_path, voxel_size):
     m.measure()
     expected_com = tuple(expected_translation[d] + idx[d] * vs[d] for d in range(3))
     assert np.allclose(tuple(m.measurements[1].com), expected_com)
+
+
+def test_raw_intensity_excludes_voxels_outside_raw_coverage(tmp_path):
+    """An object whose segmentation extends past the raw EM dataset's own
+    coverage must have its mean/std computed only from the voxels that
+    actually have real EM data -- not have the missing region's padding
+    (0) silently averaged in as if it were real signal.
+    """
+    from cellmap_analyze.util.zarr_io import prepare_ds
+    from cellmap_analyze.analyze.measure import Measure
+
+    voxel_size = Coordinate((10, 10, 10))
+
+    # Segmentation: a single solid object filling a (10, 3, 3) block.
+    seg_shape = (10, 3, 3)
+    seg_data = np.ones(seg_shape, dtype=np.uint8)
+    seg_total_roi = Roi((0, 0, 0), seg_shape) * voxel_size
+    seg_path = str(tmp_path / "data.zarr/seg")
+    seg_ds = prepare_ds(
+        seg_path,
+        "s0",
+        total_roi=seg_total_roi,
+        voxel_size=voxel_size,
+        dtype=seg_data.dtype,
+    )
+    seg_ds[seg_total_roi] = seg_data
+
+    # Raw EM only covers x in [0, 6) of the same voxel grid -- the object's
+    # x in [6, 10) has no real EM data at all.
+    raw_shape = (6, 3, 3)
+    raw_value = 100
+    raw_data = np.full(raw_shape, raw_value, dtype=np.uint16)
+    raw_total_roi = Roi((0, 0, 0), raw_shape) * voxel_size
+    raw_path = str(tmp_path / "data.zarr/raw")
+    raw_ds = prepare_ds(
+        raw_path,
+        "s0",
+        total_roi=raw_total_roi,
+        voxel_size=voxel_size,
+        dtype=raw_data.dtype,
+    )
+    raw_ds[raw_total_roi] = raw_data
+
+    m = Measure(
+        input_path=f"{seg_path}/s0",
+        output_path=str(tmp_path / "csvs"),
+        num_workers=1,
+        raw_path=f"{raw_path}/s0",
+    )
+    m.measure()
+
+    oi = m.measurements[1]
+    covered_voxels = 6 * 3 * 3
+    assert oi.raw_count == covered_voxels
+    assert np.isclose(oi.mean_intensity, raw_value)
+    assert np.isclose(oi.std_intensity, 0.0)

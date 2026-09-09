@@ -7,6 +7,19 @@ from cellmap_analyze.util.voxel_size_utils import compute_common_scale_factor
 from functools import partial
 
 
+def _apply_mask_value(block, mask_value):
+    """``mask_value`` is either a scalar (exact match, ``block == mask_value``)
+    or a ``[min, max]`` pair (inclusive range, ``min <= block <= max``) --
+    the range form lets a raw-intensity mask express a ceiling/floor (e.g.
+    excluding saturated/over-threshold voxels) without a separate precomputed
+    mask volume.
+    """
+    if isinstance(mask_value, (list, tuple)):
+        lo, hi = mask_value
+        return (block >= lo) & (block <= hi)
+    return block == mask_value
+
+
 class Mask:
     def __init__(
         self,
@@ -76,7 +89,7 @@ class Mask:
         if operation == ["simple"]:
             block = self.idi.to_ndarray_ts(roi)
             if mask_value is not None:
-                block = block == mask_value
+                block = _apply_mask_value(block, mask_value)
         else:
             total_iterations = sum(iterations)
             # Use minimum voxel size for uniform padding in physical units
@@ -93,7 +106,7 @@ class Mask:
             )
 
             if mask_value is not None:
-                block = block == mask_value
+                block = _apply_mask_value(block, mask_value)
             for operation, iterations in zip(operation, iterations):
                 if operation == "erosion":
                     block = erosion(block, iterations, structuring_element)

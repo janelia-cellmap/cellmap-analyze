@@ -212,8 +212,15 @@ class Measure(ComputeConfigMixin):
 
         raw_idi = kwargs.get("raw_idi")
         if raw_idi is not None:
-            # Read raw at write_roi (no face-neighbor padding needed for intensity)
-            extra_kwargs["raw_data"] = raw_idi.to_ndarray_ts(block.write_roi)
+            # Read raw at write_roi (no face-neighbor padding needed for intensity).
+            # raw_valid marks voxels that came from padding/no-overlap fill
+            # rather than a real read, so they can be excluded from intensity
+            # stats instead of being silently counted as real intensity 0.
+            raw_data, raw_valid = raw_idi.to_ndarray_ts(
+                block.write_roi, return_valid_mask=True
+            )
+            extra_kwargs["raw_data"] = raw_data
+            extra_kwargs["raw_valid"] = raw_valid
 
         # get information only from actual block(not including padding)
         # Convert block offset from scaled coordinates back to true nm

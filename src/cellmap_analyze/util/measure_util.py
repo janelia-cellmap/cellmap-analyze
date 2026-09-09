@@ -283,9 +283,14 @@ def get_contacting_organelles_information(
     return contacting_organelle_information_1, contacting_organelle_information_2
 
 
-def get_raw_intensity_stats(segmentation, raw_data, trim=1):
+def get_raw_intensity_stats(segmentation, raw_data, raw_valid=None, trim=1):
     segmentation = trim_array(segmentation, trim)
     mask = segmentation > 0
+    if raw_valid is not None:
+        # Exclude voxels where raw_data came from padding/no-overlap fill
+        # rather than a real read, so they aren't silently counted as
+        # intensity 0.
+        mask &= raw_valid
     labels = segmentation[mask].ravel()
     values = raw_data[mask].ravel().astype(np.float64)
     if labels.size == 0:
@@ -314,6 +319,7 @@ def get_object_information(
         is_contact_site = True
 
     raw_data = kwargs.get("raw_data")
+    raw_valid = kwargs.get("raw_valid")
 
     ois = {}
     if np.any(trim_array(object_data, trim)):
@@ -338,7 +344,7 @@ def get_object_information(
 
         if raw_data is not None:
             raw_intensity_stats = get_raw_intensity_stats(
-                object_data, raw_data, trim=trim
+                object_data, raw_data, raw_valid=raw_valid, trim=trim
             )
 
         # Note some contact site ids may be overwritten but that shouldnt be an issue

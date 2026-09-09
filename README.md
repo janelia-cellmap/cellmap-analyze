@@ -21,6 +21,15 @@ A suite of Dask-powered tools for processing and analyzing terabyte-scale 3D seg
 | **Label With Mask**      | `label-with-mask`            | Label one dataset with IDs from another.                    |
 | **Morphological Operations** | `morphological-operations` | Erosion and dilation of segmented datasets. Processing order across blocks is not guaranteed. |
 | **Skeletonize**          | `skeletonize`                | Generate skeletons from segmented objects with optional pruning and simplification. Automatically resamples to isotropic resolution before skeletonization. |
+| **Compute EDT**          | `compute-edt`                | Compute a Euclidean distance transform over a segmentation, for reuse across repeated `split-narrow-bridges` runs. |
+| **Split Narrow Bridges** | `split-narrow-bridges`       | Split accidentally-merged blob-like objects (nuclei, cells) at thin necks via EDT-watershed, preserving all original foreground voxels. |
+
+These tools chain together into a full predictions-to-segmentations pipeline:
+start from raw model output (`connected-components` thresholds prediction
+probability maps, or `mws` agglomerates affinities) to get an initial
+instance segmentation, optionally refine it (`split-narrow-bridges` to
+separate accidentally-merged instances, `fill-holes`, `morphological-operations`),
+then finalize with `clean-connected-components` and/or `filter-ids`.
 
 ### Analysis Tools
 
