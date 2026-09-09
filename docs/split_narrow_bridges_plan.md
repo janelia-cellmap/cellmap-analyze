@@ -398,6 +398,27 @@ not a legitimate object discarded prematurely. For a standalone size-based
 cull with no splitting involved at all, use `filter_ids`/
 `CleanConnectedComponents` directly on the `ConnectedComponents` output.
 
+## Skipping tiny objects before splitting (added)
+
+Added `minimum_object_volume_to_split_nm_3`: an optional pre-filter checked
+against each object's *total* volume (from the bbox CSV, before any mask is
+even read) — objects below it are never handed to a strategy at all, and are
+written through unchanged.
+
+This is the mirror image of the removed `max_object_volume_nm_3` idea above,
+but not subject to the same objection. Skipping *large* objects up front was
+wrong because "too large" is usually the exact signature of several real
+objects merged together — the thing this tool exists to fix. Skipping
+*small* objects up front doesn't have that problem: an object too small to
+contain two real merged things almost never does, and `minimum_subregion_volume_nm_3`
+already forces this mathematically anyway (a split needs >= 2 pieces, each
+clearing that gate, so the object needed >= ~2x that volume to survive the
+existing per-cut gate in the first place). The pre-filter doesn't change
+*which* objects end up split — it just skips the mask/EDT/skeleton work for
+objects that were always going to fail the existing gate after that work was
+done, and stays independently useful as its own knob if
+`minimum_subregion_volume_nm_3` is explicitly disabled (`0`).
+
 ## Status / next steps
 
 Done: both strategies implemented and unit-tested on synthetic geometries
@@ -431,6 +452,9 @@ Also done:
    to 0 (falsy → gate still disabled), so the pure-defaults case is
    unchanged. Pass `minimum_subregion_volume_nm_3=0` explicitly to disable
    the gate while still using a real `minimum_volume_nm_3`.
+7. `minimum_object_volume_to_split_nm_3` pre-filter (see above) — skips the
+   split attempt (mask read, EDT, skeleton) entirely for objects below a
+   total-volume threshold. Default 0 disables it (unchanged behavior).
 
 Not done / explicitly out of scope:
 3. `SkeletonGraphSplit`'s per-candidate-neck connectivity check is
