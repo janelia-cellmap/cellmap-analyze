@@ -35,9 +35,7 @@ logger = logging.getLogger(__name__)
 #
 # A strategy only decides *where* to cut a single object's binary mask; all
 # I/O, global ID bookkeeping, and blockwise writing lives in
-# SplitNarrowBridges. See docs/split_narrow_bridges_plan.md for the design
-# rationale (why this is pluggable, and the open questions around
-# thresholding).
+# SplitNarrowBridges.
 
 
 class SplitStrategy(ABC):
@@ -120,8 +118,8 @@ def _adaptive_neck_radius_nm(radii_nm, floor_nm):
     ``neck_radius_nm``).
 
     Experimental/baseline: this is intentionally the simplest version of
-    "adaptive" (see docs/split_narrow_bridges_plan.md), meant to be treated
-    as a starting point to experiment against, not a final answer. Falls
+    "adaptive", meant to be treated as a starting point to experiment
+    against, not a final answer. Falls
     back to the floor when there are too few samples or no real bimodality
     (a uniform blob's radii are all ~equal, and Otsu on a degenerate/near-
     constant histogram can return a near-zero threshold that would disable
@@ -243,8 +241,8 @@ class EDTWatershedSplit(SplitStrategy):
 
     ``neck_radius_voxels`` does double duty: it sets the minimum separation
     between watershed seeds (an isotropic approximation using the finest
-    voxel axis -- see the open question in docs/split_narrow_bridges_plan.md
-    about anisotropic handling), *and* it's the maximum boundary width for a
+    voxel axis -- anisotropic handling is an open question), *and* it's
+    the maximum boundary width for a
     watershed split to be accepted as a genuine neck (see
     ``_merge_thick_boundaries``) -- this is the "thin, between two thicker
     things" check. ``minimum_subregion_volume_voxels`` is an optional
@@ -356,8 +354,7 @@ class SplitNarrowBridges(ComputeConfigMixin):
                 only strategy currently offered. Standard choice for
                 blob-like objects: nuclei, cells. A topology-aware
                 skeleton-graph strategy for thin/branched objects existed
-                but was removed pending real validation -- see
-                docs/split_narrow_bridges_plan.md).
+                but was removed pending real validation).
             neck_radius_nm: Candidate-cut threshold, in nm. Converted to
                 voxels using the finest voxel axis (isotropic approximation).
                 In "adaptive" ``neck_radius_mode``, this instead acts as a
@@ -407,8 +404,7 @@ class SplitNarrowBridges(ComputeConfigMixin):
                 to 1024 (was too tight for real data: real id 4665 in
                 jrc_mus-cerebellum-2, plausibly a segmentation-noise blob
                 rather than a real merged-nuclei chain, split into 122
-                pieces -- see docs/split_narrow_bridges_plan.md). Still a
-                real safety net against genuinely pathological runaway
+                pieces). Still a real safety net against genuinely pathological runaway
                 fragmentation (thousands of pieces), just not tuned tightly
                 for now.
             csv_path: Optional path to a CSV with per-object bounding boxes
@@ -441,8 +437,7 @@ class SplitNarrowBridges(ComputeConfigMixin):
                 it's actually near a real object boundary, which can push a
                 block's peak memory past whatever's configured per dask
                 slot (this is what failed on jrc_mus-cerebellum-3 in
-                production -- see docs/split_narrow_bridges_plan.md). Prefer
-                explicitly running ``compute-edt`` once yourself and passing
+                production). Prefer explicitly running ``compute-edt`` once yourself and passing
                 the result via ``edt_path`` (reused across many runs) over
                 setting ``precompute_edt=True`` here, if you do need the
                 amortization.

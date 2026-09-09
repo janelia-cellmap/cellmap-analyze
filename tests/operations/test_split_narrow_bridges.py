@@ -270,9 +270,8 @@ def test_split_narrow_bridges_uses_precomputed_edt(tmp_path):
     # edt_path (manually supplied) and precompute_edt=True (explicit --
     # False is now the default, since ComputeEDT's fixed-block-grid
     # padding has no memory-aware wave planning of its own and can OOM a
-    # dask slot regardless of any single object's size; see
-    # docs/split_narrow_bridges_plan.md) should both give identical
-    # results to the default per-object edt.edt(mask, ...) recompute.
+    # dask slot regardless of any single object's size) should both give
+    # identical results to the default per-object edt.edt(mask, ...) recompute.
     seg = _dumbbell_segmentation()
     seg_path = _write_segmentation(str(tmp_path / "segmentation.zarr"), seg)
 
