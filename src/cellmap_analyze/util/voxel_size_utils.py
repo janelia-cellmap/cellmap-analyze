@@ -121,6 +121,12 @@ def read_raw_offset(ds):
     per-array ``offset`` attr is legacy fallback, and a disagreement between
     the two raises ValueError.
 
+    One difference is not a disagreement: funlib's ``prepare_ds`` (and so
+    every funlib writer, cellmap-flow's blockwise outputs among them) stores
+    ``offset`` as voxel 0's CORNER, half a voxel below the OME center. That
+    is the same position in funlib's convention, so it is accepted and the
+    OME translation is used.
+
     Args:
         ds: A CellMapArray (returned by open_dataset).
 
@@ -139,6 +145,10 @@ def read_raw_offset(ds):
     )
 
     if ome_tr is not None and arr_off is not None and not _values_match(ome_tr, arr_off):
+        corner = _funlib_corner(ome_tr, read_raw_voxel_size(ds))
+        # _values_match treats None as a match, so test the corner explicitly.
+        if corner is not None and _values_match(corner, arr_off):
+            return ome_tr
         raise ValueError(
             _conflict_msg(
                 ds,
@@ -192,6 +202,17 @@ def _ome_translation_for(attrs, scale_name):
         return _extract_ome_translation(attrs, scale_name)
     except (KeyError, IndexError, TypeError):
         return None
+
+
+def _funlib_corner(center, voxel_size):
+    """Voxel 0's corner, the funlib ``offset``, for an OME center translation.
+
+    None when the two lengths differ (e.g. a channel axis on one only), which
+    leaves the comparison to report a conflict.
+    """
+    if voxel_size is None or len(voxel_size) != len(center):
+        return None
+    return tuple(float(c) - float(v) / 2.0 for c, v in zip(center, voxel_size))
 
 
 def _values_match(a, b, atol=1e-6):
