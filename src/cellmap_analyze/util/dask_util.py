@@ -892,9 +892,14 @@ def get_zarr_chunk_path_from_block_index(block_index, idi, depth):
     # "c/0/10/0"); hand-joining coords without it silently pointed at
     # nonexistent paths for v3 arrays, making every distributed delete call
     # a no-op and leaving 100% of real cleanup to the final rmtree.
-    # encode_chunk_key handles v2 (no prefix) too, so this covers both.
-    chunk_key_encoding = idi.ds.data.metadata.chunk_key_encoding
-    key = chunk_key_encoding.encode_chunk_key(block_coords)
+    # ArrayV3Metadata wraps key encoding under .chunk_key_encoding, but
+    # ArrayV2Metadata has no such attribute -- it exposes encode_chunk_key
+    # directly on itself, so dispatch on zarr_format instead of assuming v3.
+    metadata = idi.ds.data.metadata
+    if metadata.zarr_format == 3:
+        key = metadata.chunk_key_encoding.encode_chunk_key(block_coords)
+    else:
+        key = metadata.encode_chunk_key(block_coords)
     return f"{idi.path}/{key}"
 
 
