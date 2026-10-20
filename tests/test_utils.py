@@ -196,6 +196,19 @@ def simple_sum_r2(data, voxel_size):
     return np.sum(np.sum(positions**2, axis=1))
 
 
+def simple_sum_m2(data, voxel_size):
+    """The six second-moment sums (zz, yy, xx, zy, zx, yx), the same way as simple_sum_r2."""
+    positions = np.array(np.where(data)).T + 0.5  # center on voxel
+    if np.isscalar(voxel_size):
+        voxel_size = np.array([voxel_size, voxel_size, voxel_size])
+    else:
+        voxel_size = np.array(voxel_size)
+    positions = positions * voxel_size
+    z, y, x = positions[:, 0], positions[:, 1], positions[:, 2]
+    return np.array([np.sum(z * z), np.sum(y * y), np.sum(x * x),
+                     np.sum(z * y), np.sum(z * x), np.sum(y * x)])
+
+
 def simple_object_information_dict(segmentation, voxel_size):
     # Handle both scalar and tuple voxel_size
     if np.isscalar(voxel_size):
@@ -221,6 +234,7 @@ def simple_object_information_dict(segmentation, voxel_size):
             com=simple_com(obj, voxel_size),
             surface_area=simple_surface_area(obj, voxel_face_areas),
             sum_r2=simple_sum_r2(obj, voxel_size),
+            sum_m2=simple_sum_m2(obj, voxel_size),
             bounding_box=simple_bounding_box(obj, voxel_size),
         )
         assert np.allclose(

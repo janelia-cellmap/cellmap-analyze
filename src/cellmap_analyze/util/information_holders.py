@@ -49,6 +49,7 @@ class ObjectInformation:
         surface_area: float = 0,
         com: np.ndarray = np.array([0, 0, 0]),
         sum_r2: float = 0,
+        sum_m2: np.ndarray = None,
         bounding_box: list = [np.inf, np.inf, np.inf, -np.inf, -np.inf, -np.inf],
         **kwargs,
     ):
@@ -58,6 +59,7 @@ class ObjectInformation:
         self.bounding_box = bounding_box
         self.com = com
         self.sum_r2 = sum_r2
+        self.sum_m2 = np.zeros(6) if sum_m2 is None else np.asarray(sum_m2, dtype=float)
         if counts > 0:
             self.radius_of_gyration = np.sqrt(
                 self.sum_r2 / counts - np.dot(self.com, self.com)
@@ -109,6 +111,48 @@ class ObjectInformation:
             )
             self.is_contact_site = True
 
+    @property
+    def principal_axes(self):
+        """``(lengths, vectors)`` of this object's principal axes, z y x.
+
+        The covariance of an object's voxel positions is
+        ``sum_m2 / counts - com (x) com``; its eigenvectors are the directions
+        the object extends along and its eigenvalues the variance along each,
+        largest first. ``lengths`` are ``sqrt(12 * eigenvalue)``, which is the
+        side of a uniform box with that variance: a 20 x 4 x 2 voxel box
+        measures 20, 4, 2 (to the discrete-voxel correction sqrt(N^2 - 1)).
+        ``vectors[:, i]`` is the unit vector of axis ``i``.
+
+        A sign is meaningless -- v and -v describe the same axis -- so each
+        vector is given with its largest component positive, making the value
+        reproducible rather than at the mercy of the eigensolver.
+        """
+        if self.counts < 1:
+            return np.full(3, np.nan), np.full((3, 3), np.nan)
+        zz, yy, xx, zy, zx, yx = self.sum_m2
+        cov = np.array([[zz, zy, zx], [zy, yy, yx], [zx, yx, xx]]) / self.counts - np.outer(
+            self.com, self.com
+        )
+        values, vectors = np.linalg.eigh(cov)
+        order = np.argsort(values)[::-1]
+        values, vectors = values[order], vectors[:, order]
+        for i in range(3):
+            if vectors[np.argmax(np.abs(vectors[:, i])), i] < 0:
+                vectors[:, i] *= -1
+        return np.sqrt(np.maximum(values, 0) * 12), vectors
+
+    @property
+    def elongation(self):
+        """Longest principal axis over the second longest; 1 for a sphere, NaN if flat."""
+        lengths = self.principal_axes[0]
+        return lengths[0] / lengths[1] if lengths[1] > 0 else np.nan
+
+    @property
+    def flatness(self):
+        """Second principal axis over the third; 1 for a rod or sphere, large for a sheet."""
+        lengths = self.principal_axes[0]
+        return lengths[1] / lengths[2] if lengths[2] > 0 else np.nan
+
     def __add__(self, other: "ObjectInformation"):
         oi = ObjectInformation()
         oi.counts = self.counts + other.counts
@@ -118,6 +162,8 @@ class ObjectInformation:
         oi.volume = self.volume + other.volume
         oi.surface_area = self.surface_area + other.surface_area
         oi.sum_r2 = self.sum_r2 + other.sum_r2
+        # Sums about a shared origin, so they add like sum_r2 (its trace).
+        oi.sum_m2 = self.sum_m2 + other.sum_m2
         oi.radius_of_gyration = np.sqrt(oi.sum_r2 / oi.counts - np.dot(oi.com, oi.com))
 
         if self.has_raw_intensity != other.has_raw_intensity:
