@@ -197,6 +197,19 @@ def split_narrow_bridges():
             snb.split_objects()
 
 
+def multiscale():
+    from cellmap_analyze.process.multiscale import Multiscale
+
+    rp = RunProperties()
+    with io_util.tee_streams(rp.logpath):
+        os.chdir(rp.execution_directory)
+        with io_util.TimingMessager(
+            "Multiscale", logger, final_message="Complete success"
+        ):
+            ms = Multiscale(**rp.run_config)
+            ms.create_multiscale()
+
+
 def assign_to_organelles():
     from cellmap_analyze.analyze.assign_to_organelles import AssignToOrganelles
 
