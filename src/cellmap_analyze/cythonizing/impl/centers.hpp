@@ -83,7 +83,10 @@ centers(
             c.x += p2;
             c.n++;
             if (compute_sum_r2) {
-                c.sum_r2 += p0 * p0 + p1 * p1 + p2 * p2;
+                c.sum_r2 +=
+                    static_cast<double>(p0) * p0 +
+                    static_cast<double>(p1) * p1 +
+                    static_cast<double>(p2) * p2;
             }
             if (compute_second_moments) {
                 c.szz += p0 * p0;

@@ -269,6 +269,7 @@ def simple_contact_site_information_dict(
             volume=np.sum(cs) * voxel_volume,
             com=simple_com(cs, voxel_size),
             sum_r2=simple_sum_r2(cs, voxel_size),
+            sum_m2=simple_sum_m2(cs, voxel_size),
             surface_area=simple_surface_area(cs, voxel_face_areas),
             bounding_box=simple_bounding_box(cs, voxel_size),
             id_to_surface_area_dict_1=simple_id_to_surface_area_dict(

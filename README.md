@@ -35,7 +35,7 @@ then finalize with `clean-connected-components` and/or `filter-ids`.
 
 | Tool                | CLI Command                  | Description                                                           |
 | ------------------- | ---------------------------- | --------------------------------------------------------------------- |
-| **Measurement**     | `measure`                    | Compute metrics (volume, surface area, radius of gyration, bounding box) for objects and contact sites. Supports raw intensity statistics when a raw dataset is provided. |
+| **Measurement**     | `measure`                    | Compute metrics (volume, surface area, radius of gyration, bounding box, principal axes) for objects and contact sites. Principal axes give three axis lengths, elongation (longest / second), flatness (second / third), and the direction of the longest axis. Supports raw intensity statistics when a raw dataset is provided. |
 | **Fit Lines**       | `fit_lines_to_segmentations` | Fit geometric lines to elongated/cylindrical structures.              |
 | **Assign to Organelles** | `assign_to_organelles`  | Map segmented objects to organelles based on centers of mass.         |
 

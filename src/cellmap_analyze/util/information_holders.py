@@ -143,13 +143,20 @@ class ObjectInformation:
 
     @property
     def elongation(self):
-        """Longest principal axis over the second longest; 1 for a sphere, NaN if flat."""
+        """Longest principal axis over the second longest; 1 for a sphere.
+
+        NaN when the second length is 0, i.e. all voxels lie on one line.
+        """
         lengths = self.principal_axes[0]
         return lengths[0] / lengths[1] if lengths[1] > 0 else np.nan
 
     @property
     def flatness(self):
-        """Second principal axis over the third; 1 for a rod or sphere, large for a sheet."""
+        """Second principal axis over the third; 1 for a rod or sphere, large for a sheet.
+
+        NaN when the third length is 0, i.e. all voxels lie in one plane (any
+        object one voxel thick along some axis).
+        """
         lengths = self.principal_axes[0]
         return lengths[1] / lengths[2] if lengths[2] > 0 else np.nan
 
@@ -220,6 +227,7 @@ class ObjectInformation:
             )
             and np.allclose(self.com, other.com, rtol=1e-13, atol=1e-13)
             and np.allclose(self.sum_r2, other.sum_r2, rtol=1e-13, atol=1e-13)
+            and np.allclose(self.sum_m2, other.sum_m2, rtol=1e-13, atol=1e-13)
             and np.allclose(
                 self.radius_of_gyration,
                 other.radius_of_gyration,
