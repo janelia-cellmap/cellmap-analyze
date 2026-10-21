@@ -235,7 +235,8 @@ class CustomSkeleton:
 
     def simplify(self, tolerance_nm=200):
         """
-        Simplify skeleton by removing vertices close to straight lines.
+        Simplify skeleton by removing vertices close to straight lines (RDP, per polyline
+        between branch points), without losing any of its loops.
         """
         start_time = time.time()
         logger.info(f"Starting simplification with tolerance {tolerance_nm}nm")
@@ -252,40 +253,21 @@ class CustomSkeleton:
         # Use consistent rounding precision (e.g., 6 decimal places)
         PRECISION = 6
 
-        for i, polyline in enumerate(polylines):
-            # Check if this is a loop (first vertex == last vertex)
-            is_loop = False
+        polylines = [np.asarray(polyline, dtype=float) for polyline in polylines]
+        keeps = []
+        for points in polylines:
+            keep = np.ones(len(points), dtype=bool)
+            if len(points) > 2:
+                keep = rdp(points, epsilon=tolerance_nm, return_mask=True).astype(bool)
+                keep[[0, -1]] = True
+            keeps.append(keep)
+        CustomSkeleton._keep_cycles(polylines, keeps)
 
-            if len(polyline) > 2:
-                # Compare coordinates (handle both tuple and array formats)
-                first = np.asarray(polyline[0])
-                last = np.asarray(polyline[-1])
-                if np.allclose(first, last):
-                    is_loop = True
-
-            # For loops: keep the closing vertex (A, B, C, D, A)
-            # RDP will preserve both first and last vertices (even though they're at the same position)
-            # This naturally preserves the loop structure
-            polyline_for_rdp = polyline
-
-            # Apply RDP simplification
-            simplified = rdp(polyline_for_rdp, epsilon=tolerance_nm)
-
-            # Round vertices to consistent precision
-            simplified_rounded = []
-            for vertex in simplified:
-                v_rounded = tuple(round(float(x), PRECISION) for x in vertex)
-                simplified_rounded.append(v_rounded)
-                all_vertices_set.add(v_rounded)
-
-            # For loops, simplified should already have first == last from RDP
-            # Verify this is the case
-            if is_loop and len(simplified_rounded) > 1:
-                # Double-check the loop is still closed after RDP
-                if simplified_rounded[0] != simplified_rounded[-1]:
-                    # This shouldn't happen since RDP preserves endpoints, but just in case
-                    simplified_rounded.append(simplified_rounded[0])
-
+        for points, keep in zip(polylines, keeps):
+            simplified_rounded = [
+                tuple(round(float(x), PRECISION) for x in vertex) for vertex in points[keep]
+            ]
+            all_vertices_set.update(simplified_rounded)
             simplified_polylines.append(simplified_rounded)
     
         logger.info(f"RDP produced {len(all_vertices_set)} unique vertices")
@@ -321,8 +303,68 @@ class CustomSkeleton:
     
         result = CustomSkeleton(vertices_list, edges, radii, simplified_polylines)
         logger.info(f"Total simplification time: {time.time() - start_time:.4f}s")
-    
+
         return result
+
+    @staticmethod
+    def _keep_cycles(polylines, keeps):
+        """Restore just enough of the vertices RDP dropped that no cycle is lost.
+
+        RDP keeps each polyline within the tolerance of the original, but alone it can
+        change the skeleton's topology. A closed polyline narrower than about twice the
+        tolerance shrinks to the line to its farthest vertex and back; parallel polylines
+        between the same two branch points, each within the tolerance of the straight
+        line between those points, all shrink to that one line. Either way a cycle of the
+        skeleton disappears. Restored vertices are original ones, farthest first, and
+        polylines that keep their cycles are left exactly as RDP made them.
+        """
+        bare = {}
+        for i, (points, keep) in enumerate(zip(polylines, keeps)):
+            if len(points) > 3 and np.allclose(points[0], points[-1]):
+                # a closed polyline stays a cycle with three distinct vertices
+                while len(np.unique(points[keep], axis=0)) < 3:
+                    if not CustomSkeleton._restore_farthest_vertex(points, keep):
+                        break
+            elif keep.sum() == 2 and len(points) >= 2:
+                ends = tuple(sorted(tuple(np.round(p, 6)) for p in (points[0], points[-1])))
+                bare.setdefault(ends, []).append(i)
+
+        for group in bare.values():
+            # Only one of these may stay the bare line between the two branch points: a
+            # single original edge if there is one (it has no vertex to restore), else
+            # the straightest.
+            group.sort(
+                key=lambda i: (
+                    len(polylines[i]) > 2,
+                    CustomSkeleton._max_chord_distance(polylines[i]),
+                )
+            )
+            for i in group[1:]:
+                CustomSkeleton._restore_farthest_vertex(polylines[i], keeps[i])
+
+    @staticmethod
+    def _restore_farthest_vertex(points, keep):
+        """Keep the dropped vertex farthest from the simplified polyline, measured from the
+        kept segment it was dropped from; False when none is dropped."""
+        kept = np.flatnonzero(keep)
+        best, best_distance = None, -1.0
+        for a, b in zip(kept[:-1], kept[1:]):
+            if b - a > 1:
+                inner = np.arange(a + 1, b)
+                distances = CustomSkeleton.lineseg_dists(points[inner], points[a], points[b])
+                j = int(np.argmax(distances))
+                if distances[j] > best_distance:
+                    best, best_distance = inner[j], distances[j]
+        if best is None:
+            return False
+        keep[best] = True
+        return True
+
+    @staticmethod
+    def _max_chord_distance(points):
+        if len(points) < 3:
+            return 0.0
+        return float(np.max(CustomSkeleton.lineseg_dists(points[1:-1], points[0], points[-1])))
 
     @staticmethod
     def find_branchpoints_and_endpoints(graph):
