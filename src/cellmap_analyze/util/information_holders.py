@@ -118,9 +118,9 @@ class ObjectInformation:
         The covariance of an object's voxel positions is
         ``sum_m2 / counts - com (x) com``; its eigenvectors are the directions
         the object extends along and its eigenvalues the variance along each,
-        largest first. ``lengths`` are ``sqrt(12 * eigenvalue)``, which is the
-        side of a uniform box with that variance: a 20 x 4 x 2 voxel box
-        measures 20, 4, 2 (to the discrete-voxel correction sqrt(N^2 - 1)).
+        largest first. ``lengths`` are ``sqrt(20 * eigenvalue)``, the axis
+        lengths (diameters) of the solid ellipsoid with the same variances, as
+        in scikit-image's regionprops: a sphere measures its diameter.
         ``vectors[:, i]`` is the unit vector of axis ``i``.
 
         A sign is meaningless -- v and -v describe the same axis -- so each
@@ -139,7 +139,7 @@ class ObjectInformation:
         for i in range(3):
             if vectors[np.argmax(np.abs(vectors[:, i])), i] < 0:
                 vectors[:, i] *= -1
-        return np.sqrt(np.maximum(values, 0) * 12), vectors
+        return np.sqrt(np.maximum(values, 0) * 20), vectors
 
     @property
     def elongation(self):

@@ -18,14 +18,15 @@ def _object(labels, voxel_size=(1.0, 1.0, 1.0), offset=(0.0, 0.0, 0.0)):
                              sum_r2=sum_r2[0], sum_m2=sum_m2[0])
 
 
-def test_axes_of_a_box_are_its_sides():
-    # A uniform box of N voxels has variance (N^2 - 1)/12 along that side, so
-    # the lengths come back as sqrt(N^2 - 1), not N.
+def test_axes_of_a_box():
+    # A box N voxels long has variance (N^2 - 1)/12 along that side, and the
+    # lengths are sqrt(20 * variance).
     labels = np.zeros((30, 10, 10), np.uint64)
     labels[5:25, 3:7, 4:6] = 1          # 20 x 4 x 2 in z, y, x
     oi = _object(labels)
     lengths, vectors = oi.principal_axes
-    assert np.allclose(lengths, [np.sqrt(20**2 - 1), np.sqrt(4**2 - 1), np.sqrt(2**2 - 1)])
+    variances = (np.array([20, 4, 2]) ** 2 - 1) / 12
+    assert np.allclose(lengths, np.sqrt(20 * variances))
     assert np.allclose(np.abs(vectors[:, 0]), [1, 0, 0])      # longest axis is z
     assert np.isclose(oi.elongation, lengths[0] / lengths[1])
     assert np.isclose(oi.flatness, lengths[1] / lengths[2])
@@ -62,14 +63,15 @@ def test_anisotropic_voxels_measure_in_nm():
     oi = _object(labels, voxel_size=(8.0, 4.0, 2.0))
     lengths, vectors = oi.principal_axes
     assert np.allclose(np.abs(vectors[:, 0]), [1, 0, 0])
-    assert np.allclose(lengths, [np.sqrt(80**2 - 8**2), np.sqrt(20**2 - 2**2),
-                                 np.sqrt(8**2 - 4**2)])
+    variances = np.array([80**2 - 8**2, 20**2 - 2**2, 8**2 - 4**2]) / 12
+    assert np.allclose(lengths, np.sqrt(20 * variances))
 
 
-def test_a_sphere_is_not_elongated():
+def test_a_sphere_measures_its_diameter():
     z, y, x = np.ogrid[:31, :31, :31]
     labels = (((z - 15) ** 2 + (y - 15) ** 2 + (x - 15) ** 2) <= 12**2).astype(np.uint64)
     oi = _object(labels)
+    assert np.allclose(oi.principal_axes[0], 24, atol=0.5)
     assert oi.elongation == pytest.approx(1.0, abs=0.02)
     assert oi.flatness == pytest.approx(1.0, abs=0.02)
 
