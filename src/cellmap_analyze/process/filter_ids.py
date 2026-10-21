@@ -26,6 +26,7 @@ class FilterIDs(ComputeConfigMixin):
         ids_to_keep: Union[List, str] = None,
         ids_to_remove: Union[List, str] = None,
         binarize=False,
+        preserve_ids=False,
         roi=None,
         num_workers=10,
         chunk_shape=None,
@@ -38,6 +39,10 @@ class FilterIDs(ComputeConfigMixin):
             raise ValueError(
                 "Must provide either ids_to_keep or ids_to_remove not both"
             )
+        # by default kept ids are renumbered 1..N in the order given;
+        # preserve_ids keeps their original values instead
+        if binarize and preserve_ids:
+            raise ValueError("binarize and preserve_ids are mutually exclusive")
 
         self.ids_to_keep = ids_to_keep
         self.ids_to_remove = ids_to_remove
@@ -51,6 +56,8 @@ class FilterIDs(ComputeConfigMixin):
                     self.ids_to_keep = [int(i) for i in self.ids_to_keep.split(",")]
             if binarize:
                 self.new_dtype = np.uint8
+            elif preserve_ids:
+                self.new_dtype = np.min_scalar_type(max(self.ids_to_keep))
             else:
                 self.new_dtype = np.min_scalar_type(len(self.ids_to_keep))
         if self.ids_to_remove:
@@ -60,6 +67,8 @@ class FilterIDs(ComputeConfigMixin):
             self.global_relabeling_dict = dict(
                 zip(self.ids_to_keep, [1] * len(self.ids_to_keep))
             )
+        elif preserve_ids:
+            self.global_relabeling_dict = dict(zip(self.ids_to_keep, self.ids_to_keep))
         else:
             self.global_relabeling_dict = dict(
                 zip(self.ids_to_keep, range(1, len(self.ids_to_keep) + 1))
