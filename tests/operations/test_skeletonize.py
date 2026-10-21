@@ -786,16 +786,18 @@ def test_skeletonize_complex_shapes(tmp_zarr, tmp_skeletonize_csv, voxel_size):
         # Edges are optional - after erosion it might be a single point or even empty
 
 
-def test_skeletonize_preserves_loops(tmp_zarr, tmp_skeletonize_csv, voxel_size):
+@pytest.mark.parametrize("tolerance_nm", [5, 50])
+def test_skeletonize_preserves_loops(tmp_zarr, tmp_skeletonize_csv, voxel_size, tolerance_nm):
     """
     Test that loops are preserved during simplification.
 
     This test uses ID 7 (figure-8 shape) which should produce a skeleton with loops.
-    After simplification, the loops should still be present (not broken into open paths).
+    After simplification, the loops should still be present (not broken into open paths),
+    at the default tolerance too, where its loops are narrower than twice the tolerance.
     """
     import networkx as nx
 
-    output_path = tmp_zarr + "/test_skeletonize_loops"
+    output_path = tmp_zarr + f"/test_skeletonize_loops_{tolerance_nm}"
 
     # Run skeletonization WITHOUT erosion to preserve the figure-8 structure
     skeletonizer = Skeletonize(
@@ -804,7 +806,7 @@ def test_skeletonize_preserves_loops(tmp_zarr, tmp_skeletonize_csv, voxel_size):
         csv_path=tmp_skeletonize_csv,
         erosion=False,  # No erosion to preserve loop structure
         min_branch_length_nm=0,
-        tolerance_nm=5,
+        tolerance_nm=tolerance_nm,
         num_workers=1,
         sharded=False,
     )
@@ -834,11 +836,13 @@ def test_skeletonize_preserves_loops(tmp_zarr, tmp_skeletonize_csv, voxel_size):
     # Find cycles in the graph
     cycles = nx.cycle_basis(g)
 
-    # A figure-8 should have at least one loop (ideally two, but simplification might merge them)
-    # The key property is that there ARE loops - not just a tree structure
-    assert len(cycles) >= 1, (
-        f"Figure-8 skeleton has no cycles after simplification. "
-        f"Found {len(cycles)} cycles, expected >= 1. "
+    # Simplification keeps every loop of the skeleton it simplifies
+    _, full_edges = CustomSkeleton.read_neuroglancer_skeleton(f"{output_path}/full/7")
+    full = nx.Graph()
+    full.add_edges_from(full_edges)
+    assert len(cycles) == len(nx.cycle_basis(full)) == 2, (
+        f"Figure-8 skeleton has {len(cycles)} cycles after simplification, "
+        f"{len(nx.cycle_basis(full))} before. "
         "This indicates loops were broken during simplification."
     )
 
