@@ -107,10 +107,13 @@ class Measure(ComputeConfigMixin):
             # If raw_path is a multiscale group (no scale level given), pick
             # the level whose voxel size best matches the input segmentation
             # so intensities line up with minimal resampling.
+            # Intensities, so when no level matches, a finer one is block-averaged
+            # to the segmentation's voxel size rather than sampled one voxel per block.
             self.raw_idi = ImageDataInterface(
                 self.raw_path,
                 chunk_shape=chunk_shape,
                 target_voxel_size=self.input_idi.original_voxel_size,
+                interpolation_order=1,
             )
             # Align scale factors between raw and input
             raw_sf = compute_common_scale_factor(
