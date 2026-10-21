@@ -16,7 +16,7 @@ A suite of Dask-powered tools for processing and analyzing terabyte-scale 3D seg
 | **Clean Components**     | `clean-connected-components` | Refine existing segmentations by removing small/large components. |
 | **Contact Sites**        | `contact-sites`              | Identify regions where two segmentations are within a configurable physical distance. Handles mismatched voxel sizes by resampling to a common resolution. |
 | **Fill Holes**           | `fill-holes`              | Fill interior gaps in segmented volumes.                    |
-| **Filter IDs**           | `filter-ids`                 | Exclude unwanted segmentation IDs.                          |
+| **Filter IDs**           | `filter-ids`                 | Exclude unwanted segmentation IDs. Kept IDs are renumbered 1..N in the order given, unless `preserve_ids: true`. |
 | **Mutex Watershed**      | `mws`                        | Mutex watershed agglomeration from affinities.              |
 | **Label With Mask**      | `label-with-mask`            | Label one dataset with IDs from another.                    |
 | **Morphological Operations** | `morphological-operations` | Erosion and dilation of segmented datasets. Processing order across blocks is not guaranteed. |
