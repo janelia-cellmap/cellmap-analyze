@@ -174,10 +174,11 @@ def get_region_properties(data, voxel_size=(1, 1, 1), trim=1, offset=np.zeros((3
     coms = []
     # coms = np.array(center_of_mass(data, data, index=ids))
     center_on_voxels = True
-    coms, sum_r2 = find_centers(
+    coms, sum_r2, sum_m2 = find_centers(
         data,
         ids,
         compute_sum_r2=True,
+        compute_second_moments=True,
         center_on_voxels=center_on_voxels,
         voxel_size=voxel_size,
         offset=offset,
@@ -212,6 +213,11 @@ def get_region_properties(data, voxel_size=(1, 1, 1), trim=1, offset=np.zeros((3
             "COM Y (nm)": coms[:, 1],
             "COM Z (nm)": coms[:, 0],
             "sum_r2 (nm^2)": sum_r2,
+            # The second-moment tensor about the origin, in the same frame as
+            # the COM: six sums that add across blocks, giving the covariance
+            # and so each object's principal axes (see ObjectInformation).
+            **{f"sum_m2_{k} (nm^2)": sum_m2[:, i]
+               for i, k in enumerate(("zz", "yy", "xx", "zy", "zx", "yx"))},
             "MIN X (nm)": bounding_boxes_coords[:, 2] * voxel_size[2],
             "MIN Y (nm)": bounding_boxes_coords[:, 1] * voxel_size[1],
             "MIN Z (nm)": bounding_boxes_coords[:, 0] * voxel_size[0],
@@ -381,6 +387,9 @@ def get_object_information(
                 surface_area=region_prop["Surface Area (nm^2)"],
                 com=region_prop[["COM Z (nm)", "COM Y (nm)", "COM X (nm)"]].to_numpy(),
                 sum_r2=region_prop["sum_r2 (nm^2)"],
+                sum_m2=region_prop[
+                    [f"sum_m2_{k} (nm^2)" for k in ("zz", "yy", "xx", "zy", "zx", "yx")]
+                ].to_numpy(dtype=float),
                 bounding_box=[
                     region_prop["MIN Z (nm)"] + offset[0],
                     region_prop["MIN Y (nm)"] + offset[1],

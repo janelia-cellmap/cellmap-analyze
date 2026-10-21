@@ -20,6 +20,12 @@ cdef extern from "impl/centers.hpp":
         double y
         double x
         double sum_r2
+        double szz
+        double syy
+        double sxx
+        double szy
+        double szx
+        double syx
 
     cpp_map[uint64_t, Center] centers(
         size_t size_z,
@@ -27,6 +33,7 @@ cdef extern from "impl/centers.hpp":
         size_t size_x,
         const uint64_t* labels,
         bool compute_sum_r2,
+        bool compute_second_moments,
         bool center_on_voxels,
         const double* voxel_size,
         const double* offset
@@ -36,6 +43,7 @@ cdef extern from "impl/centers.hpp":
 # ——— Python-visible functions ———
 def find_centers_cpp(np.ndarray[uint64_t, ndim=3] labels not None,
                      bint compute_sum_r2=False,
+                     bint compute_second_moments=False,
                      bint center_on_voxels=True,
                      double[:] voxel_size=None,
                      double[:] offset=None):
@@ -43,7 +51,9 @@ def find_centers_cpp(np.ndarray[uint64_t, ndim=3] labels not None,
     Compute connected-component centers via a C++ backend.
 
     labels:           3D uint64 array of labels; will be made C-contiguous.
-    compute_sum_r2:   whether to compute per-label second moment.
+    compute_sum_r2:   whether to compute per-label second moment (its trace).
+    compute_second_moments: whether to compute the per-label second-moment
+                      tensor (the six sums zz, yy, xx, zy, zx, yx).
     voxel_size:       optional length-3 memoryview with voxel sizes (z, y, x).
     offset:           optional length-3 memoryview of doubles.
     """
@@ -87,6 +97,7 @@ def find_centers_cpp(np.ndarray[uint64_t, ndim=3] labels not None,
         labels.shape[2],
         labels_data,
         compute_sum_r2,
+        compute_second_moments,
         center_on_voxels,
         voxel_size_ptr,
         offset_ptr
@@ -110,6 +121,7 @@ def find_centers_scipy(np.ndarray components, np.ndarray ids):
 def find_centers(np.ndarray components,
                  np.ndarray ids,
                  compute_sum_r2=False,
+                 compute_second_moments=False,
                  center_on_voxels=True,
                  voxel_size=None,
                  offset=None):
@@ -120,6 +132,8 @@ def find_centers(np.ndarray components,
         components: Label array
         ids: Array of label IDs to compute centers for
         compute_sum_r2: Whether to compute sum of squared distances
+        compute_second_moments: Whether to also return the second-moment tensor
+            per label, as an (n, 6) array of (zz, yy, xx, zy, zx, yx) sums
         center_on_voxels: Whether to center on voxel centers (add 0.5)
         voxel_size: Tuple or array of voxel sizes (z, y, x). Can be scalar for isotropic.
         offset: Offset to add to coordinates
@@ -143,18 +157,24 @@ def find_centers(np.ndarray components,
         c_results = find_centers_cpp(
             components.astype(np.uint64),
             compute_sum_r2,
+            compute_second_moments,
             center_on_voxels,
             voxel_size_arr,
             offset
         )
-        if compute_sum_r2:
+        if compute_sum_r2 or compute_second_moments:
             coords = np.array([[c_results[i]["z"],
                                  c_results[i]["y"],
                                  c_results[i]["x"]]
                                 for i in ids], dtype=np.double)
             sums   = np.array([c_results[i]["sum_r2"] for i in ids],
                               dtype=np.double)
-            return coords, sums
+            if not compute_second_moments:
+                return coords, sums
+            m2 = np.array([[c_results[i][k] for k in
+                            ("szz", "syy", "sxx", "szy", "szx", "syx")]
+                           for i in ids], dtype=np.double)
+            return coords, sums, m2
         else:
             return np.array([[c_results[i]["z"],
                               c_results[i]["y"],

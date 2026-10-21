@@ -643,6 +643,16 @@ def tmp_cylinders_information_csv(segmentation_cylinders, shared_tmpdir, voxel_s
     for category in ["COM", "MIN", "MAX"]:
         for d in ["X", "Y", "Z"]:
             columns.append(f"{category} {d} (nm)")
+    columns += [
+        "Principal Axis Length 1 (nm)",
+        "Principal Axis Length 2 (nm)",
+        "Principal Axis Length 3 (nm)",
+        "Elongation",
+        "Flatness",
+        "Principal Axis 1 X",
+        "Principal Axis 1 Y",
+        "Principal Axis 1 Z",
+    ]
     df = pd.DataFrame(
         index=np.arange(len(cylinder_information_dict)),
         columns=columns,
@@ -656,6 +666,10 @@ def tmp_cylinders_information_csv(segmentation_cylinders, shared_tmpdir, voxel_s
             *oi.com[::-1],
             *oi.bounding_box[:3][::-1],
             *oi.bounding_box[3:][::-1],
+            *oi.principal_axes[0],
+            oi.elongation,
+            oi.flatness,
+            *oi.principal_axes[1][:, 0][::-1],
         ]
         df.loc[i] = row
 

@@ -31,6 +31,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _principal_axis_values(oi):
+    """The eight principal-axis columns for one object, in the CSV's order."""
+    lengths, vectors = oi.principal_axes
+    return [*lengths, oi.elongation, oi.flatness, *vectors[:, 0][::-1]]
+
+
 class Measure(ComputeConfigMixin):
     def __init__(
         self,
@@ -290,6 +296,20 @@ class Measure(ComputeConfigMixin):
             for d in ["X", "Y", "Z"]:
                 columns.append(f"{category} {d} (nm)")
 
+        # Principal axes, from the second-moment tensor accumulated blockwise:
+        # the lengths size an object and their ratios say how elongated or flat
+        # it is, while the major axis vector says which way it points.
+        columns += [
+            "Principal Axis Length 1 (nm)",
+            "Principal Axis Length 2 (nm)",
+            "Principal Axis Length 3 (nm)",
+            "Elongation",
+            "Flatness",
+            "Principal Axis 1 X",
+            "Principal Axis 1 Y",
+            "Principal Axis 1 Z",
+        ]
+
         self.has_raw_intensity = any(
             oi.has_raw_intensity for oi in self.measurements.values()
         )
@@ -325,6 +345,7 @@ class Measure(ComputeConfigMixin):
                 *oi.com[::-1],
                 *oi.bounding_box[:3][::-1],
                 *oi.bounding_box[3:][::-1],
+                *_principal_axis_values(oi),
             ]
             if self.has_raw_intensity:
                 row += [oi.mean_intensity, oi.std_intensity]
