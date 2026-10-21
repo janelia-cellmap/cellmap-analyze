@@ -1,10 +1,6 @@
 import zarr
 import pytest
 
-from cellmap_analyze.util.zarr_io import (
-    list_multiscale_levels,
-    resolve_scale_path,
-)
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 
 
@@ -50,51 +46,6 @@ def multiscale_group(tmp_path):
     )
 
 
-def test_list_multiscale_levels(multiscale_group):
-    levels = list_multiscale_levels(multiscale_group)
-    assert levels == [
-        ("s0", (4.0, 4.0, 4.0)),
-        ("s1", (8.0, 8.0, 8.0)),
-        ("s2", (16.0, 16.0, 16.0)),
-    ]
-
-
-def test_list_levels_returns_none_for_array(multiscale_group):
-    # A concrete scale-level array is not a multiscale group.
-    assert list_multiscale_levels(multiscale_group + "/s0") is None
-
-
-def test_resolve_defaults_to_finest_scale(multiscale_group):
-    assert resolve_scale_path(multiscale_group).endswith("/s0")
-
-
-def test_resolve_matches_exact_target(multiscale_group):
-    assert resolve_scale_path(
-        multiscale_group, target_voxel_size=(8.0, 8.0, 8.0)
-    ).endswith("/s1")
-
-
-def test_resolve_prefers_finer_over_upsampling(multiscale_group):
-    # 15nm sits between the 8nm and 16nm levels. Picking 16nm would require
-    # upsampling, so the coarsest level at or finer than the target (8nm) is
-    # chosen instead.
-    assert resolve_scale_path(
-        multiscale_group, target_voxel_size=(15.0, 15.0, 15.0)
-    ).endswith("/s1")
-
-
-def test_resolve_falls_back_to_finest_when_all_coarser(multiscale_group):
-    # Target finer than every level -> upsampling is unavoidable; use s0.
-    assert resolve_scale_path(
-        multiscale_group, target_voxel_size=(2.0, 2.0, 2.0)
-    ).endswith("/s0")
-
-
-def test_resolve_leaves_scale_array_untouched(multiscale_group):
-    array_path = multiscale_group + "/s1"
-    assert resolve_scale_path(array_path) == array_path
-
-
 def test_idi_opens_group_at_default_scale(multiscale_group):
     idi = ImageDataInterface(multiscale_group)
     assert idi.path.endswith("/s0")
@@ -104,6 +55,33 @@ def test_idi_opens_group_at_default_scale(multiscale_group):
 def test_idi_opens_group_at_matching_scale(multiscale_group):
     idi = ImageDataInterface(
         multiscale_group, target_voxel_size=(8.0, 8.0, 8.0)
+    )
+    assert idi.path.endswith("/s1")
+    assert tuple(idi.voxel_size) == (8, 8, 8)
+
+
+def test_idi_prefers_finer_over_upsampling(multiscale_group):
+    # 15nm sits between the 8nm and 16nm levels. Picking 16nm would require
+    # upsampling, so the coarsest level at or finer than the target (8nm) is
+    # chosen instead, at its own voxel size.
+    idi = ImageDataInterface(
+        multiscale_group, target_voxel_size=(15.0, 15.0, 15.0)
+    )
+    assert idi.path.endswith("/s1")
+    assert tuple(idi.voxel_size) == (8, 8, 8)
+
+
+def test_idi_falls_back_to_finest_when_all_coarser(multiscale_group):
+    # Target finer than every level -> upsampling is unavoidable; use s0.
+    idi = ImageDataInterface(
+        multiscale_group, target_voxel_size=(2.0, 2.0, 2.0)
+    )
+    assert idi.path.endswith("/s0")
+
+
+def test_idi_leaves_scale_array_untouched(multiscale_group):
+    idi = ImageDataInterface(
+        multiscale_group + "/s1", target_voxel_size=(4.0, 4.0, 4.0)
     )
     assert idi.path.endswith("/s1")
     assert tuple(idi.voxel_size) == (8, 8, 8)

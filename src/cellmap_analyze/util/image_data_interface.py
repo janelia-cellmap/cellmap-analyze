@@ -2,96 +2,20 @@
 import logging
 import os
 from pathlib import Path
+
 import tensorstore as ts
-import numpy as np
-from funlib.geometry import Coordinate
-from funlib.geometry import Roi
+import worldarray as wa
+from funlib.geometry import Coordinate, Roi
 
-from cellmap_analyze.util.io_util import split_dataset_path, print_with_datetime
-from cellmap_analyze.util.voxel_size_utils import (
-    read_raw_voxel_size,
-    read_raw_offset,
-    scale_voxel_size_to_integers,
-)
-from cellmap_analyze.util.zarr_io import open_dataset, resolve_scale_path
-from scipy.ndimage import zoom, map_coordinates
-import time
-import random
+from cellmap_analyze.util.io_util import split_dataset_path
+from cellmap_analyze.util.voxel_size_utils import scale_voxel_size_to_integers
+from cellmap_analyze.util.zarr_io import open_dataset
 
-# Much below taken from flyemflows: https://github.com/janelia-flyem/flyemflows/blob/master/flyemflows/util/util.py
 logging.basicConfig(format="%(levelname)s:%(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
-def is_close_to_integer(value, tolerance=0.01):
-    """Check if a value is close to an integer within tolerance.
-
-    Args:
-        value: Numeric value to check
-        tolerance: Maximum difference from nearest integer (default: 0.01 = 1%)
-
-    Returns:
-        True if value is within tolerance of an integer
-    """
-    return abs(value - round(value)) < tolerance
-
-
-def requires_interpolation(rescale_factors, tolerance=0.01):
-    """Check if any rescale factor requires interpolation (non-integer).
-
-    Args:
-        rescale_factors: Tuple of per-axis rescale factors
-        tolerance: Tolerance for integer check (default: 0.01 = 1%)
-
-    Returns:
-        True if any factor is not close to an integer
-    """
-    return any(not is_close_to_integer(rf, tolerance) for rf in rescale_factors)
-
-
-def read_with_retries(dataset, valid_slices, max_retries=10, timeout=5, base_delay=1):
-    """
-    Attempt to read from TensorStore up to `max_retries` times on TimeoutError.
-
-    Parameters
-    ----------
-    dataset : tensorstore.TensorStore
-        Opened TensorStore handle.
-    valid_slices : tuple of slice
-        The slices you want to read.
-    max_retries : int, optional
-        How many times to retry on TimeoutError (default: 3).
-    timeout : float, optional
-        Seconds to wait on each .result(timeout=…) call (default: 30).
-
-           Returns
-    -------
-    numpy.ndarray
-        The result of the successful read.
-
-    Raises
-    ------
-    TimeoutError
-        If all attempts time out.
-    """
-
-    for attempt in range(1, max_retries + 1):
-        try:
-            return dataset[valid_slices].read().result(timeout=timeout * attempt)
-        except TimeoutError as e:
-            print_with_datetime(
-                f"[Attempt {attempt}/{max_retries}] "
-                f"Timeout reading {dataset} slices={valid_slices!r}: {e}",
-                logger,
-                log_type="error",
-            )
-            if attempt == max_retries:
-                # re-raise the last timeout
-                raise
-            # exponential backoff with jitter
-            delay = base_delay * (1.3 ** (attempt - 1))
-            jitter = random.uniform(0, base_delay)
-            time.sleep(delay + jitter)
+# worldarray's format names, as cellmap-analyze's filetype names
+_FILETYPES = {"zarr2": "zarr", "zarr3": "zarr3", "n5": "n5", "precomputed": "neuroglancer_precomputed"}
 
 
 def _detect_zarr_driver(dataset_path: str) -> str:
@@ -205,390 +129,43 @@ def open_ds_tensorstore(dataset_path: str, mode="r", concurrency_limit=None):
     return dataset_future.result()
 
 
-def _apply_integer_fast_path(
-    arr, rescale_factors, channel_offset, all_up, all_down, interpolation_order
-):
-    """Apply the repeat/slice/zoom fast-path resampling used for integer or
-    close-to-integer rescale factors. Shared by the data array and the
-    (optional) validity mask so the two can never drift apart in shape."""
-    if all_up:
-        return (
-            arr.repeat(int(round(rescale_factors[0])), axis=channel_offset)
-            .repeat(int(round(rescale_factors[1])), axis=channel_offset + 1)
-            .repeat(int(round(rescale_factors[2])), axis=channel_offset + 2)
+
+
+def _concurrency_context(concurrency_limit):
+    """The per-handle context cellmap-analyze has always used: data copies and file IO
+    capped, network request pools left at tensorstore's defaults."""
+    if not concurrency_limit:
+        return None
+    return wa.capped_context(concurrency=concurrency_limit, network=False)
+
+
+def _open_world_array(path, target_voxel_size, context):
+    """The array at ``path``; for a multiscale group, its first (finest) level, or the
+    coarsest level no coarser than ``target_voxel_size`` when one is given (the first
+    when every level is coarser), at that level's own voxel size."""
+    if target_voxel_size is not None:
+        return wa.open(
+            path,
+            voxel_size=tuple(float(v) for v in target_voxel_size),
+            level_mode="floor",
+            on_mismatch="keep",
+            context=context,
         )
-    elif all_down:
-        downsample_factors = tuple(int(round(1 / rf)) for rf in rescale_factors)
-        downsample_slices = (slice(None),) * channel_offset + tuple(
-            slice(None, None, factor) for factor in downsample_factors
-        )
-        return arr[downsample_slices]
-    else:
-        zoom_factors = (1,) * channel_offset + rescale_factors
-        return zoom(arr, zoom=zoom_factors, order=interpolation_order)
-
-
-def to_ndarray_tensorstore(
-    dataset,
-    roi=None,
-    voxel_size=None,
-    offset=None,
-    output_voxel_size=None,
-    swap_axes=False,
-    custom_fill_value=None,
-    max_retries=10,
-    timeout=5,
-    interpolation_order=0,
-    return_valid_mask=False,
-):
-    """Read a region of a tensorstore dataset and return it as a numpy array
-
-    Args:
-        dataset ('tensorstore.dataset'): Tensorstore dataset
-        roi ('funlib.geometry.Roi'): Region of interest to read
-        voxel_size: Native voxel size of the dataset
-        offset: Spatial offset of the dataset
-        output_voxel_size: Target voxel size for resampling (if different from native)
-        swap_axes: Whether to swap axes for n5 format
-        custom_fill_value: Fill value for padding (default: dataset fill_value)
-        max_retries: Maximum retry attempts for reading
-        timeout: Timeout in seconds for each read attempt
-        interpolation_order: Order of interpolation for non-integer resampling
-            0 = nearest-neighbor (preserves labels, default)
-            1 = linear interpolation (for continuous data)
-        return_valid_mask: If True, also return a boolean array (same shape
-            as the returned data) that is False wherever a voxel came from
-            padding/fill rather than a real read from the dataset -- e.g. the
-            ROI extending past the dataset's own bounds. This lets callers
-            (e.g. intensity statistics) exclude fabricated fill values
-            instead of silently treating them as real data.
-
-    Returns:
-        Numpy array of the region, resampled to output_voxel_size if specified.
-        If return_valid_mask is True, returns a (data, valid_mask) tuple instead.
-
-    Note:
-        For non-integer scale factors (e.g., 8nm→5nm = 1.6x), uses scipy.ndimage.zoom.
-        For integer or close-to-integer factors, uses fast paths (repeat/slicing).
-        Padding is preserved in physical space regardless of resampling method.
-    """
-
-    if output_voxel_size is None:
-        output_voxel_size = voxel_size
-
-    if swap_axes:
-        print("Swapping axes")
-        if roi:
-            roi = Roi(roi.begin[::-1], roi.shape[::-1])
-        if offset:
-            offset = Coordinate(offset[::-1])
-        voxel_size = Coordinate(voxel_size[::-1])
-        output_voxel_size = Coordinate(output_voxel_size[::-1])
-
-    # Calculate per-axis rescale factors for anisotropic data
-    rescale_factors = tuple(vs / ovs for vs, ovs in zip(voxel_size, output_voxel_size))
-
-    # Check if any axis needs rescaling
-    needs_rescaling = any(rf != 1 for rf in rescale_factors)
-    # For fast-path direction (up vs down), use first axis as representative
-    rescale_factor = rescale_factors[0]
-
-    channel_offset = 0
-    domain = dataset.domain
-    if len(domain) > 3:
-        # Determine how many dimensions to skip (channels dimension exists if channels > 0)
-        channel_offset = 1
-        channels = slice(domain[0].inclusive_min, domain[0].exclusive_max)
-        domain = domain[1:]
-
-    if roi is None:
-        # with ts.Transaction() as txn:
-        data = dataset.read().result()
-        # Check if any rescaling is needed (anisotropic or isotropic)
-        if needs_rescaling:
-            # Check if any rescale factor requires interpolation (non-integer)
-            if requires_interpolation(rescale_factors):
-                # Use scipy.ndimage.zoom for non-integer scaling
-                zoom_factors = (1,) * channel_offset + rescale_factors
-                data = zoom(data, zoom=zoom_factors, order=interpolation_order)
-            else:
-                # Use existing fast paths for integer or close-to-integer scaling
-                all_up = all(rf >= 1 for rf in rescale_factors)
-                all_down = all(rf <= 1 for rf in rescale_factors)
-                if all_up:
-                    # Apply per-axis upsampling
-                    data = (
-                        data.repeat(int(round(rescale_factors[0])), axis=0 + channel_offset)
-                        .repeat(int(round(rescale_factors[1])), axis=1 + channel_offset)
-                        .repeat(int(round(rescale_factors[2])), axis=2 + channel_offset)
-                    )
-                elif all_down:
-                    # Use simple slicing for integer downsampling
-                    downsample_factors = tuple(int(round(1 / rf)) for rf in rescale_factors)
-                    downsample_slices = (
-                        (slice(None),) * channel_offset +
-                        tuple(slice(None, None, factor) for factor in downsample_factors)
-                    )
-                    data = data[downsample_slices]
-                else:
-                    # Mixed up/down per axis — use zoom for correctness
-                    zoom_factors = (1,) * channel_offset + rescale_factors
-                    data = zoom(data, zoom=zoom_factors, order=interpolation_order)
-        if swap_axes:
-            data = np.swapaxes(data, 0 + channel_offset, 2 + channel_offset)
-        if return_valid_mask:
-            # The whole dataset was read with no ROI, so nothing here came
-            # from padding/fill -- every voxel is valid.
-            return data, np.ones(data.shape, dtype=bool)
-        return data
-
-    if offset is None:
-        offset = Coordinate(np.zeros(roi.dims, dtype=int))
-
-    if voxel_size != output_voxel_size:
-        # in the case where there is a mismatch in voxel sizes, we may need to extra pad to ensure that the output is a multiple of the output voxel size
-        original_roi = roi
-        # Snap in offset-relative space (matching the actual read below,
-        # which grows to native voxel boundaries (offset, offset+vs, …) not
-        # (0, vs, …)). Without this, whenever offset isn't itself a multiple
-        # of voxel_size -- the common case for any dataset using the default
-        # OME voxel-center convention with zero translation -- the crop
-        # window below would be computed against the wrong grid anchor and
-        # end up reading the wrong native voxels entirely.
-        roi = (original_roi - offset).snap_to_grid(voxel_size) + offset
-        # Coordinate arithmetic truncates to int rather than rounding, which
-        # can crop boundary blocks one voxel short of the expected output
-        # size. Round explicitly and derive the end from the offset plus the
-        # expected size so the slices always match `original_roi.shape /
-        # output_voxel_size`, consistent with the other branches below.
-        snapped_offset = [
-            int(round((original_roi.begin[i] - roi.begin[i]) / output_voxel_size[i]))
-            for i in range(3)
-        ]
-        snapped_size = [
-            int(round(original_roi.shape[i] / output_voxel_size[i])) for i in range(3)
-        ]
-        snapped_slices = tuple(
-            slice(snapped_offset[i], snapped_offset[i] + snapped_size[i])
-            for i in range(3)
-        )
-
-    # Subtract offset before snapping so snap_to_grid aligns to the
-    # actual voxel boundaries (offset, offset+vs, offset+2*vs, …)
-    # instead of (0, vs, 2*vs, …).
-    roi -= offset
-    roi = roi.snap_to_grid(voxel_size)
-    roi /= voxel_size
-
-    # Specify the range
-    roi_slices = roi.to_slices()
-
-    # Compute the valid range
-    valid_slices = tuple(
-        slice(max(s.start, inclusive_min), min(s.stop, exclusive_max))
-        for s, inclusive_min, exclusive_max in zip(
-            roi_slices, domain.inclusive_min, domain.exclusive_max
-        )
-    )
-
-    # Check if the ROI has no overlap with the dataset
-    no_overlap = any(vs.start > vs.stop for vs in valid_slices)
-
-    pad_width = [
-        [valid_slice.start - s.start, s.stop - valid_slice.stop]
-        for s, valid_slice in zip(roi_slices, valid_slices)
-    ]
-
-    if channel_offset > 0:
-        pad_width = [[0, 0]] + pad_width
-        valid_slices = (channels,) + valid_slices
-
-    # Create an array to hold the requested data, filled with a default value (e.g., zeros)
-    # output_shape = [s.stop - s.start for s in roi_slices]
-    # valid_slices = (slice(None),) + valid_slices, channel stuff
-    if not dataset.fill_value:
-        fill_value = 0
-    if custom_fill_value:
-        fill_value = custom_fill_value
-
-    if no_overlap:
-        if needs_rescaling:
-            # Use output voxel space for the shape
-            output_shape = (
-                ([dataset.shape[0]] if channel_offset > 0 else [])
-                + [int(round(original_roi.shape[i] / output_voxel_size[i])) for i in range(3)]
-            )
-        else:
-            output_shape = (
-                ([dataset.shape[0]] if channel_offset > 0 else [])
-                + [s.stop - s.start for s in roi_slices]
-            )
-        fv = 0 if fill_value == "edge" else fill_value
-        data = np.full(output_shape, fv, dtype=dataset.dtype.numpy_dtype)
-        if swap_axes:
-            data = np.swapaxes(data, 0 + channel_offset, 2 + channel_offset)
-        if return_valid_mask:
-            return data, np.zeros(output_shape, dtype=bool)
-        return data
-
-    # with ts.Transaction() as txn:
-    try:
-        data = read_with_retries(dataset, valid_slices, max_retries, timeout)
-    except TimeoutError:
-        logger.error(
-            f"Timeout while reading dataset {dataset} with slices {valid_slices}"
-        )
-        raise TimeoutError(
-            f"Failed to read dataset {dataset} with slices {valid_slices} after {max_retries} retries."
-        )
-    if return_valid_mask:
-        # True for every voxel that came from an actual read below; padded
-        # voxels (regardless of fill mode, including "edge") are never real
-        # data and are marked invalid.
-        valid = np.ones(data.shape, dtype=bool)
-    if np.any(np.array(pad_width)):
-        if fill_value == "edge":
-            data = np.pad(
-                data,
-                pad_width=pad_width,
-                mode="edge",
-            )
-        else:
-            data = np.pad(
-                data,
-                pad_width=pad_width,
-                mode="constant",
-                constant_values=fill_value,
-            )
-        if return_valid_mask:
-            valid = np.pad(
-                valid, pad_width=pad_width, mode="constant", constant_values=False
-            )
-    # else:
-    #     padded_data = (
-    #         np.ones(output_shape, dtype=dataset.dtype.numpy_dtype) * fill_value
-    #     )
-    #     padded_slices = tuple(
-    #         slice(valid_slice.start - s.start, valid_slice.stop - s.start)
-    #         for s, valid_slice in zip(roi_slices, valid_slices)
-    #     )
-
-    #     # Read the region of interest from the dataset
-    #     padded_data[padded_slices] = dataset[valid_slices].read().result()
-
-    # Resample if needed (if not, `valid` already matches data's shape as read+padded)
-    if needs_rescaling:
-        # Check if any rescale factor requires interpolation (non-integer)
-        if requires_interpolation(rescale_factors):
-            # Use map_coordinates for non-integer scaling to ensure global grid alignment
-            # Calculate global output positions aligned to dataset origin
-            # original_roi is in physical coordinates aligned to output voxel size
-
-            # Number of output voxels needed
-            num_output_voxels = tuple(
-                int(round(original_roi.shape[i] / output_voxel_size[i]))
-                for i in range(3)
-            )
-
-            # Global output positions in physical space (relative to dataset origin + offset)
-            output_positions = [
-                original_roi.begin[i] - offset[i] + np.arange(num_output_voxels[i]) * output_voxel_size[i]
-                for i in range(3)
-            ]
-
-            # Map output positions to input array coordinates
-            # data starts at position (roi.begin * voxel_size + offset) in physical space
-            # After subtracting offset and dividing by voxel_size, data starts at roi.begin in voxel coords
-            # data array index 0 corresponds to physical position (roi.begin * voxel_size + offset)
-            data_start_physical = roi.begin * voxel_size
-
-            # Convert output positions to input array indices
-            input_coords = [
-                (output_positions[i] - data_start_physical[i]) / voxel_size[i]
-                for i in range(3)
-            ]
-
-            # Create mesh grid for 3D sampling
-            coords_mesh = np.meshgrid(*input_coords, indexing='ij')
-            coords_array = np.array([c.ravel() for c in coords_mesh])
-
-            # Sample at exact global grid positions using map_coordinates
-            # Handle channels if present
-            if channel_offset > 0:
-                # Resample each channel separately
-                output_data = np.zeros((data.shape[0],) + num_output_voxels, dtype=data.dtype)
-                if return_valid_mask:
-                    output_valid = np.zeros((valid.shape[0],) + num_output_voxels, dtype=bool)
-                for ch in range(data.shape[0]):
-                    resampled = map_coordinates(
-                        data[ch],
-                        coords_array,
-                        order=interpolation_order,
-                        mode='constant',
-                        cval=0
-                    )
-                    output_data[ch] = resampled.reshape(num_output_voxels)
-                    if return_valid_mask:
-                        # order=0 (nearest) regardless of interpolation_order so
-                        # validity stays a crisp 0/1 decision, not a blend.
-                        resampled_valid = map_coordinates(
-                            valid[ch].astype(np.uint8),
-                            coords_array,
-                            order=0,
-                            mode='constant',
-                            cval=0,
-                        )
-                        output_valid[ch] = resampled_valid.reshape(num_output_voxels) > 0
-                data = output_data
-                if return_valid_mask:
-                    valid = output_valid
-            else:
-                if return_valid_mask:
-                    resampled_valid = map_coordinates(
-                        valid.astype(np.uint8),
-                        coords_array,
-                        order=0,
-                        mode='constant',
-                        cval=0,
-                    )
-                    valid = (resampled_valid.reshape(num_output_voxels) > 0)
-                data = map_coordinates(
-                    data,
-                    coords_array,
-                    order=interpolation_order,
-                    mode='constant',
-                    cval=0
-                )
-                data = data.reshape(num_output_voxels)
-        else:
-            # Use existing fast paths for integer or close-to-integer scaling
-            slices = (slice(None),) * channel_offset + snapped_slices
-
-            all_up = all(rf >= 1 for rf in rescale_factors)
-            all_down = all(rf <= 1 for rf in rescale_factors)
-            data = _apply_integer_fast_path(
-                data, rescale_factors, channel_offset, all_up, all_down, interpolation_order
-            )
-            data = data[slices]
-            if return_valid_mask:
-                # order=0 (nearest, via a uint8 view) regardless of
-                # interpolation_order so validity stays a crisp 0/1 decision.
-                valid_u8 = _apply_integer_fast_path(
-                    valid.astype(np.uint8), rescale_factors, channel_offset, all_up, all_down, 0
-                )
-                valid = valid_u8[slices] > 0
-
-    if swap_axes:
-        data = np.swapaxes(data, 0 + channel_offset, 2 + channel_offset)
-        if return_valid_mask:
-            valid = np.swapaxes(valid, 0 + channel_offset, 2 + channel_offset)
-
-    if return_valid_mask:
-        return data, valid
-    return data
+    node = wa.detect(path)
+    if node.kind == "array" or (node.format == "precomputed" and node.scale_key is not None):
+        return wa.open(path, context=context)
+    return wa.open(path, level="first", context=context)
 
 
 class ImageDataInterface:
+    """cellmap-analyze's view of a dataset: worldarray for every read and for where the
+    data sits, plus the integer-scaled frame (funlib ``Coordinate``/``Roi``) the
+    blockwise code works in, and the zarr-python ``.ds`` handle that writes go through.
+
+    In the frame, every length is nm times ``voxel_size_scale_factor``, an integer chosen
+    so the voxel size and the corner of voxel 0 are both whole.
+    """
+
     def __init__(
         self,
         dataset_path,
@@ -602,10 +179,6 @@ class ImageDataInterface:
         interpolation_order=0,
         target_voxel_size=None,
     ):
-        # Don't resolve remote URIs / precomputed URLs as local paths --
-        # ``Path("s3://...").resolve()`` collapses the double slash and
-        # prepends the CWD, and a ``precomputed://`` prefix is not a
-        # filesystem path either.
         from cellmap_analyze.util.io_util import (
             is_precomputed_path,
             is_remote_path,
@@ -615,151 +188,103 @@ class ImageDataInterface:
         dataset_path = str(dataset_path)
         if not is_remote_path(dataset_path) and not is_precomputed_path(dataset_path):
             dataset_path = str(Path(dataset_path).resolve())
-        # Tensorstore + our open_dataset accept either a precomputed:// URL
-        # or the bare URL -- strip the prefix for ``self.path`` so the
-        # tensorstore reopen in ``to_ndarray_ts`` doesn't pay the cost
-        # of stripping it again on every block.
-        self.path = strip_precomputed_prefix(dataset_path)
-        # If the path points at a multiscale group rather than a scale-level
-        # array, resolve it to a concrete level: the finest (s0) by default,
-        # or the level matching ``target_voxel_size`` when one is given.
-        self.path = resolve_scale_path(self.path, target_voxel_size, logger)
-        filename, dataset = split_dataset_path(self.path)
-        self.ds = open_dataset(filename, dataset, mode=mode)
-        # Content-based detection (probes for info / zarr.json / .zarray /
-        # attributes.json) -- the .zarr-vs-.n5 filename heuristic
-        # can't see precomputed volumes (no extension) or non-standard
-        # naming.
-        self.filetype = _detect_zarr_driver(self.path)
-        # Precomputed's tensorstore handle is XYZ-ordered (the channel
-        # dim is dropped inside open_precomputed_tensorstore), matching
-        # N5's layout, so the same swap_axes=True codepath converts it
-        # to ZYX for everything downstream.
-        self.swap_axes = self.filetype in ("n5", "neuroglancer_precomputed")
-        self.ts = None
-        self.dtype = self.ds.dtype
-        self.chunk_shape = self.ds.chunk_shape
-        if self.swap_axes:
-            self.chunk_shape = Coordinate(self.chunk_shape[::-1])
-        if chunk_shape is not None:
-            if type(chunk_shape) != Coordinate:
-                chunk_shape = Coordinate(chunk_shape)
-            self.chunk_shape = chunk_shape
-
-        # Read the raw float voxel_size and offset from zarr attributes
-        # BEFORE funlib.geometry.Coordinate truncates them to integers.
-        raw_voxel_size = read_raw_voxel_size(self.ds)
-        raw_offset = read_raw_offset(self.ds)
-
-        # Handle multichannel metadata: strip extra (non-spatial) dims
-        n_spatial = 3
-        if len(raw_voxel_size) > n_spatial:
-            n_extra = len(raw_voxel_size) - n_spatial
-            raw_voxel_size = raw_voxel_size[n_extra:]
-            raw_offset = raw_offset[n_extra:]
-
-        # For N5, metadata (pixelResolution, dimensions) is in X,Y,Z order.
-        # Reverse to Z,Y,X so the IDI presents a consistent convention
-        # matching zarr and the rest of the codebase (COMs, ROIs, etc.).
-        if self.swap_axes:
-            raw_voxel_size = raw_voxel_size[::-1]
-            raw_offset = raw_offset[::-1]
-
-        # The persisted offset / OME-NGFF translation is the physical position
-        # of the voxel CENTER of voxel [0,0,0]. funlib ROI math treats the
-        # offset as the voxel CORNER (begin). Convert center -> corner by
-        # subtracting half a voxel so every internal voxel<->physical
-        # conversion (measure's +0.5, assign's floor, block IO) is consistent
-        # and datasets at different scales line up. The write path
-        # (create_multiscale_dataset) converts corner -> center on the way out,
-        # so stored translations stay OME-correct.
-        raw_offset = tuple(o - vs / 2.0 for o, vs in zip(raw_offset, raw_voxel_size))
-
-        # Scale float voxel sizes to integers for funlib compatibility
-        scaled_vs, scale_factor = scale_voxel_size_to_integers(raw_voxel_size)
-        self.original_voxel_size = raw_voxel_size
-        self._raw_offset = raw_offset
-        self.voxel_size_scale_factor = scale_factor
-        self.voxel_size = Coordinate(scaled_vs)
-
-        # Recompute ROI in scaled physical coordinates from the array shape
-        array_shape = self.ds.data.shape[-n_spatial:]
-        if self.swap_axes:
-            array_shape = array_shape[::-1]
-        scaled_offset = Coordinate(
-            int(round(o * scale_factor)) for o in raw_offset
+        self.mode = mode
+        self.concurrency_limit = concurrency_limit
+        self._wa = _open_world_array(
+            strip_precomputed_prefix(dataset_path),
+            target_voxel_size,
+            _concurrency_context(concurrency_limit),
         )
-        self.roi = Roi(scaled_offset, Coordinate(array_shape) * self.voxel_size)
-        self.offset = self.roi.offset
+        self._wa_concurrency = concurrency_limit
+        self._ds = None
+        # the opened level's own path (wa.path is the path as given, e.g. the group)
+        self.path = self._wa.meta.path.rstrip("/")
+        self.filetype = _FILETYPES[self._wa.meta.format]
+        self.dtype = self._wa.dtype
+        self.chunk_shape = Coordinate(self._wa.meta.chunk_shape)
+        if chunk_shape is not None:
+            self.chunk_shape = Coordinate(chunk_shape)
 
-        # Update the underlying funlib Array to use our scaled voxel_size/roi
-        # so that ds[roi] indexing converts physical -> voxel coords correctly
-        self.ds.voxel_size = self.voxel_size
-        self.ds.roi = self.roi
+        # True nm, spatial axes, zyx; the corner of voxel 0 (translation - voxel_size / 2).
+        self.original_voxel_size = tuple(self._wa.voxel_size)
+        self._raw_offset = tuple(self._wa.corner)
+        self._spatial_shape = tuple(self._wa.shape[i] for i in self._wa.spatial)
+        _, scale_factor = scale_voxel_size_to_integers(
+            self.original_voxel_size + self._raw_offset
+        )
+        self._set_frame(scale_factor)
 
         self.custom_fill_value = custom_fill_value
-        self.concurrency_limit = concurrency_limit
         if output_voxel_size is not None:
             self.output_voxel_size = output_voxel_size
-        else:
-            self.output_voxel_size = self.voxel_size
-
         self.max_retries = max_retries
         self.timeout = timeout
         self.interpolation_order = interpolation_order
 
-    def rescale_to_factor(self, new_scale_factor):
-        """Rescale this IDI's internal coordinates to use a new scale factor.
-
-        Used when combining multiple IDIs that need to share the same
-        scaled coordinate space (e.g., contact sites).
-
-        Args:
-            new_scale_factor: The new integer scale factor to use.
-        """
-        if new_scale_factor == self.voxel_size_scale_factor:
-            return
-
-        self.voxel_size_scale_factor = new_scale_factor
-        scaled_vs = tuple(
-            int(round(v * new_scale_factor)) for v in self.original_voxel_size
+    def _set_frame(self, scale_factor):
+        self.voxel_size_scale_factor = scale_factor
+        self.voxel_size = Coordinate(int(round(v * scale_factor)) for v in self.original_voxel_size)
+        self.roi = Roi(
+            Coordinate(int(round(c * scale_factor)) for c in self._raw_offset),
+            Coordinate(self._spatial_shape) * self.voxel_size,
         )
-        self.voxel_size = Coordinate(scaled_vs)
-
-        array_shape = self.ds.data.shape[-3:]
-        if self.swap_axes:
-            array_shape = array_shape[::-1]
-        scaled_offset = Coordinate(
-            int(round(o * new_scale_factor)) for o in self._raw_offset
-        )
-        self.roi = Roi(scaled_offset, Coordinate(array_shape) * self.voxel_size)
         self.offset = self.roi.offset
         self.output_voxel_size = self.voxel_size
-        # Keep funlib Array in sync
-        self.ds.voxel_size = self.voxel_size
-        self.ds.roi = self.roi
+        if self._ds is not None:
+            self._ds.voxel_size = self.voxel_size
+            self._ds.roi = self.roi
+
+    def rescale_to_factor(self, new_scale_factor):
+        """Re-express the frame with another integer factor, so several datasets can
+        share one frame (contact sites, masks, measure)."""
+        if new_scale_factor != self.voxel_size_scale_factor:
+            self._set_frame(new_scale_factor)
+
+    @property
+    def ds(self):
+        """The zarr-python array (a ``CellMapArray`` in the frame), opened on first use:
+        writes go through it; reads do not."""
+        if self._ds is None:
+            filename, dataset = split_dataset_path(self.path)
+            self._ds = open_dataset(filename, dataset, mode=self.mode)
+            self._ds.voxel_size = self.voxel_size
+            self._ds.roi = self.roi
+        return self._ds
+
+    def __getstate__(self):
+        # Workers reopen the zarr-python handle themselves on first use.
+        state = self.__dict__.copy()
+        state["_ds"] = None
+        return state
+
+    def _world_array(self):
+        if self._wa_concurrency != self.concurrency_limit:
+            # e.g. dask_util.rescale_idi_concurrency gave this worker its fair share
+            self._wa = self._wa.reopen(context=_concurrency_context(self.concurrency_limit))
+            self._wa_concurrency = self.concurrency_limit
+        return self._wa
 
     def to_ndarray_ts(self, roi=None, return_valid_mask=False):
-        if not self.ts:
-            self.ts = open_ds_tensorstore(
-                self.path, concurrency_limit=self.concurrency_limit
-            )
-            self.domain = self.ts.domain
-        res = to_ndarray_tensorstore(
-            self.ts,
-            roi,
-            self.voxel_size,
-            self.offset,
-            self.output_voxel_size,
-            self.swap_axes,
-            self.custom_fill_value,
-            self.max_retries,
-            self.timeout,
-            self.interpolation_order,
-            return_valid_mask,
+        """The data in ``roi`` (frame units; the whole dataset when None) at
+        ``output_voxel_size``, padded with ``custom_fill_value`` (0 by default) where it
+        leaves the data. With ``return_valid_mask``, also True where the data was."""
+        factor = self.voxel_size_scale_factor
+        if roi is None:
+            roi = self.roi
+        box = (
+            tuple(b / factor for b in roi.begin),
+            tuple(e / factor for e in roi.end),
         )
-        self.ts = None
-        return res
-
-    def to_ndarray_ds(self, roi=None):
-        return self.ds.to_ndarray(roi)
+        voxel_size = None
+        if Coordinate(self.output_voxel_size) != self.voxel_size:
+            voxel_size = tuple(v / factor for v in self.output_voxel_size)
+        return self._world_array().read(
+            box,
+            voxel_size=voxel_size,
+            padding=0 if self.custom_fill_value is None else self.custom_fill_value,
+            method="nearest" if self.interpolation_order == 0 else "linear",
+            mask=return_valid_mask,
+            retries=wa.Retry(max_attempts=self.max_retries, timeout=self.timeout),
+            # callers' boxes sit on the grid they resample onto (the other dataset's)
+            anchor=box[0] if voxel_size is not None else None,
+        )

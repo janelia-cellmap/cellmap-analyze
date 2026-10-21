@@ -1,4 +1,5 @@
 """Reading arrays written the way funlib (and so cellmap-flow) writes them."""
+import logging
 import os
 
 import numpy as np
@@ -39,12 +40,16 @@ def test_funlib_corner_offset_is_accepted(tmp_path, voxel_size):
     assert tuple(idi.roi.offset) == tuple(int(round(c * s)) for c in corner)
 
 
-def test_conflicting_offset_still_raises(tmp_path, voxel_size):
+def test_conflicting_offset_warns_and_uses_the_translation(tmp_path, voxel_size, caplog):
     vs = [float(v) for v in voxel_size]
     translation = [1000.0 + v / 2 for v in vs]
     offset_attr = [translation[0] + 100.0, *translation[1:]]   # neither center nor corner
-    with pytest.raises(ValueError, match="Metadata conflict"):
-        ImageDataInterface(_write(tmp_path / "a.zarr", vs, translation, offset_attr))
+    with caplog.at_level(logging.WARNING, logger="worldarray"):
+        idi = ImageDataInterface(_write(tmp_path / "a.zarr", vs, translation, offset_attr))
+    assert "neither the OME translation" in caplog.text
+    # placed by the OME translation: voxel 0's corner is half a voxel below it
+    s = idi.voxel_size_scale_factor
+    assert tuple(idi.roi.offset) == tuple(int(round((t - v / 2) * s)) for t, v in zip(translation, vs))
 
 
 def test_zarr_v2_chunk_paths(tmp_path, voxel_size):

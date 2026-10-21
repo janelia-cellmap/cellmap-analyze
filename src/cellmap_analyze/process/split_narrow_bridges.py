@@ -464,7 +464,7 @@ class SplitNarrowBridges(ComputeConfigMixin):
                 caught by min-volume filtering afterward.
             num_workers: Number of parallel dask workers.
             timeout: Base timeout (seconds) for ImageDataInterface reads,
-                scaled up per ``ImageDataInterface.read_with_retries``
+                scaled up per attempt by the read retries
                 (``timeout * attempt``, up to 10 attempts) and, when
                 ``concurrency_limit`` auto-resolves above 1 (see below),
                 further scaled by the biggest object's estimated chunk
