@@ -1,5 +1,6 @@
 """Tests for zarr v3 format: writing, reading, and backward compatibility with v2."""
 import json
+import logging
 import os
 
 import numpy as np
@@ -61,7 +62,7 @@ class TestZarrV3Format:
         # Read back via IDI
         idi = ImageDataInterface(output_path + "/s0")
         assert tuple(idi.voxel_size) == (4, 4, 4)
-        block = idi.to_ndarray_ds(roi)
+        block = idi.to_ndarray_ts(roi)
         assert np.array_equal(block, test_data)
 
     def test_write_via_roi_setitem(self, tmp_path):
@@ -149,7 +150,7 @@ class TestZarrV2BackwardCompat:
 
         # Read the dataset's own ROI: the OME translation is the voxel CENTER,
         # so the dataset corner is translation - vs/2, not the origin.
-        read_data = idi.to_ndarray_ds(idi.roi)
+        read_data = idi.to_ndarray_ts(idi.roi)
         assert np.all(read_data == 42)
 
     def test_read_v2_with_ome_metadata(self, tmp_path):
@@ -245,7 +246,7 @@ class TestZarrV2BackwardCompat:
         # Verify data round-trip. Read the dataset's own ROI: the OME
         # translation is the voxel CENTER, so the corner is translation - vs/2,
         # not the origin.
-        read_data = idi.to_ndarray_ds(idi.roi)
+        read_data = idi.to_ndarray_ts(idi.roi)
         assert np.array_equal(read_data, test_data)
 
     def test_v3_output_has_ome_ngff_metadata(self, tmp_path):
@@ -459,7 +460,8 @@ class TestMetadataPrecedence:
         assert tuple(idi.offset) == (0, 0, 0)
 
     def test_per_array_only_returns_per_array_values(self, tmp_path):
-        """No OME multiscales -> falls back to per-array attrs."""
+        """No OME multiscales -> falls back to per-array attrs, read as funlib writes
+        them: the offset is the corner of voxel 0."""
         s0 = self._make_group_with_array(
             str(tmp_path / "attr_only.zarr"),
             ome=None,
@@ -467,7 +469,7 @@ class TestMetadataPrecedence:
         )
         idi = ImageDataInterface(s0)
         assert tuple(idi.voxel_size) == (8, 8, 8)
-        assert tuple(idi.offset) == (0, 0, 0)
+        assert tuple(idi.offset) == (4, 4, 4)
 
     def test_both_consistent_succeeds(self, tmp_path):
         """OME and per-array attrs both present and EQUAL -> no error, value
@@ -496,28 +498,28 @@ class TestMetadataPrecedence:
         assert "16" in msg and "8" in msg
         assert "OME" in msg
 
-    def test_translation_conflict_raises(self, tmp_path):
-        """OME translation and per-array offset disagree -> ValueError."""
+    def test_translation_conflict_warns(self, tmp_path, caplog):
+        """OME translation and per-array offset disagree -> a warning naming both, and
+        the OME translation places the array."""
         s0 = self._make_group_with_array(
             str(tmp_path / "tr_conflict.zarr"),
             ome=self._ome(vs=(16.0, 16.0, 16.0), trans=(6.0, 6.0, 6.0)),
             per_array={"voxel_size": [16.0, 16.0, 16.0], "offset": [0.0, 0.0, 0.0]},
         )
-        with pytest.raises(ValueError) as exc:
-            ImageDataInterface(s0)
-        msg = str(exc.value)
-        assert "translation" in msg or "offset" in msg
-        assert "6" in msg and "0" in msg
-        assert "OME" in msg
+        with caplog.at_level(logging.WARNING, logger="worldarray"):
+            idi = ImageDataInterface(s0)
+        assert "offset [0.0, 0.0, 0.0]" in caplog.text
+        assert "OME translation [6.0, 6.0, 6.0]" in caplog.text
+        assert tuple(idi.offset) == (-2, -2, -2)  # 6 - 16 / 2
 
-    def test_conflict_message_includes_path(self, tmp_path):
-        """The error message names the dataset path for diagnosis."""
+    def test_conflict_message_includes_path(self, tmp_path, caplog):
+        """The warning names the dataset path for diagnosis."""
         target = str(tmp_path / "named.zarr")
         s0 = self._make_group_with_array(
             target,
             ome=self._ome(vs=(16.0, 16.0, 16.0), trans=(6.0, 6.0, 6.0)),
             per_array={"voxel_size": [16.0, 16.0, 16.0], "offset": [0.0, 0.0, 0.0]},
         )
-        with pytest.raises(ValueError) as exc:
+        with caplog.at_level(logging.WARNING, logger="worldarray"):
             ImageDataInterface(s0)
-        assert "named.zarr" in str(exc.value)
+        assert "named.zarr" in caplog.text
