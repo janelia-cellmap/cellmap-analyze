@@ -334,3 +334,45 @@ def test_measure_blockwise_with_raw(
         assert oi.has_raw_intensity
         assert np.allclose(oi.mean_intensity, gt[label_id]["mean"], rtol=1e-5)
         assert np.allclose(oi.std_intensity, gt[label_id]["std"], rtol=1e-5)
+
+
+def _write_level(path, data, voxel_size):
+    """data as s0 of a group at `path`, its corner at the origin."""
+    from funlib.geometry import Coordinate, Roi
+    from cellmap_analyze.util.voxel_size_utils import scale_voxel_size_to_integers
+    from cellmap_analyze.util.zarr_util import create_multiscale_dataset
+
+    original = tuple(float(v) for v in voxel_size)
+    scaled, _ = scale_voxel_size_to_integers(original)
+    ds = create_multiscale_dataset(
+        path,
+        dtype=data.dtype,
+        voxel_size=scaled,
+        total_roi=Roi((0, 0, 0), Coordinate(data.shape) * Coordinate(scaled)),
+        write_size=Coordinate(data.shape) * Coordinate(scaled),
+        original_voxel_size=original,
+    )
+    ds.data[:] = data
+
+
+def test_measure_raw_finer_than_segmentation_is_block_averaged(tmp_path, voxel_size):
+    # The only raw level is twice as fine as the segmentation, and alternates
+    # 10, 20 along z: each segmentation voxel's intensity is their mean, 15,
+    # where sampling one raw voxel per block would give all 10s or all 20s.
+    seg = np.ones((4, 4, 4), np.uint8)
+    raw = np.broadcast_to(
+        (10 + 10 * (np.arange(8) % 2)).astype(np.uint8)[:, None, None], (8, 8, 8)
+    ).copy()
+    _write_level(f"{tmp_path}/m.zarr/seg", seg, voxel_size)
+    _write_level(f"{tmp_path}/m.zarr/raw", raw, np.array(voxel_size) / 2)
+
+    m = Measure(
+        input_path=f"{tmp_path}/m.zarr/seg/s0",
+        output_path=str(tmp_path),
+        raw_path=f"{tmp_path}/m.zarr/raw",
+        num_workers=1,
+    )
+    m.measure()
+    assert m.measurements[1].mean_intensity == pytest.approx(15)
+    # every segmentation voxel holds the same block mean
+    assert m.measurements[1].std_intensity == pytest.approx(0)

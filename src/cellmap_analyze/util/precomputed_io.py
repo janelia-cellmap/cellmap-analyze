@@ -130,11 +130,10 @@ def open_precomputed_tensorstore(path, scale_index=None):
     elif len(ds.domain) == 4:
         ds = ds[..., 0]
     # The precomputed driver bakes ``voxel_offset`` into the array
-    # domain so voxel indices start at the offset, not at 0. The
-    # cellmap-analyze read path (``to_ndarray_tensorstore``) handles
-    # the physical offset itself and assumes a 0-based voxel array
-    # (the N5 convention). Translate the domain to origin so the two
-    # conventions agree.
+    # domain so voxel indices start at the offset, not at 0. The caller
+    # (zarr_io's ``.ds`` handle) handles the physical offset itself and
+    # assumes a 0-based voxel array (the N5 convention). Translate the
+    # domain to origin so the two conventions agree.
     if any(o != 0 for o in ds.domain.origin):
         ds = ds.translate_to[(0,) * len(ds.domain)]
     return ds

@@ -114,9 +114,12 @@ class FitLinesToSegmentations(ComputeConfigMixin):
             roi = Roi(
                 box_min - self.voxel_size, (box_max - box_min) + self.voxel_size * 2
             )
+            # Read whole voxels, so the data starts at roi.offset exactly
+            origin = self.segmentation_idi.roi.offset
+            roi = (roi - origin).snap_to_grid(self.voxel_size) + origin
             data = self.segmentation_idi.to_ndarray_ts(roi)
-            # Use original voxel_size for physical calculations, convert offset back
-            roi_offset_nm = np.array(roi.offset) / sf
+            # Points are placed at voxel centres, in true nm
+            roi_offset_nm = (np.array(roi.offset) + np.array(self.voxel_size) / 2) / sf
             line_start, line_end = FitLinesToSegmentations.fit_line_to_object(
                 data, id, original_vs, roi_offset_nm
             )

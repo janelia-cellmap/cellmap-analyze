@@ -4,44 +4,9 @@ import struct
 
 import numpy as np
 import pytest
-from cellmap_analyze.util.image_data_interface import (
-    ImageDataInterface,
-    is_close_to_integer,
-    requires_interpolation,
-)
+from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from funlib.geometry import Roi, Coordinate
 from cellmap_analyze.util.zarr_io import prepare_ds
-
-
-class TestHelperFunctions:
-    """Test the helper functions for detecting non-integer scale factors."""
-
-    def test_is_close_to_integer_true(self):
-        """Test values that are close to integers."""
-        assert is_close_to_integer(2.0)
-        assert is_close_to_integer(1.999)
-        assert is_close_to_integer(2.001)
-
-    def test_is_close_to_integer_false(self):
-        """Test values that are not close to integers."""
-        assert not is_close_to_integer(0.5)  # 0.5 is not close to an integer
-        assert not is_close_to_integer(0.499)
-        assert not is_close_to_integer(1.6)
-        assert not is_close_to_integer(2.5)
-        assert not is_close_to_integer(0.625)
-        assert not is_close_to_integer(1.05)
-
-    def test_requires_interpolation_true(self):
-        """Test that non-integer factors require interpolation."""
-        assert requires_interpolation((1.6, 1.6, 1.6))
-        assert requires_interpolation((2.0, 1.6, 2.0))  # Mixed
-        assert requires_interpolation((0.625, 0.625, 0.625))
-        assert requires_interpolation((0.5, 0.5, 0.5))  # 0.5 is not close to integer
-
-    def test_requires_interpolation_false(self):
-        """Test that integer factors don't require interpolation."""
-        assert not requires_interpolation((2.0, 2.0, 2.0))
-        assert not requires_interpolation((1.999, 2.001, 2.0))  # Close to integer
 
 
 class TestNonIntegerResampling:
@@ -678,10 +643,10 @@ class TestN5AnisotropicSwapAxes:
     def test_single_voxel_roi_z_axis(self, tmp_n5):
         """A 1-voxel-thick ROI in z should return shape 1 in that dimension."""
         idi = ImageDataInterface(tmp_n5)
-        # IDI voxel_size is now (131, 100, 100) in z,y,x; z-voxel = 131.
         # Anchor at idi.roi.begin: with no OME translation the offset is treated
         # as a voxel CENTER, so the grid-aligned corner is begin = -vs/2, not 0.
-        roi = Roi(idi.roi.begin, Coordinate(131, 1000, 1000))
+        vz, vy, vx = idi.voxel_size
+        roi = Roi(idi.roi.begin, Coordinate(vz, 10 * vy, 10 * vx))
         result = idi.to_ndarray_ts(roi)
         assert result.shape[0] == 1, (
             f"Expected 1 voxel in z, got {result.shape[0]} (shape={result.shape})"
@@ -690,9 +655,10 @@ class TestN5AnisotropicSwapAxes:
     def test_single_voxel_roi_x_axis(self, tmp_n5):
         """A 1-voxel-thick ROI in x should return shape 1 in that dimension."""
         idi = ImageDataInterface(tmp_n5)
-        # x-voxel = 100. Anchor at idi.roi.begin (= -vs/2) since the offset is
-        # treated as a voxel CENTER when no OME translation is present.
-        roi = Roi(idi.roi.begin, Coordinate(1310, 1000, 100))
+        # Anchor at idi.roi.begin (= -vs/2) since the offset is treated as a
+        # voxel CENTER when no OME translation is present.
+        vz, vy, vx = idi.voxel_size
+        roi = Roi(idi.roi.begin, Coordinate(10 * vz, 10 * vy, vx))
         result = idi.to_ndarray_ts(roi)
         assert result.shape[2] == 1, (
             f"Expected 1 voxel in x, got {result.shape[2]} (shape={result.shape})"
@@ -702,9 +668,10 @@ class TestN5AnisotropicSwapAxes:
         """A ROI fully outside the dataset should return zeros in z,y,x order."""
         idi = ImageDataInterface(tmp_n5)
         # ROI completely past the dataset end in z; should be 1 voxel in z
+        vz, vy, vx = idi.voxel_size
         roi = Roi(
             Coordinate(idi.roi.end[0], 0, 0),
-            Coordinate(131, 1000, 1000),
+            Coordinate(vz, 10 * vy, 10 * vx),
         )
         result = idi.to_ndarray_ts(roi)
         assert result.shape[0] == 1, (
