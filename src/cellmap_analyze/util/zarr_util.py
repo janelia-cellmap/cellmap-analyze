@@ -126,12 +126,14 @@ def create_multiscale_dataset(
     # true value (no separate original_voxel_size attr).
     from cellmap_analyze.util.voxel_size_utils import scale_voxel_size_to_integers
 
-    effective_voxel_size = (
-        list(original_voxel_size)
-        if original_voxel_size is not None
-        else list(voxel_size)
-    )
-    _, scale_factor = scale_voxel_size_to_integers(effective_voxel_size)
+    if original_voxel_size is not None:
+        effective_voxel_size = list(original_voxel_size)
+        # The caller's frame factor, which can exceed the voxel size's own
+        # when the corner needs it (e.g. 5 nm voxels centred on 0).
+        scale_factor = int(round(voxel_size[0] / original_voxel_size[0]))
+    else:
+        effective_voxel_size = list(voxel_size)
+        _, scale_factor = scale_voxel_size_to_integers(effective_voxel_size)
     # total_roi.begin is the internal funlib CORNER (= OME center - vs/2).
     # Convert corner -> OME center (+ vs/2) so the persisted translation/offset
     # is the voxel CENTER, matching OME-NGFF and what the read path expects

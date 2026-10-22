@@ -233,6 +233,40 @@ class TestOutputMetadata:
         assert tuple(idi.voxel_size) == tuple(scaled_vs)
         assert idi.voxel_size_scale_factor == scale_factor
 
+    @pytest.mark.parametrize(
+        "original_vs, translation",
+        [((5.0, 5.0, 5.0), (0.0, 0.0, 0.0)), ((8.0, 8.0, 8.0), (4.5, 0.0, 0.0))],
+    )
+    def test_output_keeps_input_placement(self, tmp_path, original_vs, translation):
+        """An output written in its input's frame sits where the input does,
+        when the frame's scale factor comes from the corner rather than the
+        voxel size (here 2, for corners at -2.5 nm and 0.5 nm)."""
+        group = zarr.open_group(str(tmp_path / "in.zarr"), mode="w")
+        group.create_array("s0", shape=(16, 16, 16), chunks=(8, 8, 8), dtype="uint8")
+        group.attrs["multiscales"] = [{
+            "version": "0.4",
+            "axes": [{"name": a, "type": "space", "unit": "nanometer"} for a in "zyx"],
+            "datasets": [{"path": "s0", "coordinateTransformations": [
+                {"type": "scale", "scale": list(original_vs)},
+                {"type": "translation", "translation": list(translation)},
+            ]}],
+        }]
+        input_idi = ImageDataInterface(str(tmp_path / "in.zarr" / "s0"))
+        assert input_idi.voxel_size_scale_factor == 2
+
+        output_idi = create_multiscale_dataset_idi(
+            str(tmp_path / "out.zarr" / "seg"),
+            dtype=np.uint8,
+            voxel_size=input_idi.voxel_size,
+            total_roi=input_idi.roi,
+            write_size=input_idi.chunk_shape * input_idi.voxel_size,
+            original_voxel_size=input_idi.original_voxel_size,
+        )
+        assert output_idi.voxel_size_scale_factor == input_idi.voxel_size_scale_factor
+        assert output_idi.roi == input_idi.roi
+        arr = zarr.open_array(str(tmp_path / "out.zarr" / "seg" / "s0"), mode="r")
+        assert arr.attrs["offset"] == list(translation)
+
 
 class TestMultiDatasetConsistency:
     def test_rescale_to_common_factor(self, tmp_path):
