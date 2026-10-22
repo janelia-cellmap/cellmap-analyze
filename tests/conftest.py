@@ -46,4 +46,6 @@ def chunk_size():
 @pytest.fixture(scope="session")
 def shared_tmpdir(tmpdir_factory):
     """Create a shared temporary directory for all test functions."""
-    return tmpdir_factory.mktemp("tmp")
+    # A str, not py.path: pandas treats objects with read/write methods as
+    # open files, so paths built from a py.path broke to_csv and read_csv.
+    return str(tmpdir_factory.mktemp("tmp"))
