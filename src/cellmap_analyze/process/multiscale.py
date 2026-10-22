@@ -2,23 +2,17 @@ import logging
 import os
 import re
 
+import dask.bag as db
 import numpy as np
 import tensorstore as ts
+import worldarray as wa
 import zarr
 
 from cellmap_analyze.util import dask_util
-from cellmap_analyze.util.image_data_interface import (
-    ImageDataInterface,
-    open_ds_tensorstore,
-    read_with_retries,
-)
-from cellmap_analyze.util.io_util import is_remote_path
+from cellmap_analyze.util.image_data_interface import open_ds_tensorstore
+from cellmap_analyze.util.io_util import TimingMessager, is_remote_path
 from cellmap_analyze.util.mixins import ComputeConfigMixin
-from cellmap_analyze.util.voxel_size_utils import (
-    get_multiscales,
-    read_raw_offset,
-    read_raw_voxel_size,
-)
+from cellmap_analyze.util.voxel_size_utils import get_multiscales
 from cellmap_analyze.util.zarr_util import generate_multiscales_metadata
 
 logging.basicConfig(
@@ -56,24 +50,24 @@ class Multiscale(ComputeConfigMixin):
     """Add downsampled levels (s1, s2, ...) to an existing OME-Zarr dataset.
 
     Each level is computed blockwise from the previous one with tensorstore's
-    ``downsample`` driver; the default ``mode`` keeps label ids intact. Levels
-    are written until one fits in a single chunk, or ``num_levels`` of them.
+    ``downsample`` driver: by default ``mode`` for integer data, which keeps
+    label ids intact, and ``mean`` for floats. Levels are written until one
+    fits in a single chunk, or ``num_levels`` of them.
     """
 
     def __init__(
         self,
         input_path,
         num_levels=None,
-        downsample_method="mode",
+        downsample_method=None,
         overwrite=False,
         num_workers=10,
     ):
         super().__init__(num_workers)
-        if downsample_method not in _BLOCK_METHODS:
+        if downsample_method is not None and downsample_method not in _BLOCK_METHODS:
             raise ValueError(
                 f"downsample_method must be one of {_BLOCK_METHODS}, got {downsample_method!r}"
             )
-        self.downsample_method = downsample_method
 
         # Levels are written beside the input, so it must be local; made
         # absolute so dask workers, whose working directory may differ, open
@@ -89,20 +83,25 @@ class Multiscale(ComputeConfigMixin):
         self.group_path = group_path
         self.base_level = _level_index(leaf)
 
-        base_idi = ImageDataInterface(f"{self.group_path}/{leaf}")
-        if base_idi.filetype not in ("zarr", "zarr3"):
+        base_path = f"{self.group_path}/{leaf}"
+        base = wa.open(base_path)
+        if base.meta.format not in ("zarr2", "zarr3"):
             raise ValueError(
-                f"multiscale needs a zarr v2 or v3 dataset, got {base_idi.filetype} at {input_path}"
+                f"multiscale needs a zarr v2 or v3 dataset, got {base.meta.format} at {input_path}"
             )
-        base_array = base_idi.ds.data
+        base_array = zarr.open_array(base_path, mode="r")
         if base_array.ndim != 3:
             raise ValueError(f"multiscale supports 3D arrays, got shape {base_array.shape}")
         self.chunks = tuple(base_array.chunks)
         self.dtype = base_array.dtype
         self.fill_value = base_array.fill_value
         # True nm voxel size and OME translation (voxel 0's centre) of the base.
-        self.voxel_size = read_raw_voxel_size(base_idi.ds)
-        self.translation = read_raw_offset(base_idi.ds)
+        self.voxel_size = base.voxel_size
+        self.translation = base.translation
+
+        if downsample_method is None:
+            downsample_method = "mean" if np.issubdtype(self.dtype, np.floating) else "mode"
+        self.downsample_method = downsample_method
 
         self.levels = self._plan_levels(base_array.shape, num_levels)
         existing = [
@@ -155,12 +154,16 @@ class Multiscale(ComputeConfigMixin):
             slice(i * c, min((i + 1) * c, s))
             for i, c, s in zip(coords, chunks, dest_shape)
         )
-        source = ts.downsample(
-            open_ds_tensorstore(source_path, concurrency_limit=concurrency_limit),
-            list(factors),
-            method,
+        source = wa.open(
+            source_path,
+            context=wa.capped_context(concurrency=concurrency_limit, network=False),
         )
-        data = read_with_retries(source, slices)
+        # The finer voxels under these, clipped to the array: an edge window
+        # past it is summarised from the voxels it has.
+        begin = [s.start * f for s, f in zip(slices, factors)]
+        end = [min(s.stop * f, n) for s, f, n in zip(slices, factors, source.shape)]
+        block = source.read_index(begin, end, retries=wa.Retry())
+        data = ts.downsample(ts.array(block), list(factors), method).read().result()
         dest = open_ds_tensorstore(dest_path, mode="r+", concurrency_limit=concurrency_limit)
         dest[slices].write(data).result()
 
@@ -214,27 +217,31 @@ class Multiscale(ComputeConfigMixin):
         source_path = f"{self.group_path}/s{self.base_level}"
         if not self.levels:
             logger.info(f"{source_path} already fits in one chunk; no levels to add")
-        for level in self.levels:
-            dest_path = f"{self.group_path}/{level['name']}"
-            self._create_level_array(level)
-            num_blocks = int(
-                np.prod([-(-s // c) for s, c in zip(level["shape"], self.chunks)])
-            )
-            dask_util.compute_blockwise_partitions(
-                num_blocks,
-                self.num_workers,
-                self.compute_args,
-                logger,
-                f"downsampling {source_path} to {level['name']}",
-                Multiscale.downsample_block,
-                source_path,
-                dest_path,
-                level["factors"],
-                self.chunks,
-                level["shape"],
-                self.downsample_method,
-                self.concurrency_limit,
-            )
-            # List each level only once its data is complete.
-            self._write_level_metadata(level)
-            source_path = dest_path
+            return
+        # One cluster for every level; each reads the one before, so they run in turn.
+        with dask_util.start_dask(self.num_workers, f"multiscale of {source_path}", logger):
+            for level in self.levels:
+                dest_path = f"{self.group_path}/{level['name']}"
+                self._create_level_array(level)
+                num_blocks = int(
+                    np.prod([-(-s // c) for s, c in zip(level["shape"], self.chunks)])
+                )
+                bag = db.range(
+                    num_blocks,
+                    npartitions=dask_util.guesstimate_npartitions(num_blocks, self.num_workers),
+                ).map_partitions(
+                    dask_util.partition_worker,
+                    Multiscale.downsample_block,
+                    source_path,
+                    dest_path,
+                    level["factors"],
+                    self.chunks,
+                    level["shape"],
+                    self.downsample_method,
+                    self.concurrency_limit,
+                )
+                with TimingMessager(f"Downsampling {source_path} to {level['name']}", logger):
+                    bag.compute(**self.compute_args)
+                # List each level only once its data is complete.
+                self._write_level_metadata(level)
+                source_path = dest_path

@@ -107,6 +107,32 @@ def test_partial_edge_blocks_are_kept(tmp_path, voxel_size):
     assert np.all(s1[2] == 3) and not np.any(s1[:2])
 
 
+def test_floats_default_to_mean(tmp_path, voxel_size):
+    data = np.zeros((4, 4, 4), np.float32)
+    data[:2, :2, :2] = [[[0, 1], [2, 3]], [[4, 5], [6, 7]]]
+    path = f"{tmp_path}/ms.zarr/edt"
+    _write(path, data, voxel_size, chunks=(2, 2, 2))
+    Multiscale(path, num_workers=1, num_levels=1).create_multiscale()
+
+    s1 = ImageDataInterface(f"{path}/s1").to_ndarray_ts()
+    assert s1[0, 0, 0] == 3.5 and not np.any(s1.ravel()[1:])
+
+
+def test_commands_pyramid_their_output_and_filled_copy(tmp_path, voxel_size):
+    from cli.cli import RunProperties
+
+    data = np.ones((8, 8, 8), np.uint8)
+    for name in ("seg", "seg_filled"):
+        _write(f"{tmp_path}/out.zarr/{name}", data, voxel_size, chunks=(4, 4, 4))
+    rp = RunProperties.__new__(RunProperties)  # without parsing a command line
+    rp.multiscale = True
+    rp.add_multiscale(f"{tmp_path}/out.zarr/seg", 1, filled=True)
+    assert os.path.exists(f"{tmp_path}/out.zarr/seg/s1")
+    assert os.path.exists(f"{tmp_path}/out.zarr/seg_filled/s1")
+    # an output the command did not write is skipped
+    rp.add_multiscale(f"{tmp_path}/out.zarr/missing", 1)
+
+
 def test_anisotropic_axes_wait_for_the_finer_ones():
     assert downsample_factors((8, 8, 20)) == (2, 2, 1)
     assert downsample_factors((16, 16, 20)) == (2, 2, 2)

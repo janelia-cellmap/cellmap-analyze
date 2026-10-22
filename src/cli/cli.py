@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class RunProperties:
-    def __init__(self):
+    def __init__(self, multiscale=None):
         args = io_util.parser_params()
 
         # Change execution directory
@@ -20,12 +20,36 @@ class RunProperties:
         self.run_config = io_util.read_run_config(args.config_path)
         if args.num_workers is not None:
             self.run_config["num_workers"] = args.num_workers
+        # Commands that write a volume give it a pyramid afterwards; the
+        # run-config's `multiscale` key overrides each command's default.
+        self.multiscale = multiscale
+        if multiscale is not None:
+            self.multiscale = self.run_config.pop("multiscale", multiscale)
+
+    def add_multiscale(self, output_path, num_workers, filled=False):
+        """Pyramid the command's output, and its hole-filled copy when it made one."""
+        if not self.multiscale:
+            return
+        from cellmap_analyze.process.multiscale import Multiscale
+
+        output_paths = [output_path]
+        if filled:
+            output_paths.append(
+                io_util.get_output_path_from_input_path(output_path, "_filled")
+            )
+        for path in output_paths:
+            # e.g. connected components with deduplicate_ids writes nothing
+            # when it finds no duplicates
+            if not os.path.exists(path):
+                continue
+            # The output was just rewritten, so any levels beside it are stale.
+            Multiscale(path, overwrite=True, num_workers=num_workers).create_multiscale()
 
 
 def connected_components():
     from cellmap_analyze.process.connected_components import ConnectedComponents
 
-    rp = RunProperties()
+    rp = RunProperties(multiscale=True)
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
         with io_util.TimingMessager(
@@ -33,6 +57,7 @@ def connected_components():
         ):
             cc = ConnectedComponents(**rp.run_config)
             cc.get_connected_components()
+            rp.add_multiscale(cc.output_path, cc.num_workers, filled=cc.fill_holes)
 
 
 def clean_connected_components():
@@ -40,7 +65,7 @@ def clean_connected_components():
         CleanConnectedComponents,
     )
 
-    rp = RunProperties()
+    rp = RunProperties(multiscale=True)
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
         with io_util.TimingMessager(
@@ -48,12 +73,13 @@ def clean_connected_components():
         ):
             ccc = CleanConnectedComponents(**rp.run_config)
             ccc.clean_connected_components()
+            rp.add_multiscale(ccc.output_path, ccc.num_workers, filled=ccc.fill_holes)
 
 
 def contact_sites():
     from cellmap_analyze.process.contact_sites import ContactSites
 
-    rp = RunProperties()
+    rp = RunProperties(multiscale=True)
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
         with io_util.TimingMessager(
@@ -61,12 +87,13 @@ def contact_sites():
         ):
             contact_sites = ContactSites(**rp.run_config)
             contact_sites.get_contact_sites()
+            rp.add_multiscale(contact_sites.output_path, contact_sites.num_workers)
 
 
 def mutex_watershed():
     from cellmap_analyze.process.mutex_watershed import MutexWatershed
 
-    rp = RunProperties()
+    rp = RunProperties(multiscale=True)
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
         with io_util.TimingMessager(
@@ -74,6 +101,7 @@ def mutex_watershed():
         ):
             mws = MutexWatershed(**rp.run_config)
             mws.get_connected_components()
+            rp.add_multiscale(mws.output_path, mws.num_workers, filled=mws.fill_holes)
 
 
 def skeletonize():
@@ -94,7 +122,7 @@ def morphological_operations():
         MorphologicalOperations,
     )
 
-    rp = RunProperties()
+    rp = RunProperties(multiscale=True)
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
         with io_util.TimingMessager(
@@ -102,12 +130,13 @@ def morphological_operations():
         ):
             mo = MorphologicalOperations(**rp.run_config)
             mo.perform_morphological_operation()
+            rp.add_multiscale(mo.output_idi.path, mo.num_workers)
 
 
 def fill_holes():
     from cellmap_analyze.process.fill_holes import FillHoles
 
-    rp = RunProperties()
+    rp = RunProperties(multiscale=True)
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
         with io_util.TimingMessager(
@@ -115,12 +144,13 @@ def fill_holes():
         ):
             fill_holes = FillHoles(**rp.run_config)
             fill_holes.fill_holes()
+            rp.add_multiscale(fill_holes.output_path, fill_holes.num_workers)
 
 
 def filter_ids():
     from cellmap_analyze.process.filter_ids import FilterIDs
 
-    rp = RunProperties()
+    rp = RunProperties(multiscale=True)
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
         with io_util.TimingMessager(
@@ -128,12 +158,13 @@ def filter_ids():
         ):
             filter_ids = FilterIDs(**rp.run_config)
             filter_ids.get_filtered_ids()
+            rp.add_multiscale(filter_ids.output_path, filter_ids.num_workers)
 
 
 def label_with_mask():
     from cellmap_analyze.process.label_with_mask import LabelWithMask
 
-    rp = RunProperties()
+    rp = RunProperties(multiscale=True)
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
         with io_util.TimingMessager(
@@ -141,6 +172,7 @@ def label_with_mask():
         ):
             lwm = LabelWithMask(**rp.run_config)
             lwm.get_label_with_mask()
+            rp.add_multiscale(lwm.output_idi.path, lwm.num_workers)
 
 
 def measure():
@@ -174,7 +206,7 @@ def fit_lines_to_segmentations():
 def compute_edt():
     from cellmap_analyze.process.compute_edt import ComputeEDT
 
-    rp = RunProperties()
+    rp = RunProperties(multiscale=False)
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
         with io_util.TimingMessager(
@@ -182,12 +214,13 @@ def compute_edt():
         ):
             cedt = ComputeEDT(**rp.run_config)
             cedt.calculate_edt()
+            rp.add_multiscale(cedt.output_path, cedt.num_workers)
 
 
 def split_narrow_bridges():
     from cellmap_analyze.process.split_narrow_bridges import SplitNarrowBridges
 
-    rp = RunProperties()
+    rp = RunProperties(multiscale=True)
     with io_util.tee_streams(rp.logpath):
         os.chdir(rp.execution_directory)
         with io_util.TimingMessager(
@@ -195,6 +228,7 @@ def split_narrow_bridges():
         ):
             snb = SplitNarrowBridges(**rp.run_config)
             snb.split_objects()
+            rp.add_multiscale(snb.output_path, snb.num_workers)
 
 
 def multiscale():

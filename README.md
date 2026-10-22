@@ -23,15 +23,19 @@ A suite of Dask-powered tools for processing and analyzing terabyte-scale 3D seg
 | **Skeletonize**          | `skeletonize`                | Generate skeletons from segmented objects with optional pruning and simplification. Automatically resamples to isotropic resolution before skeletonization. |
 | **Compute EDT**          | `compute-edt`                | Compute a Euclidean distance transform over a segmentation, for reuse across repeated `split-narrow-bridges` runs. |
 | **Split Narrow Bridges** | `split-narrow-bridges`       | Split accidentally-merged blob-like objects (nuclei, cells) at thin necks via EDT-watershed, preserving all original foreground voxels. |
-| **Multiscale**           | `multiscale`                 | Add downsampled levels (`s1`, `s2`, …) to an existing zarr segmentation for viewing. Labels are downsampled by mode by default, on anisotropic data the finer axes are halved first, and each level's OME translation is placed at its voxel centres. |
+| **Multiscale**           | `multiscale`                 | Add downsampled levels (`s1`, `s2`, …) to an existing zarr dataset for viewing, until a level fits in one chunk. Integer data (labels) is downsampled by mode and floats by mean, on anisotropic data the finer axes are halved first, and each level's OME translation is placed at its voxel centres. |
 
 These tools chain together into a full predictions-to-segmentations pipeline:
 start from raw model output (`connected-components` thresholds prediction
 probability maps, or `mws` agglomerates affinities) to get an initial
 instance segmentation, optionally refine it (`split-narrow-bridges` to
 separate accidentally-merged instances, `fill-holes`, `morphological-operations`),
-then finalize with `clean-connected-components` and/or `filter-ids`, and
-run `multiscale` on the result to add a pyramid for viewing.
+then finalize with `clean-connected-components` and/or `filter-ids`.
+
+Each processing command that writes a volume then adds a multiscale pyramid to
+it, as `multiscale` does, so every output is ready to view. Set
+`multiscale: false` in its `run-config.yaml` to skip this; `compute-edt` adds
+one only with `multiscale: true`.
 
 ### Analysis Tools
 
