@@ -1000,7 +1000,7 @@ class SplitNarrowBridges(ComputeConfigMixin):
                     )
                     data[data_slice] = region
 
-        output_idi.ds[block.write_roi] = data
+        output_idi.write(block.write_roi, data)
 
     # Per-worker-process cache for relabel_block_with_splits (see
     # _load_subpieces_cached) -- a plain class attribute so it persists

@@ -29,7 +29,7 @@ class TestZarrV3Format:
             total_roi=roi,
             write_size=roi.shape,
         )
-        ds.data[:] = np.ones(shape, dtype=np.uint8)
+        ds.write_index((0, 0, 0), ds.shape, np.ones(shape, dtype=np.uint8))
 
         # zarr v3 uses zarr.json, zarr v2 uses .zarray
         ds_path = str(tmp_path / "v3test.zarr" / "seg" / "s0")
@@ -57,7 +57,7 @@ class TestZarrV3Format:
         test_data = np.zeros(shape, dtype=np.uint64)
         test_data[2:5, 2:5, 2:5] = 1
         test_data[7:9, 7:9, 7:9] = 2
-        ds.data[:] = test_data
+        ds.write_index((0, 0, 0), ds.shape, test_data)
 
         # Read back via IDI
         idi = ImageDataInterface(output_path + "/s0")
@@ -65,8 +65,8 @@ class TestZarrV3Format:
         block = idi.to_ndarray_ts(roi)
         assert np.array_equal(block, test_data)
 
-    def test_write_via_roi_setitem(self, tmp_path):
-        """The idi.ds[roi] = value pattern should work with v3 format."""
+    def test_write_via_roi(self, tmp_path):
+        """idi.write(roi, data) should work with v3 format."""
         output_path = str(tmp_path / "write.zarr" / "out")
         vs = Coordinate(8, 8, 8)
         shape = (5, 5, 5)
@@ -77,11 +77,10 @@ class TestZarrV3Format:
             total_roi=roi, write_size=roi.shape,
         )
         write_data = np.arange(125, dtype=np.uint16).reshape(shape)
-        idi.ds[roi] = write_data
+        idi.write(roi, write_data)
 
         # Read back
-        readback = np.array(idi.ds.data[:])
-        assert np.array_equal(write_data, readback)
+        assert np.array_equal(write_data, idi.to_ndarray_ts(roi))
 
 
 class TestZarrV2BackwardCompat:
@@ -241,7 +240,7 @@ class TestZarrV2BackwardCompat:
         # Read via IDI — should get voxel_size from parent OME metadata
         idi = ImageDataInterface(os.path.join(zarr_path, "seg/s0"))
         assert tuple(idi.original_voxel_size) == (16.0, 16.0, 16.0)
-        assert idi.ds.data.shape == (10, 10, 10)
+        assert idi.shape == (10, 10, 10)
 
         # Verify data round-trip. Read the dataset's own ROI: the OME
         # translation is the voxel CENTER, so the corner is translation - vs/2,
@@ -262,12 +261,11 @@ class TestZarrV2BackwardCompat:
             total_roi=roi, write_size=roi.shape,
         )
 
-        # Parent group should have OME-NGFF multiscales in zarr.json
+        # Parent group should have OME-NGFF 0.5 multiscales in zarr.json
         group = zarr.open_group(output_path, mode="r")
-        attrs = dict(group.attrs)
-        assert "multiscales" in attrs
-        ms = attrs["multiscales"][0]
-        assert ms["version"] == "0.4"
+        ome = dict(group.attrs)["ome"]
+        assert ome["version"] == "0.5"
+        ms = ome["multiscales"][0]
         assert len(ms["axes"]) == 3
         assert ms["axes"][0]["unit"] == "nanometer"
 
@@ -280,15 +278,13 @@ class TestZarrV2BackwardCompat:
         assert os.path.exists(os.path.join(s0_path, "zarr.json"))
         assert not os.path.exists(os.path.join(s0_path, ".zarray"))
 
-    def test_prepare_ds_matches_container_format(self, tmp_path):
-        """prepare_ds should create arrays matching the container's zarr format.
+    def test_outputs_match_container_format(self, tmp_path):
+        """Outputs should be created in the container's zarr format.
 
         A v2 container (root .zgroup) should get v2 arrays (.zarray),
         not v3 arrays (zarr.json). This ensures tools like Neuroglancer
         that inherit the format from the root group can read the arrays.
         """
-        from cellmap_analyze.util.zarr_io import prepare_ds
-
         # Create a v2 container
         v2_path = str(tmp_path / "v2container.zarr")
         os.makedirs(v2_path)
@@ -301,7 +297,7 @@ class TestZarrV2BackwardCompat:
         shape = (10, 10, 10)
         roi = Roi(Coordinate(0, 0, 0), Coordinate(shape) * vs)
 
-        prepare_ds(v2_path, "seg/s0", roi, vs, np.uint8, write_size=roi.shape)
+        create_multiscale_dataset(f"{v2_path}/seg", np.uint8, vs, roi, write_size=roi.shape)
 
         # Array should be v2 format
         s0_path = os.path.join(v2_path, "seg", "s0")
@@ -317,7 +313,7 @@ class TestZarrV2BackwardCompat:
         import zarr
         zarr.open_group(v3_path, mode="w", zarr_format=3)
 
-        prepare_ds(v3_path, "seg/s0", roi, vs, np.uint8, write_size=roi.shape)
+        create_multiscale_dataset(f"{v3_path}/seg", np.uint8, vs, roi, write_size=roi.shape)
 
         # Array should be v3 format
         s0_path = os.path.join(v3_path, "seg", "s0")

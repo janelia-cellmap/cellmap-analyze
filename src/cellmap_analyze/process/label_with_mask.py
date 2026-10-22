@@ -97,7 +97,7 @@ class LabelWithMask(ComputeConfigMixin):
             & (input < intensity_threshold_maximum)
         ) * mask
         # Erosion operates uniformly in voxel space, so use uniform trimming
-        output_idi.ds[block.write_roi] = trim_array(output, padding_voxels)
+        output_idi.write(block.write_roi, trim_array(output, padding_voxels))
 
     def get_label_with_mask(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)

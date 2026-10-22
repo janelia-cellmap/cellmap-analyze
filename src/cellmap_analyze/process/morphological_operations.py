@@ -145,7 +145,7 @@ class MorphologicalOperations(ComputeConfigMixin):
         if mask:
             mask_block = mask.process_block(roi=block.read_roi)
             if not np.any(mask_block):
-                output_idi.ds[block.write_roi] = 0
+                output_idi.write(block.write_roi, 0)
                 return
 
         data = input_idi.to_ndarray_ts(block.read_roi)
@@ -189,7 +189,7 @@ class MorphologicalOperations(ComputeConfigMixin):
             slice(n, data.shape[axis] - p if p > 0 else None)
             for axis, (n, p) in enumerate(zip(neg_voxels, pos_voxels))
         )
-        output_idi.ds[block.write_roi] = data[slices]
+        output_idi.write(block.write_roi, data[slices])
 
     def perform_morphological_operation(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)

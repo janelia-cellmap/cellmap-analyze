@@ -41,7 +41,7 @@ def s3_server():
 
 @pytest.fixture
 def s3_env(monkeypatch, s3_server):
-    """Point boto3 / tensorstore / our own ``url_to_public_https`` at moto."""
+    """Point boto3 and worldarray at moto."""
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
     monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")

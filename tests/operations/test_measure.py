@@ -352,7 +352,7 @@ def _write_level(path, data, voxel_size):
         write_size=Coordinate(data.shape) * Coordinate(scaled),
         original_voxel_size=original,
     )
-    ds.data[:] = data
+    ds.write_index((0, 0, 0), ds.shape, data)
 
 
 def test_measure_raw_finer_than_segmentation_is_block_averaged(tmp_path, voxel_size):

@@ -888,14 +888,8 @@ def get_zarr_chunk_path_from_block_index(block_index, idi, depth):
     block = create_block_from_index(idi, block_index)
     # can have duplicates eg 0/0/0 and 0/0/1 go produce the same coords[:2]
     block_coords = tuple(block.coords[:depth])
-    # Zarr v3's default chunk-key encoding prefixes keys with "c/" (e.g.
-    # "c/0/10/0"); hand-joining coords without it silently pointed at
-    # nonexistent paths for v3 arrays, making every distributed delete call
-    # a no-op and leaving 100% of real cleanup to the final rmtree.
-    # Call encode_chunk_key on the metadata itself: both ArrayV2Metadata and
-    # ArrayV3Metadata define it, but only v3 has a .chunk_key_encoding attr.
-    key = idi.ds.data.metadata.encode_chunk_key(block_coords)
-    return f"{idi.path}/{key}"
+    # the array's own key encoding, e.g. zarr v3's "c/" prefix
+    return f"{idi.path}/{idi.chunk_key(block_coords)}"
 
 
 def write_dask_result_to_pkl(block_index, output_dir, fn, *fn_args, **fn_kwargs):

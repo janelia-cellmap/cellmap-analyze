@@ -270,15 +270,17 @@ class ContactSites(ComputeConfigMixin):
 
         if not np.any(organelle_1):
             # if organelle_1 is empty, we can skip this block
-            contact_sites_blockwise_idi.ds[block.write_roi] = trim_with_padding(
-                np.zeros(organelle_1.shape, dtype=np.uint64)
+            contact_sites_blockwise_idi.write(
+                block.write_roi,
+                trim_with_padding(np.zeros(organelle_1.shape, dtype=np.uint64)),
             )
             return
         organelle_2 = organelle_2_idi.to_ndarray_ts(block.read_roi)
         if not np.any(organelle_2):
             # if organelle_2 is empty, we can skip this block
-            contact_sites_blockwise_idi.ds[block.write_roi] = trim_with_padding(
-                np.zeros(organelle_1.shape, dtype=np.uint64)
+            contact_sites_blockwise_idi.write(
+                block.write_roi,
+                trim_with_padding(np.zeros(organelle_1.shape, dtype=np.uint64)),
             )
             return
         # Calculate offset with per-axis division for anisotropic data
@@ -294,7 +296,7 @@ class ContactSites(ComputeConfigMixin):
             contact_distance_nm=contact_distance_nm,
         )
         contact_sites[contact_sites > 0] += global_id_offset
-        contact_sites_blockwise_idi.ds[block.write_roi] = trim_with_padding(contact_sites)
+        contact_sites_blockwise_idi.write(block.write_roi, trim_with_padding(contact_sites))
 
     def calculate_contact_sites_blockwise(self):
         num_blocks = dask_util.get_num_blocks(

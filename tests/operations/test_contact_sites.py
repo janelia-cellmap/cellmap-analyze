@@ -181,7 +181,7 @@ def test_contact_site_blocks_different_anisotropic_voxel_sizes(
             total_roi=total_roi,
             write_size=write_size,
         )
-        ds.data[:] = seg
+        ds.write_index((0, 0, 0), ds.shape, seg)
 
     # Run ContactSites blockwise
     output_path = f"{zarr_path}/contact_sites_{contact_distance_nm}nm"

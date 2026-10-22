@@ -147,7 +147,7 @@ class ConnectedComponents(ComputeConfigMixin):
         self.oob_value = None
         if self.calculating_holes:
             self.invert = True
-            self.oob_value = np.prod(self.input_idi.ds.shape) * 10
+            self.oob_value = np.prod(self.input_idi.shape) * 10
 
         self.voxel_size = template_idi.voxel_size
 
@@ -385,7 +385,7 @@ class ConnectedComponents(ComputeConfigMixin):
                 mask_data = mask.process_block(roi=mask_block.read_roi)
 
                 if not np.any(mask_data):
-                    connected_components_blockwise_idi.ds[block.write_roi] = 0
+                    connected_components_blockwise_idi.write(block.write_roi, 0)
                     return
 
             input = input_idi.to_ndarray_ts(block.read_roi)
@@ -452,7 +452,7 @@ class ConnectedComponents(ComputeConfigMixin):
                     in_place=True,
                 )
 
-        connected_components_blockwise_idi.ds[block.write_roi] = connected_components
+        connected_components_blockwise_idi.write(block.write_roi, connected_components)
 
     def calculate_connected_components_blockwise(self):
         num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
@@ -796,7 +796,7 @@ class ConnectedComponents(ComputeConfigMixin):
         if mask:
             mask_block = mask.process_block(roi=block.read_roi)
             if not np.any(mask_block):
-                output_idi.ds[block.write_roi] = 0
+                output_idi.write(block.write_roi, 0)
                 return
 
         # All ids must be accounted for in the relabeling dict
@@ -821,7 +821,7 @@ class ConnectedComponents(ComputeConfigMixin):
                     f"Error in relabel_block {block.read_roi}, {list(relabeling_dict.keys())}, {list(relabeling_dict.values())}"
                 )
 
-        output_idi.ds[block.write_roi] = data
+        output_idi.write(block.write_roi, data)
 
     @staticmethod
     def relabel_dataset(

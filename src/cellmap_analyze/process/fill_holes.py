@@ -175,12 +175,12 @@ class FillHoles(ComputeConfigMixin):
                 in_place=True,
             )
 
-        output_idi.ds[block.write_roi] = input + holes.astype(input.dtype)
+        output_idi.write(block.write_roi, input + holes.astype(input.dtype))
 
     def relabel_dataset(self):
         self.output_idi = create_multiscale_dataset_idi(
             self.output_path,
-            dtype=self.input_idi.ds.dtype,
+            dtype=self.input_idi.dtype,
             voxel_size=self.voxel_size,
             total_roi=self.roi,
             write_size=self.input_idi.chunk_shape * self.input_idi.voxel_size,

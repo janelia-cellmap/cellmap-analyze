@@ -1061,7 +1061,7 @@ class Skeletonize(ComputeConfigMixin):
         min_vs = min(original_vs)
         iso_voxels = (dx * dy * dz) / (min_vs ** 3)
 
-        dtype_bytes = self.segmentation_idi.ds.data.dtype.itemsize
+        dtype_bytes = self.segmentation_idi.dtype.itemsize
         bytes_per_voxel = max(dtype_bytes + 1, self.peak_bytes_per_voxel)
         peak = self.peak_bytes_baseline + bytes_per_voxel * iso_voxels
         return int(peak * self.memory_safety_multiplier)

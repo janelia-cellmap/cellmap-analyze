@@ -26,7 +26,7 @@ def _write_channel(path, arr, voxel_size=(1.0, 1.0, 1.0)):
         write_size=Coordinate(10, 10, 10) * Coordinate(voxel_size),
         original_voxel_size=voxel_size,
     )
-    ds.data[:] = arr
+    ds.write_index((0, 0, 0), ds.shape, arr)
     return f"{path}/s0"
 
 

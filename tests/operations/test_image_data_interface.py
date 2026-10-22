@@ -112,11 +112,11 @@ def test_nonzero_translation_center_corner_convention(tmp_path, voxel_size):
     idx = (1, 2, 3)
     arr = np.zeros(shape, dtype=np.uint8)
     arr[idx] = 1
-    ds.data[:] = arr
+    ds.write_index((0, 0, 0), ds.shape, arr)
 
     # stored OME translation is the CENTER
     zattrs = dict(zarr.open_group(path, mode="r").attrs)
-    stored = zattrs["multiscales"][0]["datasets"][0]["coordinateTransformations"][
+    stored = zattrs["ome"]["multiscales"][0]["datasets"][0]["coordinateTransformations"][
         1
     ]["translation"]
     assert np.allclose(stored, expected_translation)
@@ -138,8 +138,8 @@ def test_raw_intensity_excludes_voxels_outside_raw_coverage(tmp_path):
     actually have real EM data -- not have the missing region's padding
     (0) silently averaged in as if it were real signal.
     """
-    from cellmap_analyze.util.zarr_io import prepare_ds
     from cellmap_analyze.analyze.measure import Measure
+    from cellmap_analyze.util.zarr_util import create_multiscale_dataset
 
     voxel_size = Coordinate((10, 10, 10))
 
@@ -148,14 +148,10 @@ def test_raw_intensity_excludes_voxels_outside_raw_coverage(tmp_path):
     seg_data = np.ones(seg_shape, dtype=np.uint8)
     seg_total_roi = Roi((0, 0, 0), seg_shape) * voxel_size
     seg_path = str(tmp_path / "data.zarr/seg")
-    seg_ds = prepare_ds(
-        seg_path,
-        "s0",
-        total_roi=seg_total_roi,
-        voxel_size=voxel_size,
-        dtype=seg_data.dtype,
+    seg_ds = create_multiscale_dataset(
+        seg_path, seg_data.dtype, voxel_size, seg_total_roi, seg_total_roi.shape
     )
-    seg_ds[seg_total_roi] = seg_data
+    seg_ds.write_index((0, 0, 0), seg_shape, seg_data)
 
     # Raw EM only covers x in [0, 6) of the same voxel grid -- the object's
     # x in [6, 10) has no real EM data at all.
@@ -164,14 +160,10 @@ def test_raw_intensity_excludes_voxels_outside_raw_coverage(tmp_path):
     raw_data = np.full(raw_shape, raw_value, dtype=np.uint16)
     raw_total_roi = Roi((0, 0, 0), raw_shape) * voxel_size
     raw_path = str(tmp_path / "data.zarr/raw")
-    raw_ds = prepare_ds(
-        raw_path,
-        "s0",
-        total_roi=raw_total_roi,
-        voxel_size=voxel_size,
-        dtype=raw_data.dtype,
+    raw_ds = create_multiscale_dataset(
+        raw_path, raw_data.dtype, voxel_size, raw_total_roi, raw_total_roi.shape
     )
-    raw_ds[raw_total_roi] = raw_data
+    raw_ds.write_index((0, 0, 0), raw_shape, raw_data)
 
     m = Measure(
         input_path=f"{seg_path}/s0",

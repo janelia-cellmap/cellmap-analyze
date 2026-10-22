@@ -293,7 +293,7 @@ class MutexWatershed(ComputeConfigMixin):
         if mask:
             mask_block = mask.process_block(roi=block.read_roi)
             if not mask_block.any():
-                connected_components_blockwise_idi.ds[block.write_roi] = 0
+                connected_components_blockwise_idi.write(block.write_roi, 0)
                 return
 
         # Support list of IDIs (one per affinity channel) or single 4D IDI
@@ -310,7 +310,7 @@ class MutexWatershed(ComputeConfigMixin):
 
         # Skip blocks with no signal before expensive float64 conversion
         if affinities.max() == 0:
-            connected_components_blockwise_idi.ds[block.write_roi] = 0
+            connected_components_blockwise_idi.write(block.write_roi, 0)
             return
 
         segmentation = MutexWatershed.mutex_watershed(
@@ -333,11 +333,14 @@ class MutexWatershed(ComputeConfigMixin):
             )
         )
         segmentation[segmentation > 0] += global_id_offset
-        connected_components_blockwise_idi.ds[block.write_roi] = segmentation[
-            padding_voxels:-padding_voxels,
-            padding_voxels:-padding_voxels,
-            padding_voxels:-padding_voxels,
-        ]
+        connected_components_blockwise_idi.write(
+            block.write_roi,
+            segmentation[
+                padding_voxels:-padding_voxels,
+                padding_voxels:-padding_voxels,
+                padding_voxels:-padding_voxels,
+            ],
+        )
 
     def calculate_connected_components_blockwise(self):
         num_blocks = dask_util.get_num_blocks(

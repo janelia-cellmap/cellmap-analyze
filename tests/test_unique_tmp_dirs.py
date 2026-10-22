@@ -42,7 +42,7 @@ def _make_seg(path, shape=(8, 8, 8), vs=(8, 8, 8)):
     )
     arr = np.zeros(shape, dtype=np.uint8)
     arr[2:5, 2:5, 2:5] = 1
-    ds.data[:] = arr
+    ds.write_index((0, 0, 0), ds.shape, arr)
     return f"{path}/s0"
 
 

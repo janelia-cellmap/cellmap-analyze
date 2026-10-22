@@ -1,9 +1,9 @@
 """Integration tests for non-integer voxel size support."""
 import numpy as np
 import pytest
+import worldarray as wa
 import zarr
 from funlib.geometry import Coordinate, Roi
-from cellmap_analyze.util.zarr_io import prepare_ds
 
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.zarr_util import (
@@ -28,24 +28,20 @@ def non_int_zarr(tmp_path):
         Coordinate(0, 0, 0), Coordinate(data_shape) * Coordinate(scaled_vs)
     )
 
-    ds = prepare_ds(
-        zarr_path,
-        "test_ds/s0",
+    ds = create_multiscale_dataset(
+        f"{zarr_path}/test_ds",
+        dtype=np.uint8,
+        voxel_size=Coordinate(scaled_vs),
         total_roi=total_roi,
         write_size=Coordinate(data_shape) * Coordinate(scaled_vs),
-        voxel_size=Coordinate(scaled_vs),
-        dtype=np.uint8,
+        original_voxel_size=original_vs,
     )
 
     # Write test data: a simple labeled volume
     test_data = np.zeros(data_shape, dtype=np.uint8)
     test_data[2:5, 2:5, 2:5] = 1  # 27-voxel cube labeled 1
     test_data[6:8, 6:8, 6:8] = 2  # 8-voxel cube labeled 2
-    ds.data[:] = test_data
-
-    # New convention: the voxel_size attr holds the TRUE physical value
-    # (cellmap-analyze re-derives the integer scaling in memory on read).
-    ds.data.attrs["voxel_size"] = list(original_vs)
+    ds.write_index((0, 0, 0), ds.shape, test_data)
 
     return zarr_path, original_vs, scaled_vs, scale_factor, test_data
 
@@ -82,15 +78,14 @@ class TestIDINonIntegerVoxelSize:
         data_shape = (5, 5, 5)
 
         total_roi = Roi((0, 0, 0), Coordinate(data_shape) * Coordinate(vs))
-        ds = prepare_ds(
-            zarr_path,
-            "test/s0",
+        ds = create_multiscale_dataset(
+            f"{zarr_path}/test",
+            dtype=np.uint8,
+            voxel_size=Coordinate(vs),
             total_roi=total_roi,
             write_size=Coordinate(data_shape) * Coordinate(vs),
-            voxel_size=Coordinate(vs),
-            dtype=np.uint8,
         )
-        ds.data[:] = np.ones(data_shape, dtype=np.uint8)
+        ds.write_index((0, 0, 0), ds.shape, np.ones(data_shape, dtype=np.uint8))
 
         idi = ImageDataInterface(f"{zarr_path}/test/s0")
         assert idi.voxel_size_scale_factor == 1
@@ -168,16 +163,16 @@ class TestOutputMetadata:
         )
         metadata = dict(group.attrs)
 
-        scale_transform = metadata["multiscales"][0]["datasets"][0][
+        scale_transform = metadata["ome"]["multiscales"][0]["datasets"][0][
             "coordinateTransformations"
         ][0]
         assert scale_transform["type"] == "scale"
         for written, expected in zip(scale_transform["scale"], original_vs):
             assert abs(written - expected) < 1e-10
 
-    def test_no_original_voxel_size_attr_written(self, tmp_path):
-        """New datasets no longer carry a separate original_voxel_size attr;
-        voxel_size itself holds the true physical value."""
+    def test_no_per_array_placement_attrs(self, tmp_path):
+        """Outputs are placed by the group's OME metadata alone: the arrays carry
+        no funlib voxel_size/offset attributes."""
         output_path = str(tmp_path / "output2.zarr" / "test_ds")
         original_vs = (3.54, 4.0, 4.0)
         scaled_vs, scale_factor = scale_voxel_size_to_integers(original_vs)
@@ -186,7 +181,7 @@ class TestOutputMetadata:
             Coordinate(0, 0, 0), Coordinate(5, 5, 5) * Coordinate(scaled_vs)
         )
 
-        ds = create_multiscale_dataset(
+        create_multiscale_dataset(
             output_path,
             dtype=np.uint8,
             voxel_size=Coordinate(scaled_vs),
@@ -195,16 +190,12 @@ class TestOutputMetadata:
             original_voxel_size=original_vs,
         )
 
-        assert "original_voxel_size" not in ds.data.attrs
-        stored = ds.data.attrs["voxel_size"]
-        for s, e in zip(stored, original_vs):
-            assert abs(float(s) - e) < 1e-10
+        assert dict(zarr.open_array(output_path + "/s0", mode="r").attrs) == {}
 
-    def test_voxel_size_attr_is_true_physical_value(self, tmp_path):
-        """The persisted voxel_size attr must hold the TRUE physical voxel
-        size, not the funlib-scaled integer — so external tools reading
-        voxel_size literally get correct units. cellmap-analyze must still
-        re-derive the scaled integer in memory."""
+    def test_written_voxel_size_is_true_physical_value(self, tmp_path):
+        """The persisted voxel size must be the TRUE physical voxel size, not
+        the scaled integer, so external tools get correct units.
+        cellmap-analyze must still re-derive the scaled integer in memory."""
         output_path = str(tmp_path / "true_vs.zarr" / "test_ds")
         original_vs = (72.96, 64.0, 64.0)
         scaled_vs, scale_factor = scale_voxel_size_to_integers(original_vs)
@@ -222,10 +213,10 @@ class TestOutputMetadata:
             original_voxel_size=original_vs,
         )
 
-        # Raw attr (what an external/OME-naive reader sees) is the true value.
-        arr = zarr.open_array(output_path + "/s0", mode="r")
-        for s, e in zip(arr.attrs["voxel_size"], original_vs):
-            assert abs(float(s) - e) < 1e-10, "voxel_size attr should be physical"
+        # What an external reader sees is the true value.
+        written = wa.open(output_path + "/s0").voxel_size
+        for s, e in zip(written, original_vs):
+            assert abs(float(s) - e) < 1e-10, "voxel size should be physical"
 
         # cellmap-analyze still reconstructs the scaled-integer convention.
         idi = ImageDataInterface(output_path + "/s0")
@@ -264,8 +255,8 @@ class TestOutputMetadata:
         )
         assert output_idi.voxel_size_scale_factor == input_idi.voxel_size_scale_factor
         assert output_idi.roi == input_idi.roi
-        arr = zarr.open_array(str(tmp_path / "out.zarr" / "seg" / "s0"), mode="r")
-        assert arr.attrs["offset"] == list(translation)
+        written = wa.open(str(tmp_path / "out.zarr" / "seg" / "s0")).translation
+        assert np.allclose(written, translation)
 
 
 class TestMultiDatasetConsistency:
@@ -277,26 +268,22 @@ class TestMultiDatasetConsistency:
         scaled_vs1, sf1 = scale_voxel_size_to_integers(vs1)
         shape = (5, 5, 5)
         roi1 = Roi(Coordinate(0, 0, 0), Coordinate(shape) * Coordinate(scaled_vs1))
-        ds1 = prepare_ds(
-            zarr1, "a/s0", total_roi=roi1,
-            write_size=Coordinate(shape) * Coordinate(scaled_vs1),
-            voxel_size=Coordinate(scaled_vs1), dtype=np.uint8,
+        ds1 = create_multiscale_dataset(
+            f"{zarr1}/a", np.uint8, Coordinate(scaled_vs1), roi1,
+            write_size=Coordinate(shape) * Coordinate(scaled_vs1), original_voxel_size=vs1,
         )
-        ds1.data[:] = np.ones(shape, dtype=np.uint8)
-        ds1.data.attrs["voxel_size"] = list(vs1)
+        ds1.write_index((0, 0, 0), shape, np.ones(shape, dtype=np.uint8))
 
         # Dataset 2: voxel_size (4, 4, 4) -> scale_factor 1
         zarr2 = str(tmp_path / "ds2.zarr")
         vs2 = (4.0, 4.0, 4.0)
         scaled_vs2, sf2 = scale_voxel_size_to_integers(vs2)
         roi2 = Roi(Coordinate(0, 0, 0), Coordinate(shape) * Coordinate(scaled_vs2))
-        ds2 = prepare_ds(
-            zarr2, "b/s0", total_roi=roi2,
-            write_size=Coordinate(shape) * Coordinate(scaled_vs2),
-            voxel_size=Coordinate(scaled_vs2), dtype=np.uint8,
+        ds2 = create_multiscale_dataset(
+            f"{zarr2}/b", np.uint8, Coordinate(scaled_vs2), roi2,
+            write_size=Coordinate(shape) * Coordinate(scaled_vs2), original_voxel_size=vs2,
         )
-        ds2.data[:] = np.ones(shape, dtype=np.uint8)
-        ds2.data.attrs["voxel_size"] = list(vs2)
+        ds2.write_index((0, 0, 0), shape, np.ones(shape, dtype=np.uint8))
 
         idi1 = ImageDataInterface(f"{zarr1}/a/s0")
         idi2 = ImageDataInterface(f"{zarr2}/b/s0")

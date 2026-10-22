@@ -135,7 +135,7 @@ class ComputeEDT(ComputeConfigMixin):
                 write_shape = tuple(
                     int(round(s / vs)) for s, vs in zip(block.write_roi.shape, voxel_size)
                 )
-                output_idi.ds[block.write_roi] = np.zeros(write_shape, dtype=np.float32)
+                output_idi.write(block.write_roi, np.zeros(write_shape, dtype=np.float32))
                 return
 
         data = segmentation_idi.to_ndarray_ts(block.read_roi)
@@ -147,7 +147,7 @@ class ComputeEDT(ComputeConfigMixin):
             write_shape = tuple(
                 int(round(s / vs)) for s, vs in zip(block.write_roi.shape, voxel_size)
             )
-            output_idi.ds[block.write_roi] = np.zeros(write_shape, dtype=np.float32)
+            output_idi.write(block.write_roi, np.zeros(write_shape, dtype=np.float32))
             return
 
         # Multi-label aware: distance to the nearest voxel with a *different*
@@ -156,7 +156,7 @@ class ComputeEDT(ComputeConfigMixin):
         # an organelle-vs-background approximation.
         distance = edt_module.edt(data, anisotropy=tuple(original_voxel_size))
         distance = trim_array_anisotropic(distance, padding, voxel_size)
-        output_idi.ds[block.write_roi] = distance.astype(np.float32)
+        output_idi.write(block.write_roi, distance.astype(np.float32))
 
     def calculate_edt(self):
         num_blocks = dask_util.get_num_blocks(

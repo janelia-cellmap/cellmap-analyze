@@ -6,7 +6,14 @@ import numpy as np
 import pytest
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from funlib.geometry import Roi, Coordinate
-from cellmap_analyze.util.zarr_io import prepare_ds
+from cellmap_analyze.util.zarr_util import create_multiscale_dataset
+
+
+def _write(path, data, voxel_size, total_roi):
+    """``data`` as s0 of an OME-Zarr group at ``path``, in one chunk; ``voxel_size`` and
+    ``total_roi`` in integer nm."""
+    vol = create_multiscale_dataset(path, data.dtype, voxel_size, total_roi, total_roi.shape)
+    vol.write_index((0, 0, 0), vol.shape, data)
 
 
 class TestNonIntegerResampling:
@@ -24,14 +31,7 @@ class TestNonIntegerResampling:
 
         # Create dataset
         ds_path = f"{tmp_zarr}/test_upsample/s0"
-        ds = prepare_ds(
-            tmp_zarr,
-            "test_upsample/s0",
-            total_roi=total_roi,
-            voxel_size=input_voxel_size,
-            dtype=test_data.dtype,
-        )
-        ds[total_roi] = test_data
+        _write(f"{tmp_zarr}/test_upsample", test_data, input_voxel_size, total_roi)
 
         # Read with output voxel size
         idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
@@ -63,14 +63,7 @@ class TestNonIntegerResampling:
 
         # Create dataset
         ds_path = f"{tmp_zarr}/test_downsample/s0"
-        ds = prepare_ds(
-            tmp_zarr,
-            "test_downsample/s0",
-            total_roi=total_roi,
-            voxel_size=input_voxel_size,
-            dtype=test_data.dtype,
-        )
-        ds[total_roi] = test_data
+        _write(f"{tmp_zarr}/test_downsample", test_data, input_voxel_size, total_roi)
 
         # Read with output voxel size
         idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
@@ -100,14 +93,7 @@ class TestNonIntegerResampling:
 
         # Create dataset
         ds_path = f"{tmp_zarr}/test_anisotropic/s0"
-        ds = prepare_ds(
-            tmp_zarr,
-            "test_anisotropic/s0",
-            total_roi=total_roi,
-            voxel_size=input_voxel_size,
-            dtype=test_data.dtype,
-        )
-        ds[total_roi] = test_data
+        _write(f"{tmp_zarr}/test_anisotropic", test_data, input_voxel_size, total_roi)
 
         # Read with output voxel size
         idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
@@ -143,14 +129,7 @@ class TestNonIntegerResampling:
 
         # Create dataset
         ds_path = f"{tmp_zarr}/test_labels/s0"
-        ds = prepare_ds(
-            tmp_zarr,
-            "test_labels/s0",
-            total_roi=total_roi,
-            voxel_size=input_voxel_size,
-            dtype=test_data.dtype,
-        )
-        ds[total_roi] = test_data
+        _write(f"{tmp_zarr}/test_labels", test_data, input_voxel_size, total_roi)
 
         # Read with interpolation_order=0 (nearest-neighbor)
         idi = ImageDataInterface(
@@ -178,14 +157,7 @@ class TestNonIntegerResampling:
 
         # Create dataset
         ds_path = f"{tmp_zarr}/test_roi_non_integer/s0"
-        ds = prepare_ds(
-            tmp_zarr,
-            "test_roi_non_integer/s0",
-            total_roi=total_roi,
-            voxel_size=input_voxel_size,
-            dtype=test_data.dtype,
-        )
-        ds[total_roi] = test_data
+        _write(f"{tmp_zarr}/test_roi_non_integer", test_data, input_voxel_size, total_roi)
 
         # Read a specific ROI in physical coordinates
         roi = Roi((16, 16, 16), (32, 32, 32))  # Physical coordinates (nm)
@@ -213,14 +185,7 @@ class TestIntegerFastPaths:
         total_roi = Roi((0, 0, 0), test_data.shape) * input_voxel_size
 
         ds_path = f"{tmp_zarr}/test_int_upsample/s0"
-        ds = prepare_ds(
-            tmp_zarr,
-            "test_int_upsample/s0",
-            total_roi=total_roi,
-            voxel_size=input_voxel_size,
-            dtype=test_data.dtype,
-        )
-        ds[total_roi] = test_data
+        _write(f"{tmp_zarr}/test_int_upsample", test_data, input_voxel_size, total_roi)
 
         idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
         result = idi.to_ndarray_ts()
@@ -239,14 +204,7 @@ class TestIntegerFastPaths:
         total_roi = Roi((0, 0, 0), test_data.shape) * input_voxel_size
 
         ds_path = f"{tmp_zarr}/test_int_downsample/s0"
-        ds = prepare_ds(
-            tmp_zarr,
-            "test_int_downsample/s0",
-            total_roi=total_roi,
-            voxel_size=input_voxel_size,
-            dtype=test_data.dtype,
-        )
-        ds[total_roi] = test_data
+        _write(f"{tmp_zarr}/test_int_downsample", test_data, input_voxel_size, total_roi)
 
         idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
         result = idi.to_ndarray_ts()
@@ -268,14 +226,7 @@ class TestIntegerFastPaths:
         total_roi = Roi((0, 0, 0), test_data.shape) * input_voxel_size
 
         ds_path = f"{tmp_zarr}/test_close_int/s0"
-        ds = prepare_ds(
-            tmp_zarr,
-            "test_close_int/s0",
-            total_roi=total_roi,
-            voxel_size=input_voxel_size,
-            dtype=test_data.dtype,
-        )
-        ds[total_roi] = test_data
+        _write(f"{tmp_zarr}/test_close_int", test_data, input_voxel_size, total_roi)
 
         idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
         result = idi.to_ndarray_ts()
@@ -299,14 +250,7 @@ class TestVoxelCoverageAccuracy:
         total_roi = Roi((0, 0, 0), test_shape) * input_voxel_size
 
         ds_path = f"{tmp_zarr}/test_physical_dims/s0"
-        ds = prepare_ds(
-            tmp_zarr,
-            "test_physical_dims/s0",
-            total_roi=total_roi,
-            voxel_size=input_voxel_size,
-            dtype=test_data.dtype,
-        )
-        ds[total_roi] = test_data
+        _write(f"{tmp_zarr}/test_physical_dims", test_data, input_voxel_size, total_roi)
 
         idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
         result = idi.to_ndarray_ts()
@@ -356,14 +300,7 @@ class TestCrossDatasetAlignment:
         total_roi_A = Roi((0, 0, 0), test_shape_A) * input_voxel_size_A
 
         ds_path_A = f"{tmp_zarr}/test_dataset_A/s0"
-        ds_A = prepare_ds(
-            tmp_zarr,
-            "test_dataset_A/s0",
-            total_roi=total_roi_A,
-            voxel_size=input_voxel_size_A,
-            dtype=test_data_A.dtype,
-        )
-        ds_A[total_roi_A] = test_data_A
+        _write(f"{tmp_zarr}/test_dataset_A", test_data_A, input_voxel_size_A, total_roi_A)
 
         # Dataset B with voxel size (5, 9, 17)
         input_voxel_size_B = Coordinate((5, 9, 17))
@@ -373,14 +310,7 @@ class TestCrossDatasetAlignment:
         total_roi_B = Roi((0, 0, 0), test_shape_B) * input_voxel_size_B
 
         ds_path_B = f"{tmp_zarr}/test_dataset_B/s0"
-        ds_B = prepare_ds(
-            tmp_zarr,
-            "test_dataset_B/s0",
-            total_roi=total_roi_B,
-            voxel_size=input_voxel_size_B,
-            dtype=test_data_B.dtype,
-        )
-        ds_B[total_roi_B] = test_data_B
+        _write(f"{tmp_zarr}/test_dataset_B", test_data_B, input_voxel_size_B, total_roi_B)
 
         # Query both datasets with the same ROI at the same output voxel size
         idi_A = ImageDataInterface(ds_path_A, output_voxel_size=output_voxel_size)
@@ -443,14 +373,7 @@ class TestBoundaryBlockShapeMatch:
 
         total_roi = Roi((0, 0, 0), test_shape) * input_voxel_size
         ds_path = f"{tmp_zarr}/test_boundary_block/s0"
-        ds = prepare_ds(
-            tmp_zarr,
-            "test_boundary_block/s0",
-            total_roi=total_roi,
-            voxel_size=input_voxel_size,
-            dtype=test_data.dtype,
-        )
-        ds[total_roi] = test_data
+        _write(f"{tmp_zarr}/test_boundary_block", test_data, input_voxel_size, total_roi)
 
         roi = Roi((begin, 0, 0), (size, 1, 1))
         idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
@@ -483,14 +406,7 @@ class TestRescaleOffsetAlignment:
 
         total_roi = Roi((0, 0, 0), test_data.shape) * input_voxel_size
         ds_path = f"{tmp_zarr}/test_offset_align/s0"
-        ds = prepare_ds(
-            tmp_zarr,
-            "test_offset_align/s0",
-            total_roi=total_roi,
-            voxel_size=input_voxel_size,
-            dtype=test_data.dtype,
-        )
-        ds[total_roi] = test_data
+        _write(f"{tmp_zarr}/test_offset_align", test_data, input_voxel_size, total_roi)
 
         idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
         offset0 = idi.offset[0]
@@ -515,14 +431,7 @@ class TestRawValidMask:
         )
         total_roi = Roi((0, 0, 0), shape) * input_voxel_size
         ds_path = f"{tmp_zarr}/{name}/s0"
-        ds = prepare_ds(
-            tmp_zarr,
-            f"{name}/s0",
-            total_roi=total_roi,
-            voxel_size=input_voxel_size,
-            dtype=test_data.dtype,
-        )
-        ds[total_roi] = test_data
+        _write(f"{tmp_zarr}/{name}", test_data, input_voxel_size, total_roi)
         return ds_path
 
     def test_no_overlap_roi_is_entirely_invalid(self, tmp_zarr):

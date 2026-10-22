@@ -129,7 +129,6 @@ def test_precomputed_read_local(tmp_path):
     )
 
     idi = ImageDataInterface(root)
-    assert idi.filetype == "neuroglancer_precomputed"
     assert tuple(idi.voxel_size) == (8, 8, 8)
     # voxel_offset = (10, 20, 30) XYZ → ZYX corner = (30, 20, 10) * 8 = (240, 160, 80)
     assert tuple(idi.offset) == (240, 160, 80)
@@ -179,7 +178,6 @@ def test_precomputed_read_s3(tmp_path, s3_env):
     _upload_dir_to_s3(s3_env, local_root, bucket, "data/seg")
 
     idi = ImageDataInterface(f"s3://{bucket}/data/seg")
-    assert idi.filetype == "neuroglancer_precomputed"
     assert tuple(idi.voxel_size) == (8, 8, 8)
     assert tuple(idi.offset) == (240, 160, 80)
     np.testing.assert_array_equal(idi.to_ndarray_ts(idi.roi), data)

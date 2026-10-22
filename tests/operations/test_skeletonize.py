@@ -1085,7 +1085,7 @@ def test_skeletonize_seed_voxel_fallback(shared_tmpdir):
         write_size=Coordinate(seg.shape) * Coordinate(vs),
         original_voxel_size=vs,
     )
-    ds.data[:] = seg
+    ds.write_index((0, 0, 0), ds.shape, seg)
 
     # CSV with the one cube's bbox.
     csv_path = shared_tmpdir + "/seed_voxel_bboxes.csv"
@@ -1171,7 +1171,7 @@ def test_skeletonize_nonzero_translation_shifts_by_translation(shared_tmpdir):
             write_size=Coordinate(seg.shape) * Coordinate(vs),
             original_voxel_size=list(vs),
         )
-        ds.data[:] = seg
+        ds.write_index((0, 0, 0), ds.shape, seg)
         # bbox CSV = OME centers of the object's min/max voxels, exactly what
         # measure would emit for this dataset: (idx + 0.5)*vs + begin (sf == 1).
         b = begin
