@@ -2,14 +2,14 @@ import os
 
 import numpy as np
 import pytest
+import worldarray as wa
 import zarr
 from funlib.geometry import Coordinate, Roi
 
-from cellmap_analyze.process.multiscale import Multiscale, downsample_factors
+from cellmap_analyze.process.multiscale import Multiscale
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.voxel_size_utils import (
     compute_common_scale_factor,
-    get_multiscales,
     scale_voxel_size_to_integers,
 )
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset
@@ -74,14 +74,11 @@ def test_levels_cover_the_same_physical_box(pyramid, voxel_size):
     path, _ = pyramid
     Multiscale(path, num_workers=1).create_multiscale()
 
-    datasets = get_multiscales(zarr.open_group(path, mode="r").attrs.asdict())[0]["datasets"]
-    assert [d["path"] for d in datasets] == ["s0", "s1", "s2"]
-    transforms = [
-        [np.array(t.get("scale", t.get("translation"))) for t in d["coordinateTransformations"]]
-        for d in datasets
-    ]
-    scale0, translation0 = transforms[0]
-    for level, (scale, translation) in enumerate(transforms):
+    # placements as the group's multiscales document lists them
+    placements = wa.open_pyramid(path).placements()
+    assert [name for name, _, _ in placements] == ["s0", "s1", "s2"]
+    _, scale0, translation0 = (np.array(p) for p in placements[0])
+    for level, (_, scale, translation) in enumerate(placements):
         factor = 2**level
         assert np.allclose(scale, scale0 * factor)
         # voxel 0 of level k is centred on the 2^k finer voxels it summarises
@@ -133,11 +130,11 @@ def test_commands_pyramid_their_output_and_filled_copy(tmp_path, voxel_size):
     rp.add_multiscale(f"{tmp_path}/out.zarr/missing", 1)
 
 
-def test_anisotropic_axes_wait_for_the_finer_ones():
-    assert downsample_factors((8, 8, 20)) == (2, 2, 1)
-    assert downsample_factors((16, 16, 20)) == (2, 2, 2)
-    assert downsample_factors((32, 8, 8)) == (1, 2, 2)
-    assert downsample_factors((3.54, 4, 4.5)) == (2, 2, 2)
+def test_anisotropic_axes_wait_for_the_finer_ones(tmp_path):
+    path = f"{tmp_path}/ms.zarr/aniso"
+    _write(path, np.zeros((16, 16, 16), np.uint8), (32, 8, 8), chunks=(2, 2, 2))
+    factors = [level["factors"] for level in Multiscale(path, num_levels=3).levels]
+    assert factors == [(1, 2, 2), (1, 2, 2), (2, 2, 2)]
 
 
 def test_existing_levels_need_overwrite(pyramid):
