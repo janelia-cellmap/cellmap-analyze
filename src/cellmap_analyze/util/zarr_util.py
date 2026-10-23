@@ -9,16 +9,14 @@ from cellmap_analyze.util.io_util import split_dataset_path
 
 def concurrency_context(concurrency_limit):
     """The per-handle context cellmap-analyze uses: data copies and file IO capped (when
-    a limit is given), network request pools left at tensorstore's defaults, and chunk
-    writes as zarr-python made them, without a lock or an fsync. Every writer owns whole
-    chunks no other writer touches, and on NFS under load tensorstore's default lock (a
-    blocking fcntl per chunk write) is costly."""
-    spec = {}
+    a limit is given), network request pools left at tensorstore's defaults. worldarray's
+    contexts write chunks as zarr-python made them, without a lock or an fsync; every
+    writer owns whole chunks no other writer touches."""
     if concurrency_limit:
-        spec = wa.capped_context_spec(concurrency=concurrency_limit, network=False)
-    spec["file_io_locking"] = {"mode": "none"}
-    spec["file_io_sync"] = False
-    return ts.Context(spec)
+        return ts.Context(
+            wa.capped_context_spec(concurrency=concurrency_limit, network=False)
+        )
+    return wa.shared_context(0, threads=0)
 
 
 def open_dataset(
