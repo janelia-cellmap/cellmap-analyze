@@ -9,7 +9,6 @@ from datetime import datetime
 import argparse
 import yaml
 from yaml.loader import SafeLoader
-from funlib.geometry import Roi
 import re
 
 # Much below taken from flyemflows: https://github.com/janelia-flyem/flyemflows/blob/master/flyemflows/util/util.py
@@ -234,13 +233,10 @@ def read_run_config(config_path):
     """
 
     def get_roi_from_string(roi_string):
-        # roi will look like this ["z_start:z_end", "y_start:y_end", "x_start:x_end"]. split it and convert to tuple
-        roi_start = [int(d.split(":")[0]) for d in roi_string]
-        roi_ends = [int(d.split(":")[1]) for d in roi_string]
-
-        roi_extents = [int(roi_ends[i] - roi_start[i]) for i in range(len(roi_string))]
-        roi = Roi(roi_start, roi_extents)
-        return roi
+        # ["z_start:z_end", "y_start:y_end", "x_start:x_end"] in nm, to the world box
+        # ((z_start, y_start, x_start), (z_end, y_end, x_end))
+        bounds = [[float(v) for v in d.split(":")] for d in roi_string]
+        return tuple(b for b, _ in bounds), tuple(e for _, e in bounds)
 
     with open(f"{config_path}/run-config.yaml") as f:
         config = yaml.load(f, Loader=SafeLoader)

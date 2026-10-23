@@ -4,14 +4,10 @@ import numpy as np
 import pytest
 import worldarray as wa
 import zarr
-from funlib.geometry import Coordinate, Roi
 
 from cellmap_analyze.process.multiscale import Multiscale
+from cellmap_analyze.util.grid_util import make_grid
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
-from cellmap_analyze.util.voxel_size_utils import (
-    compute_common_scale_factor,
-    scale_voxel_size_to_integers,
-)
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset
 
 NOISE = 99
@@ -19,21 +15,11 @@ NOISE = 99
 
 def _write(path, data, voxel_size, chunks, offset_voxels=(3, 5, 7)):
     """data as s0 of a cellmap-analyze group at `path`, away from the origin."""
-    original = tuple(float(v) for v in voxel_size)
-    scaled, _ = scale_voxel_size_to_integers(original)
-    roi = Roi(
-        Coordinate(offset_voxels) * Coordinate(scaled),
-        Coordinate(data.shape) * Coordinate(scaled),
-    )
+    corner = np.multiply(offset_voxels, voxel_size)
     ds = create_multiscale_dataset(
-        path,
-        dtype=data.dtype,
-        voxel_size=scaled,
-        total_roi=roi,
-        write_size=Coordinate(chunks) * Coordinate(scaled),
-        original_voxel_size=original,
+        path, data.dtype, make_grid(data.shape, voxel_size, corner, chunks)
     )
-    ds.data[:] = data
+    ds.write_index((0, 0, 0), ds.shape, data)
 
 
 def _upsample_with_noise(coarse, rng):
@@ -85,11 +71,9 @@ def test_levels_cover_the_same_physical_box(pyramid, voxel_size):
         assert np.allclose(translation, translation0 + scale0 * (factor - 1) / 2)
 
     # Read back, every level starts and ends where s0 does.
-    idis = [ImageDataInterface(f"{path}/s{level}") for level in range(3)]
-    common = compute_common_scale_factor(*(idi.voxel_size_scale_factor for idi in idis))
-    for idi in idis:
-        idi.rescale_to_factor(common)
-    assert all(idi.roi == idis[0].roi for idi in idis)
+    boxes = [ImageDataInterface(f"{path}/s{level}").grid.box for level in range(3)]
+    for box in boxes:
+        assert np.allclose(box.begin, boxes[0].begin) and np.allclose(box.end, boxes[0].end)
 
 
 def test_partial_edge_blocks_are_kept(tmp_path, voxel_size):

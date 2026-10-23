@@ -1,11 +1,11 @@
 # %%
-from funlib.geometry import Roi
 import numpy as np
 from cellmap_analyze.util.dask_util import (
     guesstimate_npartitions,
     start_dask,
 )
 from cellmap_analyze.util import io_util
+from cellmap_analyze.util.grid_util import voxel_corner
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 import logging
 import pandas as pd
@@ -103,25 +103,21 @@ class FitLinesToSegmentations(ComputeConfigMixin):
 
     def fit_lines_to_objects(self, df):
         results_df = []
-        sf = self.segmentation_idi.voxel_size_scale_factor
-        original_vs = np.array(self.segmentation_idi.original_voxel_size)
+        grid = self.segmentation_idi.grid
+        voxel_size = np.array(self.voxel_size)
         for _, row in df.iterrows():
             id = row["Object ID"]
-            # Bounding box coords from CSV are in true nm; convert to scaled for ROI
-            box_min = np.array([row[f"MIN {d} (nm)"] for d in ["Z", "Y", "X"]]) * sf
-            box_max = np.array([row[f"MAX {d} (nm)"] for d in ["Z", "Y", "X"]]) * sf
-            # define an roi to actually encompass the bounding box
-            roi = Roi(
-                box_min - self.voxel_size, (box_max - box_min) + self.voxel_size * 2
-            )
-            # Read whole voxels, so the data starts at roi.offset exactly
-            origin = self.segmentation_idi.roi.offset
-            roi = (roi - origin).snap_to_grid(self.voxel_size) + origin
-            data = self.segmentation_idi.to_ndarray_ts(roi)
+            # The CSV's MIN/MAX are the centres of the object's corner voxels;
+            # read its voxels and one more on every side
+            box_min = np.array([row[f"MIN {d} (nm)"] for d in ["Z", "Y", "X"]])
+            box_max = np.array([row[f"MAX {d} (nm)"] for d in ["Z", "Y", "X"]])
+            begin, end = grid.index_box((box_min - voxel_size / 2, box_max + voxel_size / 2))
+            begin, end = np.subtract(begin, 1), np.add(end, 1)
+            data = self.segmentation_idi.to_ndarray_ts(begin, end)
             # Points are placed at voxel centres, in true nm
-            roi_offset_nm = (np.array(roi.offset) + np.array(self.voxel_size) / 2) / sf
+            offset_nm = np.array(voxel_corner(grid, begin)) + voxel_size / 2
             line_start, line_end = FitLinesToSegmentations.fit_line_to_object(
-                data, id, original_vs, roi_offset_nm
+                data, id, voxel_size, offset_nm
             )
             result_df = pd.DataFrame([row])
 

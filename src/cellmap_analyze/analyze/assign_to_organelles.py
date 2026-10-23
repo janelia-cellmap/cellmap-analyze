@@ -11,7 +11,6 @@ from cellmap_analyze.util.image_data_interface import (
 from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util.dask_util import create_block_from_index
-from funlib.geometry import Coordinate
 import logging
 import pandas as pd
 import numpy as np
@@ -66,6 +65,13 @@ class AssignToOrganelles(ComputeConfigMixin):
         self._run_id = uuid.uuid4().hex[:8]
 
     @staticmethod
+    def _voxel_indices(coms_nm, organelle_idi):
+        """The voxel of the organelle dataset each COM (nm) falls in."""
+        return np.floor(
+            (np.asarray(coms_nm) - organelle_idi.corner) / organelle_idi.voxel_size
+        ).astype(int)
+
+    @staticmethod
     def _group_coms_by_block(coms_nm, organelle_idi, com_row_indices=None):
         """Group COM positions by block index.
 
@@ -82,17 +88,13 @@ class AssignToOrganelles(ComputeConfigMixin):
         if com_row_indices is None:
             com_row_indices = list(range(len(coms_nm)))
 
-        voxel_size = np.array(organelle_idi.voxel_size)
         chunk_shape = np.array(organelle_idi.chunk_shape)
-        if len(chunk_shape) == 4:
-            chunk_shape = chunk_shape[1:]
-        block_size = chunk_shape * voxel_size
-        roi_start = np.array(organelle_idi.roi.get_begin())
-        roi_end = np.array(organelle_idi.roi.get_end())
-        nchunks = np.ceil((roi_end - roi_start) / block_size).astype(int)
+        nchunks = -(-np.array(organelle_idi.grid.shape) // chunk_shape)
 
         # Compute block coordinates for each COM, clamp to valid range
-        block_coords = ((coms_nm - roi_start) / block_size).astype(int)
+        block_coords = (
+            AssignToOrganelles._voxel_indices(coms_nm, organelle_idi) // chunk_shape
+        )
         block_coords = np.clip(block_coords, 0, nchunks - 1)
 
         # Convert to linear indices
@@ -121,15 +123,14 @@ class AssignToOrganelles(ComputeConfigMixin):
         coms_nm = np.load(coms_path, mmap_mode="r")
 
         block = create_block_from_index(organelle_idi, block_index)
-        seg = organelle_idi.to_ndarray_ts(block.read_roi)
-
-        voxel_size = np.array(organelle_idi.voxel_size)
-        roi_begin = np.array(block.read_roi.get_begin())
+        seg = organelle_idi.to_ndarray_ts(block.read_begin, block.read_end)
 
         results = {}
         for row_idx in com_rows:
-            com = coms_nm[row_idx]
-            local_idx = ((com - roi_begin) / voxel_size).astype(int)
+            local_idx = (
+                AssignToOrganelles._voxel_indices(coms_nm[row_idx], organelle_idi)
+                - block.read_begin
+            )
 
             if np.all(local_idx >= 0) and np.all(local_idx < seg.shape):
                 results[row_idx] = int(
@@ -156,8 +157,9 @@ class AssignToOrganelles(ComputeConfigMixin):
         coms_nm = np.load(coms_path, mmap_mode="r")
 
         voxel_size = np.array(organelle_idi.voxel_size)
+        corner = np.array(organelle_idi.corner)
+        dataset_shape = np.array(organelle_idi.grid.shape)
         padding = initial_padding
-        dataset_roi = organelle_idi.roi
         results = {}
 
         while True:
@@ -167,19 +169,26 @@ class AssignToOrganelles(ComputeConfigMixin):
                 padding=padding,
                 read_beyond_roi=False,
             )
+            read_begin = np.array(block.read_begin)
+            read_end = np.array(block.read_end)
             # Check if we've covered the full dataset
-            covers_full_dataset = block.read_roi.contains(dataset_roi)
-            seg = organelle_idi.to_ndarray_ts(block.read_roi)
+            at_ds_begin = read_begin == 0
+            at_ds_end = read_end == dataset_shape
+            covers_full_dataset = np.all(at_ds_begin) and np.all(at_ds_end)
+            seg = organelle_idi.to_ndarray_ts(read_begin, read_end)
 
-            roi_begin = np.array(block.read_roi.get_begin())
-            roi_end = np.array(block.read_roi.get_end())
+            roi_begin = corner + read_begin * voxel_size
+            roi_end = corner + read_end * voxel_size
 
             # Extract boundaries
             boundaries = seg - fastmorph.erode(seg, erode_border=False)
             boundary_voxels = np.argwhere(boundaries > 0)
 
             if len(boundary_voxels) == 0:
-                padding = Coordinate(p * 2 for p in padding)
+                if covers_full_dataset:
+                    # no organelles anywhere
+                    break
+                padding = padding * 2
                 continue
 
             boundary_ids = boundaries[
@@ -199,16 +208,12 @@ class AssignToOrganelles(ComputeConfigMixin):
 
             pending_coms = np.array([coms_nm[r] for r in pending_rows])
 
-            # Margins: min distance from each COM to any face of read_roi
+            # Margins: min distance from each COM to any face of the read box
             # that is interior to the dataset (faces at the dataset edge
             # don't need checking — there's nothing beyond them)
-            ds_begin = np.array(dataset_roi.get_begin())
-            ds_end = np.array(dataset_roi.get_end())
             face_dists_neg = pending_coms - roi_begin  # (C, 3)
             face_dists_pos = roi_end - pending_coms  # (C, 3)
             # Mask out faces that touch the dataset boundary (set to inf)
-            at_ds_begin = np.isclose(roi_begin, ds_begin)
-            at_ds_end = np.isclose(roi_end, ds_end)
             face_dists_neg[:, at_ds_begin] = np.inf
             face_dists_pos[:, at_ds_end] = np.inf
             margins = np.minimum(
@@ -217,8 +222,9 @@ class AssignToOrganelles(ComputeConfigMixin):
             )
 
             # Containing organelle check (vectorized)
-            local_inds = ((pending_coms - roi_begin) / voxel_size).astype(
-                int
+            local_inds = (
+                AssignToOrganelles._voxel_indices(pending_coms, organelle_idi)
+                - read_begin
             )
             in_bounds = np.all(local_inds >= 0, axis=1) & np.all(
                 local_inds < seg.shape, axis=1
@@ -284,7 +290,7 @@ class AssignToOrganelles(ComputeConfigMixin):
                 break
 
             # Double padding and retry for unverified COMs only
-            padding = Coordinate(p * 2 for p in padding)
+            padding = padding * 2
             com_rows = unverified_rows
 
         return results
@@ -307,13 +313,9 @@ class AssignToOrganelles(ComputeConfigMixin):
 
     def assign_to_containing_organelle(self, df, organelle_name):
         coms = df[["COM Z (nm)", "COM Y (nm)", "COM X (nm)"]].to_numpy()
-        sf = self.organelle_idi.voxel_size_scale_factor
-        coms_scaled = coms * sf
-        coms_path = self._save_coms_to_tmp(coms_scaled)
+        coms_path = self._save_coms_to_tmp(coms)
 
-        block_to_com_rows, _ = self._group_coms_by_block(
-            coms_scaled, self.organelle_idi
-        )
+        block_to_com_rows, _ = self._group_coms_by_block(coms, self.organelle_idi)
         block_indices = sorted(block_to_com_rows.keys())
 
         if not block_indices:
@@ -345,25 +347,16 @@ class AssignToOrganelles(ComputeConfigMixin):
 
     def assign_to_n_nearest_organelles(self, df, n, organelle_name):
         coms = df[["COM Z (nm)", "COM Y (nm)", "COM X (nm)"]].to_numpy()
-        sf = self.organelle_idi.voxel_size_scale_factor
-        coms_scaled = coms * sf
-        coms_path = self._save_coms_to_tmp(coms_scaled)
+        coms_path = self._save_coms_to_tmp(coms)
 
         voxel_size = np.array(self.organelle_idi.voxel_size)
-        chunk_shape = np.array(self.organelle_idi.chunk_shape)
-        if len(chunk_shape) == 4:
-            chunk_shape = chunk_shape[1:]
-        block_size_nm = chunk_shape * voxel_size
+        block_size_nm = np.array(self.organelle_idi.chunk_shape) * voxel_size
 
-        # Initial padding: half block size, aligned to voxel grid
+        # Initial padding (voxels): half the longest block side on every axis
         half_block = max(block_size_nm) / 2
-        padding = Coordinate(
-            int(np.ceil(half_block / vs)) * vs for vs in voxel_size
-        )
+        padding = np.ceil(half_block / voxel_size).astype(int)
 
-        block_to_com_rows, _ = self._group_coms_by_block(
-            coms_scaled, self.organelle_idi
-        )
+        block_to_com_rows, _ = self._group_coms_by_block(coms, self.organelle_idi)
         block_indices = sorted(block_to_com_rows.keys())
 
         if not block_indices:
@@ -400,11 +393,11 @@ class AssignToOrganelles(ComputeConfigMixin):
             df[dist_col] = [[] for _ in range(len(df))]
             for row_idx, result in results.items():
                 df.at[row_idx, id_col] = result["ids"].tolist()
-                df.at[row_idx, dist_col] = (result["distances"] / sf).tolist()
+                df.at[row_idx, dist_col] = result["distances"].tolist()
         else:
             for row_idx, result in results.items():
                 df.at[row_idx, id_col] = int(result["ids"][0])
-                df.at[row_idx, dist_col] = float(result["distances"][0] / sf)
+                df.at[row_idx, dist_col] = float(result["distances"][0])
 
     def assign_to_organelles(self):
         with io_util.TimingMessager("Assigning objects to organelles", logger):

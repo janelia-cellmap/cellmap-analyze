@@ -131,8 +131,8 @@ def test_precomputed_read_local(tmp_path):
     idi = ImageDataInterface(root)
     assert tuple(idi.voxel_size) == (8, 8, 8)
     # voxel_offset = (10, 20, 30) XYZ → ZYX corner = (30, 20, 10) * 8 = (240, 160, 80)
-    assert tuple(idi.offset) == (240, 160, 80)
-    np.testing.assert_array_equal(idi.to_ndarray_ts(idi.roi), data)
+    assert tuple(idi.corner) == (240, 160, 80)
+    np.testing.assert_array_equal(idi.to_ndarray_ts(), data)
 
 
 def test_precomputed_read_with_scale_suffix(tmp_path):
@@ -145,7 +145,7 @@ def test_precomputed_read_with_scale_suffix(tmp_path):
 
     idi = ImageDataInterface(root + "/s0")
     assert tuple(idi.voxel_size) == (4, 4, 4)
-    np.testing.assert_array_equal(idi.to_ndarray_ts(idi.roi), data)
+    np.testing.assert_array_equal(idi.to_ndarray_ts(), data)
 
 
 def test_precomputed_read_with_explicit_prefix(tmp_path):
@@ -158,7 +158,7 @@ def test_precomputed_read_with_explicit_prefix(tmp_path):
 
     idi = ImageDataInterface("precomputed://" + root)
     assert tuple(idi.voxel_size) == (16, 16, 16)
-    np.testing.assert_array_equal(idi.to_ndarray_ts(idi.roi), data)
+    np.testing.assert_array_equal(idi.to_ndarray_ts(), data)
 
 
 def test_precomputed_read_s3(tmp_path, s3_env):
@@ -179,5 +179,5 @@ def test_precomputed_read_s3(tmp_path, s3_env):
 
     idi = ImageDataInterface(f"s3://{bucket}/data/seg")
     assert tuple(idi.voxel_size) == (8, 8, 8)
-    assert tuple(idi.offset) == (240, 160, 80)
-    np.testing.assert_array_equal(idi.to_ndarray_ts(idi.roi), data)
+    assert tuple(idi.corner) == (240, 160, 80)
+    np.testing.assert_array_equal(idi.to_ndarray_ts(), data)

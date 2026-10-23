@@ -5,13 +5,13 @@ from cellmap_analyze.util import io_util
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
+from cellmap_analyze.util.grid_util import crop_to_roi
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.io_util import get_output_path_from_input_path
 import logging
 import uuid
 import itertools
 from cellmap_analyze.util.mask_util import MasksFromConfig
-import fastremap
 
 from cellmap_analyze.util.mixins import ComputeConfigMixin
 import shutil
@@ -44,10 +44,9 @@ class CleanConnectedComponents(ComputeConfigMixin):
 
         self.input_path = input_path
         self.input_idi = ImageDataInterface(self.input_path, chunk_shape=chunk_shape)
-        if roi is None:
-            self.roi = self.input_idi.roi
-        else:
-            self.roi = roi
+        self.roi = roi
+        self.grid = crop_to_roi(self.input_idi.grid, roi)
+        self.input_idi.output_grid = self.grid
 
         self.voxel_size = self.input_idi.voxel_size
 
@@ -69,8 +68,7 @@ class CleanConnectedComponents(ComputeConfigMixin):
         if type(maximum_volume_nm_3) == str:
             maximum_volume_nm_3 = float(maximum_volume_nm_3)
 
-        # Use original (true nm) voxel size for physical volume calculations
-        voxel_volume = float(np.prod(self.input_idi.original_voxel_size))
+        voxel_volume = float(np.prod(self.grid.voxel_size))
         self.minimum_volume_voxels = float(minimum_volume_nm_3 / voxel_volume)
         self.maximum_volume_voxels = float(maximum_volume_nm_3 / voxel_volume)
 
@@ -78,9 +76,8 @@ class CleanConnectedComponents(ComputeConfigMixin):
         if mask_config:
             self.mask = MasksFromConfig(
                 mask_config,
-                output_voxel_size=self.voxel_size,
+                output_grid=self.grid,
                 connectivity=mask_connectivity,
-                caller_scale_factor=self.input_idi.voxel_size_scale_factor,
             )
 
         self.connectivity = connectivity
@@ -112,21 +109,18 @@ class CleanConnectedComponents(ComputeConfigMixin):
     ):
         try:
             block = create_block_from_index(
-                connected_components_blockwise_idi,
+                connected_components_blockwise_idi.output_grid,
                 block_index,
             )
             data = connected_components_blockwise_idi.to_ndarray_ts(
-                block.read_roi,
+                block.read_begin, block.read_end
             )
-            # need to get these premask since during relabeling we have to assing em to zero
-            unique_ids = fastremap.unique(data)
             if mask:
-                mask_block = mask.process_block(roi=block.read_roi)
+                mask_block = mask.process_block(block.read_begin, block.read_end)
                 data *= mask_block
 
             # get information only from actual block(not including padding)
             id_to_volume_dict = ConnectedComponents.get_object_sizes(data)
-            block.relabeling_dict = {id: 0 for id in unique_ids}
         except Exception as e:
             raise Exception(
                 f"Error {e} in get_connected_component_information_blockwise {block_index}, {connected_components_blockwise_idi.voxel_size}"
@@ -134,7 +128,7 @@ class CleanConnectedComponents(ComputeConfigMixin):
         return id_to_volume_dict, set()
 
     def get_connected_component_information(self):
-        num_blocks = dask_util.get_num_blocks(self.input_idi, self.roi)
+        num_blocks = dask_util.get_num_blocks(self.grid)
         self.id_to_volume_dict, _ = dask_util.compute_blockwise_partitions(
             num_blocks,
             self.num_workers,
@@ -191,7 +185,6 @@ class CleanConnectedComponents(ComputeConfigMixin):
         ConnectedComponents.relabel_dataset(
             self.input_idi,
             self.output_path,
-            self.roi,
             self.new_dtype,
             self.relabeling_dict_path,
             self.num_workers,

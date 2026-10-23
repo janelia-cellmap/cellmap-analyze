@@ -1064,8 +1064,8 @@ def test_skeletonize_seed_voxel_fallback(shared_tmpdir):
     """A 4x4x4 cube is wiped to zero voxels by Lee's algorithm. The
     seed-voxel fallback should emit a single-vertex skeleton at the EDT
     peak with a positive radius, instead of writing an empty skeleton."""
+    from cellmap_analyze.util.grid_util import make_grid
     from cellmap_analyze.util.zarr_util import create_multiscale_dataset
-    from funlib.geometry import Coordinate, Roi
 
     # Build a tiny zarr with one 4x4x4 cube (ID=1) inside a 12x12x12 volume.
     # Use isotropic 1nm voxels so we don't trigger resampling.
@@ -1076,14 +1076,10 @@ def test_skeletonize_seed_voxel_fallback(shared_tmpdir):
     zarr_path = shared_tmpdir + "/seed_voxel_test.zarr"
     os.makedirs(zarr_path, exist_ok=True)
     data_path = f"{zarr_path}/seg_cube"
-    total_roi = Roi((0, 0, 0), Coordinate(seg.shape) * Coordinate(vs))
     ds = create_multiscale_dataset(
         data_path,
         dtype=seg.dtype,
-        voxel_size=vs,
-        total_roi=total_roi,
-        write_size=Coordinate(seg.shape) * Coordinate(vs),
-        original_voxel_size=vs,
+        grid=make_grid(seg.shape, vs, chunks=seg.shape),
     )
     ds.write_index((0, 0, 0), ds.shape, seg)
 
@@ -1149,8 +1145,8 @@ def test_skeletonize_nonzero_translation_shifts_by_translation(shared_tmpdir):
     resulting skeleton is identical up to a shift equal to that translation --
     i.e. translation propagates with no half-voxel, sign, or doubling error.
     """
+    from cellmap_analyze.util.grid_util import make_grid
     from cellmap_analyze.util.zarr_util import create_multiscale_dataset
-    from funlib.geometry import Coordinate, Roi
 
     vs = (2, 2, 2)          # isotropic -> no resampling; vs/2 = 1 (integer corner)
     delta = 24              # isotropic corner shift in nm (== OME translation shift)
@@ -1162,14 +1158,10 @@ def test_skeletonize_nonzero_translation_shifts_by_translation(shared_tmpdir):
 
     def run(name, begin):
         data_path = f"{shared_tmpdir}/{name}.zarr/seg"
-        total_roi = Roi(Coordinate(begin), Coordinate(seg.shape) * Coordinate(vs))
         ds = create_multiscale_dataset(
             data_path,
             dtype=seg.dtype,
-            voxel_size=list(vs),
-            total_roi=total_roi,
-            write_size=Coordinate(seg.shape) * Coordinate(vs),
-            original_voxel_size=list(vs),
+            grid=make_grid(seg.shape, vs, corner=begin, chunks=seg.shape),
         )
         ds.write_index((0, 0, 0), ds.shape, seg)
         # bbox CSV = OME centers of the object's min/max voxels, exactly what

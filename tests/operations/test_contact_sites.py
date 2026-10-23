@@ -1,8 +1,8 @@
 import pytest
 from cellmap_analyze.process.contact_sites import ContactSites
 import numpy as np
-from funlib.geometry import Roi, Coordinate
 
+from cellmap_analyze.util.grid_util import intersection, make_grid
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset
 from tests.contact_site_fixture_helper import compute_contact_sites_ground_truth
@@ -146,7 +146,7 @@ def test_contact_site_blocks_different_anisotropic_voxel_sizes(
     """
     voxel_size_1 = (4, 6, 8)
     voxel_size_2 = (6, 4, 6)
-    output_voxel_size = tuple(
+    common_voxel_size = tuple(
         min(v1, v2) for v1, v2 in zip(voxel_size_1, voxel_size_2)
     )  # (4, 4, 6)
 
@@ -172,14 +172,10 @@ def test_contact_site_blocks_different_anisotropic_voxel_sizes(
         ("seg_2", seg_2, voxel_size_2),
     ]:
         data_path = f"{zarr_path}/{name}"
-        total_roi = Roi((0, 0, 0), tuple(s * v for s, v in zip(seg.shape, vs)))
-        write_size = tuple(c * v for c, v in zip(chunk_size, vs))
         ds = create_multiscale_dataset(
             data_path,
             dtype=seg.dtype,
-            voxel_size=vs,
-            total_roi=total_roi,
-            write_size=write_size,
+            grid=make_grid(seg.shape, vs, chunks=chunk_size),
         )
         ds.write_index((0, 0, 0), ds.shape, seg)
 
@@ -197,38 +193,22 @@ def test_contact_site_blocks_different_anisotropic_voxel_sizes(
 
     test_data = ImageDataInterface(f"{output_path}/s0").to_ndarray_ts()
 
-    # Compute ground truth: read both arrays resampled to output_voxel_size
-    # over the same ROI, then run ndarray contact sites
-    idi_1 = ImageDataInterface(
-        f"{zarr_path}/seg_1/s0", output_voxel_size=Coordinate(output_voxel_size)
-    )
-    idi_2 = ImageDataInterface(
-        f"{zarr_path}/seg_2/s0", output_voxel_size=Coordinate(output_voxel_size)
-    )
-    roi = idi_1.roi.intersect(idi_2.roi)
-    # Snap ROI to output voxel size grid to ensure consistent shapes
-    ovs = Coordinate(output_voxel_size)
-    snapped_roi = Roi(
-        roi.offset,
-        Coordinate(
-            int(s // v) * v for s, v in zip(roi.shape, ovs)
-        ),
-    )
-    resampled_1 = idi_1.to_ndarray_ts(snapped_roi)
-    resampled_2 = idi_2.to_ndarray_ts(snapped_roi)
+    # Compute ground truth: read both arrays resampled onto the common_voxel_size
+    # grid over the box both cover, then run ndarray contact sites
+    idi_1 = ImageDataInterface(f"{zarr_path}/seg_1/s0")
+    idi_2 = ImageDataInterface(f"{zarr_path}/seg_2/s0")
+    grid = intersection([idi_1.grid, idi_2.grid], common_voxel_size)
+    idi_1.output_grid = idi_2.output_grid = grid
+    resampled_1 = idi_1.to_ndarray_ts()
+    resampled_2 = idi_2.to_ndarray_ts()
 
-    # Crop to matching shape in case of rounding differences
-    min_shape = tuple(min(s1, s2) for s1, s2 in zip(resampled_1.shape, resampled_2.shape))
-    resampled_1 = resampled_1[:min_shape[0], :min_shape[1], :min_shape[2]]
-    resampled_2 = resampled_2[:min_shape[0], :min_shape[1], :min_shape[2]]
-
-    output_voxel_size_arr = np.array(output_voxel_size)
+    common_voxel_size_arr = np.array(common_voxel_size)
     ground_truth = compute_contact_sites_ground_truth(
-        resampled_1, resampled_2, contact_distance_nm, output_voxel_size_arr
+        resampled_1, resampled_2, contact_distance_nm, common_voxel_size_arr
     )
 
-    # Crop test_data to same shape (blockwise output may have different extent)
-    test_data = test_data[:min_shape[0], :min_shape[1], :min_shape[2]]
+    # the output is on the same grid
+    assert test_data.shape == ground_truth.shape
 
     # Contact site locations should match (IDs may differ due to blockwise labeling)
     assert np.array_equal(test_data > 0, ground_truth > 0)

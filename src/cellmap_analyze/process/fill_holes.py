@@ -5,6 +5,7 @@ from cellmap_analyze.util import dask_util
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
+from cellmap_analyze.util.grid_util import crop_to_roi
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 
 import logging
@@ -39,8 +40,9 @@ class FillHoles(ComputeConfigMixin):
         super().__init__(num_workers)
         self.input_idi = ImageDataInterface(input_path, chunk_shape=chunk_shape)
         self.roi = roi
-        if self.roi is None:
-            self.roi = self.input_idi.roi
+        # the holes are found on this grid (see fill_holes), so the input is read on it
+        self.grid = crop_to_roi(self.input_idi.grid, roi)
+        self.input_idi.output_grid = self.grid
         self.voxel_size = self.input_idi.voxel_size
         self.connectivity = connectivity
         # Per-instance suffix so concurrent runs sharing output_path don't
@@ -63,16 +65,16 @@ class FillHoles(ComputeConfigMixin):
         holes_idi: ImageDataInterface,
         connectivity,
     ):
-        # pad by two pixels since to determine boundary need an extra pixel
+        # pad by a voxel since to determine boundary need an extra pixel
         block = create_block_from_index(
-            input_idi,
+            holes_idi,
             block_index,
-            padding=input_idi.voxel_size,
+            padding=1,
             padding_direction="neg_with_edge_pos",
         )
         hole_to_object_dict = {}
-        holes = holes_idi.to_ndarray_ts(block.read_roi)
-        input = input_idi.to_ndarray_ts(block.read_roi)
+        holes = holes_idi.to_ndarray_ts(block.read_begin, block.read_end)
+        input = input_idi.to_ndarray_ts(block.read_begin, block.read_end)
 
         input_boundaries = find_boundaries(
             input, mode="inner", connectivity=connectivity
@@ -122,7 +124,7 @@ class FillHoles(ComputeConfigMixin):
         return final
 
     def get_hole_assignments(self):
-        num_blocks = dask_util.get_num_blocks(self.input_idi)
+        num_blocks = dask_util.get_num_blocks(self.grid)
         hole_to_object_dict = dask_util.compute_blockwise_partitions(
             num_blocks,
             self.num_workers,
@@ -153,14 +155,10 @@ class FillHoles(ComputeConfigMixin):
     def relabel_block(
         block_index, input_idi, holes_idi, output_idi, relabeling_dict_path
     ):
-        # read block from pickle file
-        block = create_block_from_index(input_idi, block_index)
+        block = create_block_from_index(output_idi, block_index)
 
-        # print_with_datetime(block.relabeling_dict, logger)
-        input = input_idi.to_ndarray_ts(
-            block.write_roi,
-        )
-        holes = holes_idi.to_ndarray_ts(block.write_roi)
+        input = input_idi.to_ndarray_ts(block.begin, block.end)
+        holes = holes_idi.to_ndarray_ts(block.begin, block.end)
         hole_ids = fastremap.unique(holes[holes > 0])
         relabeling_dict = ConnectedComponents.get_updated_relabeling_dict(
             hole_ids, relabeling_dict_path
@@ -175,19 +173,14 @@ class FillHoles(ComputeConfigMixin):
                 in_place=True,
             )
 
-        output_idi.write(block.write_roi, input + holes.astype(input.dtype))
+        output_idi.write(block.begin, block.end, input + holes.astype(input.dtype))
 
     def relabel_dataset(self):
         self.output_idi = create_multiscale_dataset_idi(
-            self.output_path,
-            dtype=self.input_idi.dtype,
-            voxel_size=self.voxel_size,
-            total_roi=self.roi,
-            write_size=self.input_idi.chunk_shape * self.input_idi.voxel_size,
-            original_voxel_size=self.input_idi.original_voxel_size,
+            self.output_path, dtype=self.input_idi.dtype, grid=self.grid
         )
 
-        num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
+        num_blocks = dask_util.get_num_blocks(self.output_idi)
         dask_util.compute_blockwise_partitions(
             num_blocks,
             self.num_workers,

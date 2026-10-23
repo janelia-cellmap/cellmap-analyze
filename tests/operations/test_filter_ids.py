@@ -77,3 +77,27 @@ def test_filter_ids_binarize_and_preserve_ids_conflict(tmp_zarr):
             binarize=True,
             preserve_ids=True,
         )
+
+
+def test_filter_ids_roi(tmp_zarr, image_with_holes_filled, voxel_size):
+    # the output covers just the voxels whose centres are in the roi (nm)
+    begin, end = np.array((2, 1, 3)), np.array((9, 7, 11))
+    fi = FilterIDs(
+        input_path=f"{tmp_zarr}/image_with_holes_filled/s0",
+        output_path=f"{tmp_zarr}/image_with_holes_filled_filteredIDs_roi",
+        ids_to_keep=[1, 2],
+        num_workers=1,
+        binarize=True,
+        roi=(tuple(begin * voxel_size), tuple(end * voxel_size)),
+    )
+    fi.get_filtered_ids()
+
+    ground_truth = np.isin(image_with_holes_filled, [1, 2]).astype(np.uint8)
+    test_idi = ImageDataInterface(
+        f"{tmp_zarr}/image_with_holes_filled_filteredIDs_roi/s0"
+    )
+    assert np.allclose(test_idi.corner, begin * voxel_size)
+    assert np.array_equal(
+        test_idi.to_ndarray_ts(),
+        ground_truth[tuple(slice(b, e) for b, e in zip(begin, end))],
+    )

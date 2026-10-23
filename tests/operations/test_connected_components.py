@@ -5,8 +5,8 @@ from cellmap_analyze.process.connected_components import ConnectedComponents
 from scipy.ndimage import gaussian_filter
 import numpy as np
 import networkx as nx
-from funlib.geometry import Coordinate, Roi
 
+from cellmap_analyze.util.grid_util import make_grid
 from cellmap_analyze.util.image_data_interface import (
     ImageDataInterface,
 )
@@ -17,14 +17,10 @@ import os
 
 
 def _write_channel(path, arr, voxel_size=(1.0, 1.0, 1.0)):
-    total_roi = Roi((0, 0, 0), Coordinate(arr.shape) * Coordinate(voxel_size))
     ds = create_multiscale_dataset(
         path,
         dtype=arr.dtype,
-        voxel_size=voxel_size,
-        total_roi=total_roi,
-        write_size=Coordinate(10, 10, 10) * Coordinate(voxel_size),
-        original_voxel_size=voxel_size,
+        grid=make_grid(arr.shape, voxel_size, chunks=(10, 10, 10)),
     )
     ds.write_index((0, 0, 0), ds.shape, arr)
     return f"{path}/s0"
@@ -179,6 +175,7 @@ def test_connected_components_chunk_shape(
     original_chunk_shape = ImageDataInterface(
         f"{tmp_zarr}/test_connected_components_hole_filling_filled/s0"
     ).chunk_shape
+    doubled_chunk_shape = tuple(2 * c for c in original_chunk_shape)
     cc = ConnectedComponents(
         input_path=f"{tmp_zarr}/image_with_holes/s0",
         output_path=f"{tmp_zarr}/test_connected_components_hole_filling",
@@ -186,7 +183,7 @@ def test_connected_components_chunk_shape(
         num_workers=1,
         connectivity=1,
         fill_holes=True,
-        chunk_shape=list(original_chunk_shape * 2),
+        chunk_shape=list(doubled_chunk_shape),
     )
     cc.get_connected_components()
     test_data_idi = ImageDataInterface(
@@ -210,7 +207,7 @@ def test_connected_components_chunk_shape(
             test_data,
             ground_truth,
         )
-        and test_data_idi.chunk_shape == original_chunk_shape * 2
+        and test_data_idi.chunk_shape == doubled_chunk_shape
     )
 
 
@@ -440,3 +437,29 @@ def test_connected_components_consensus_config_invalid_minimum_consensus(tmp_pat
             consensus_config=[{"path": path_a}, {"path": path_b}],
             minimum_consensus_count=3,
         )
+
+
+def test_connected_components_roi(tmp_zarr, intensity_image, voxel_size):
+    # only the voxels whose centres are in the roi (nm) are labelled, and the
+    # output covers just them
+    begin, end = np.array((1, 3, 2)), np.array((10, 9, 11))
+    output_path = f"{tmp_zarr}/test_connected_components_roi"
+    cc = ConnectedComponents(
+        input_path=f"{tmp_zarr}/intensity_image/s0",
+        output_path=output_path,
+        intensity_threshold_minimum=127,
+        num_workers=1,
+        connectivity=1,
+        roi=(tuple(begin * voxel_size), tuple(end * voxel_size)),
+    )
+    cc.get_connected_components()
+
+    crop = tuple(slice(b, e) for b, e in zip(begin, end))
+    ground_truth = measure.label(intensity_image[crop] >= 127, connectivity=1)
+    test_idi = ImageDataInterface(f"{output_path}/s0")
+    test_data = test_idi.to_ndarray_ts()
+    assert np.allclose(test_idi.corner, begin * voxel_size)
+    assert test_data.shape == ground_truth.shape
+    # the same objects, whatever their ids
+    pairs = np.unique(np.stack([test_data.ravel(), ground_truth.ravel()]), axis=1)
+    assert pairs.shape[1] == len(np.unique(test_data)) == len(np.unique(ground_truth))

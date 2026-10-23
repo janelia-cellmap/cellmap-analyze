@@ -1,12 +1,12 @@
 # %%
 import numpy as np
 from scipy import ndimage
-from funlib.geometry import Coordinate
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util.block_util import erosion
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
+from cellmap_analyze.util.grid_util import crop_to_roi
 from cellmap_analyze.util.mask_util import MasksFromConfig
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 
@@ -72,18 +72,15 @@ class MorphologicalOperations(ComputeConfigMixin):
         super().__init__(num_workers)
 
         self.input_idi = ImageDataInterface(input_path, chunk_shape=chunk_shape)
-
-        self.roi = roi
-        if self.roi is None:
-            self.roi = self.input_idi.roi
+        self.grid = crop_to_roi(self.input_idi.grid, roi)
+        self.input_idi.output_grid = self.grid
 
         self.mask = None
         if mask_config:
             self.mask = MasksFromConfig(
                 mask_config,
-                output_voxel_size=self.input_idi.voxel_size,
+                output_grid=self.grid,
                 connectivity=connectivity,
-                caller_scale_factor=self.input_idi.voxel_size_scale_factor,
             )
 
         if operation not in _VALID_OPERATIONS:
@@ -96,12 +93,7 @@ class MorphologicalOperations(ComputeConfigMixin):
 
         self.iterations = iterations
         self.output_idi = create_multiscale_dataset_idi(
-            output_path,
-            dtype=self.input_idi.dtype,
-            voxel_size=self.input_idi.voxel_size,
-            total_roi=self.roi,
-            write_size=self.input_idi.chunk_shape * self.input_idi.voxel_size,
-            original_voxel_size=self.input_idi.original_voxel_size,
+            output_path, dtype=self.input_idi.dtype, grid=self.grid
         )
 
     @staticmethod
@@ -118,10 +110,6 @@ class MorphologicalOperations(ComputeConfigMixin):
         # so N iterations need an N-voxel halo, and two chained N-iteration
         # passes need 2N (see class docstring for the full argument).
         padding_voxels = iterations * (2 if operation in ("opening", "closing") else 1)
-        # Per-axis padding (not collapsed to a single min(voxel_size)-based
-        # nm value) so the halo is exactly padding_voxels voxels on every
-        # axis even when voxel_size is anisotropic.
-        padding_nm = Coordinate(padding_voxels * vs for vs in input_idi.voxel_size)
         # read_beyond_roi=False: don't manufacture phantom zero-valued
         # neighbors past the true dataset edge. fastmorph's multilabel
         # dilation resolves contested background voxels by a majority vote
@@ -134,21 +122,20 @@ class MorphologicalOperations(ComputeConfigMixin):
         # was set to False). Near the true edge the halo is then narrower
         # than padding_voxels on that side -- exactly like a genuine
         # whole-array call, which has no context beyond its own edge either
-        # -- so it's trimmed by the actual (possibly asymmetric) margin
-        # below, not blindly by padding_voxels.
+        # -- so only the block's own voxels (block.inner) are written.
         block = create_block_from_index(
-            input_idi,
+            output_idi,
             block_index,
-            padding=padding_nm,
+            padding=padding_voxels,
             read_beyond_roi=False,
         )
         if mask:
-            mask_block = mask.process_block(roi=block.read_roi)
+            mask_block = mask.process_block(block.read_begin, block.read_end)
             if not np.any(mask_block):
-                output_idi.write(block.write_roi, 0)
+                output_idi.write(block.begin, block.end, 0)
                 return
 
-        data = input_idi.to_ndarray_ts(block.read_roi)
+        data = input_idi.to_ndarray_ts(block.read_begin, block.read_end)
         if mask:
             data *= mask_block
 
@@ -170,29 +157,10 @@ class MorphologicalOperations(ComputeConfigMixin):
         # else: an all-background block stays all-background under every one
         # of these ops -- skip straight to the (still all-zero) write below.
 
-        # Actual per-side margin read (== padding_voxels away from any true
-        # dataset edge, less right at one -- read_beyond_roi=False clips
-        # read_roi there instead of zero-filling past it).
-        voxel_size = np.array(input_idi.voxel_size, dtype=float)
-        neg_voxels = np.round(
-            (np.array(block.write_roi.begin) - np.array(block.read_roi.begin))
-            / voxel_size
-        ).astype(int)
-        pos_voxels = np.round(
-            (
-                np.array(block.read_roi.begin) + np.array(block.read_roi.shape)
-                - np.array(block.write_roi.begin) - np.array(block.write_roi.shape)
-            )
-            / voxel_size
-        ).astype(int)
-        slices = tuple(
-            slice(n, data.shape[axis] - p if p > 0 else None)
-            for axis, (n, p) in enumerate(zip(neg_voxels, pos_voxels))
-        )
-        output_idi.write(block.write_roi, data[slices])
+        output_idi.write(block.begin, block.end, data[block.inner])
 
     def perform_morphological_operation(self):
-        num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
+        num_blocks = dask_util.get_num_blocks(self.output_idi)
         dask_util.compute_blockwise_partitions(
             num_blocks,
             self.num_workers,

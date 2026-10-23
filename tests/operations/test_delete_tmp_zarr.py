@@ -12,7 +12,7 @@ def test_zarr_chunk_path_matches_real_chunk_files(tmp_zarr):
     # on-disk chunk-key encoding (e.g. zarr v3's "c/" prefix); this runs
     # before test_delete_tmp_zarr so it checks real, undeleted chunk files.
     idi = ImageDataInterface(f"{tmp_zarr}/random_image_to_delete/s0")
-    num_blocks = get_num_blocks(idi, idi.roi)
+    num_blocks = get_num_blocks(idi)
     assert num_blocks > 1
 
     found_real_chunk = any(

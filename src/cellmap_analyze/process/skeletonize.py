@@ -3,6 +3,7 @@ import pandas as pd
 import networkx as nx
 import edt as edt_module
 from cellmap_analyze.util import dask_util
+from cellmap_analyze.util.grid_util import voxel_corner
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.util.skeleton_util import (
@@ -569,8 +570,6 @@ class Skeletonize(ComputeConfigMixin):
             CPU affinity (``dask_util.rescale_idi_concurrency``). None
             (default) leaves it untouched.
         """
-        from funlib.geometry import Roi
-
         dask_util.rescale_idi_concurrency((segmentation_idi,), processes_per_job)
 
         result: dict = dict(Skeletonize._empty_metrics())
@@ -608,38 +607,25 @@ class Skeletonize(ComputeConfigMixin):
             max_y = row["MAX Y (nm)"]
             max_z = row["MAX Z (nm)"]
 
-            # Create ROI with 1-voxel padding
-            # Bounding box coords from CSV are in true nm; convert to scaled coordinates.
-            # MIN/MAX (nm) are voxel-*center* coordinates (see measure_util.py), not
-            # edges. `start_point` is deliberately left as `MIN*sf - padding` (not
-            # shifted to the true low edge first): the vertex-coordinate math below
-            # adds this same value directly to `index * spacing`-style local
-            # coordinates from skimage_to_custom_skeleton_fast (an edge-relative
-            # convention), and MIN*sf already sitting half a voxel inside the true
-            # edge is exactly the correction needed to land on voxel *centers*
-            # (see the OME-translation regression test in test_skeletonize.py).
-            # Changing this breaks vertex coordinates, not just the read margin.
-            #
-            # On the high side there's no such coupling (`end_point` only controls
-            # how much extra background the read grabs, not any offset used later),
-            # so it gets the real fix: MAX*sf + padding only reaches the far edge of
-            # the object's own last voxel (MAX is a center coordinate, already half
-            # a voxel inside the true high edge), giving ~zero actual margin there.
-            # Shifting by the missing half voxel first makes it a genuine full
-            # voxel of background beyond the object.
-            voxel_size = np.array(segmentation_idi.voxel_size, dtype=float)
-            sf = segmentation_idi.voxel_size_scale_factor
-            padding = voxel_size  # 1 voxel in each direction
-            start_point = np.array([min_z * sf, min_y * sf, min_x * sf]) - padding
-            end_point = (
-                np.array([max_z * sf, max_y * sf, max_x * sf]) + voxel_size / 2 + padding
+            # MIN/MAX (nm) are the centres of the object's corner voxels (see
+            # measure_util.py). Read its voxels and one more on every side.
+            grid = segmentation_idi.grid
+            voxel_size = np.array(segmentation_idi.voxel_size)
+            begin, end = grid.index_box(
+                (
+                    np.array([min_z, min_y, min_x]) - voxel_size / 2,
+                    np.array([max_z, max_y, max_x]) + voxel_size / 2,
+                )
             )
-            roi = Roi(start_point, end_point - start_point)
+            begin, end = np.subtract(begin, 1), np.add(end, 1)
+            # Vertices are local `index * spacing` positions, so adding the
+            # centre of the first voxel read puts them on voxel centres.
+            start_point_nm = np.array(voxel_corner(grid, begin)) + voxel_size / 2
 
-            logger.info(f"Processing ID {id_value}: ROI {roi}")
+            logger.info(f"Processing ID {id_value}: voxels {tuple(begin)} to {tuple(end)}")
 
             # Read data for this ID
-            data = segmentation_idi.to_ndarray_ts(roi)
+            data = segmentation_idi.to_ndarray_ts(begin, end)
             data = data == id_value
 
             # Check if there's any data
@@ -649,16 +635,14 @@ class Skeletonize(ComputeConfigMixin):
                 return result
 
             # Resample to isotropic if needed so skeletonize thins uniformly
-            # Use original (true nm) voxel_size for physical operations
-            original_vs = segmentation_idi.original_voxel_size
-            min_voxel = min(original_vs)
-            is_anisotropic = not all(v == min_voxel for v in original_vs)
+            min_voxel = min(voxel_size)
+            is_anisotropic = not all(v == min_voxel for v in voxel_size)
             if is_anisotropic:
-                zoom_factors = tuple(v / min_voxel for v in original_vs)
+                zoom_factors = tuple(v / min_voxel for v in voxel_size)
                 data = zoom(data, zoom_factors, order=0)
                 isotropic_voxel_size = np.array([min_voxel] * 3)
             else:
-                isotropic_voxel_size = np.array(original_vs)
+                isotropic_voxel_size = np.array(voxel_size)
 
             # Apply the requested morphological operations (in order) to the
             # mask that gets skeletonized.
@@ -715,7 +699,6 @@ class Skeletonize(ComputeConfigMixin):
                         f"emitting single seed vertex at EDT peak (radius={peak_radius_nm:.1f} nm)"
                     )
                     local_zyx_nm = np.array(peak_idx) * isotropic_voxel_size
-                    start_point_nm = np.array(start_point) / sf
                     seed_vertex = (
                         float(local_zyx_nm[2] + start_point_nm[2]),
                         float(local_zyx_nm[1] + start_point_nm[1]),
@@ -755,10 +738,8 @@ class Skeletonize(ComputeConfigMixin):
                 skel, spacing=isotropic_voxel_size
             )
 
-            # Transform vertices: add ROI offset and swap Z/X for neuroglancer (ZYX -> XYZ)
+            # Transform vertices: add the read's offset and swap Z/X for neuroglancer (ZYX -> XYZ)
             # Vertices from skimage_to_custom_skeleton_fast are in true nm (local coords)
-            # start_point is in scaled coords, convert back to true nm
-            start_point_nm = np.array(start_point) / sf
             skeleton.vertices = [
                 tuple(
                     [
@@ -1053,12 +1034,11 @@ class Skeletonize(ComputeConfigMixin):
         absorbs cross-dataset variance from morphology/cleanup level.
         """
         row = self.bbox_df.loc[id_value]
-        vs_nm = self.segmentation_idi.voxel_size
-        original_vs = self.segmentation_idi.original_voxel_size
-        dx = (row["MAX X (nm)"] - row["MIN X (nm)"]) + 2 * vs_nm[0]
-        dy = (row["MAX Y (nm)"] - row["MIN Y (nm)"]) + 2 * vs_nm[1]
-        dz = (row["MAX Z (nm)"] - row["MIN Z (nm)"]) + 2 * vs_nm[2]
-        min_vs = min(original_vs)
+        vs_z, vs_y, vs_x = self.segmentation_idi.voxel_size
+        dx = (row["MAX X (nm)"] - row["MIN X (nm)"]) + 2 * vs_x
+        dy = (row["MAX Y (nm)"] - row["MIN Y (nm)"]) + 2 * vs_y
+        dz = (row["MAX Z (nm)"] - row["MIN Z (nm)"]) + 2 * vs_z
+        min_vs = min(self.segmentation_idi.voxel_size)
         iso_voxels = (dx * dy * dz) / (min_vs ** 3)
 
         dtype_bytes = self.segmentation_idi.dtype.itemsize

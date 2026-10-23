@@ -1,6 +1,7 @@
 from typing import List, Union
 import numpy as np
 from cellmap_analyze.process.connected_components import ConnectedComponents
+from cellmap_analyze.util.grid_util import crop_to_roi
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.io_util import get_output_path_from_input_path
 import logging
@@ -76,10 +77,8 @@ class FilterIDs(ComputeConfigMixin):
 
         self.input_path = input_path
         self.input_idi = ImageDataInterface(self.input_path, chunk_shape=chunk_shape)
-        if roi is None:
-            self.roi = self.input_idi.roi
-        else:
-            self.roi = roi
+        self.roi = roi
+        self.input_idi.output_grid = crop_to_roi(self.input_idi.grid, roi)
         self.voxel_size = self.input_idi.voxel_size
 
         if output_path is None:
@@ -98,7 +97,6 @@ class FilterIDs(ComputeConfigMixin):
         ConnectedComponents.relabel_dataset(
             self.input_idi,
             self.output_path,
-            self.roi,
             self.new_dtype,
             self.relabeling_dict_path,
             self.num_workers,

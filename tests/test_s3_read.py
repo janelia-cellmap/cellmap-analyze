@@ -172,10 +172,10 @@ def test_s3_read_zarr_via_idi(tmp_path, s3_env):
     assert tuple(idi.voxel_size) == (8, 8, 8)
     # OME translation = voxel CENTER; v0.3.0 internally exposes the corner.
     # trans=4, vs=8 → corner = 4 − 8/2 = 0.
-    assert tuple(idi.offset) == (0, 0, 0)
+    assert tuple(idi.corner) == (0, 0, 0)
 
     # And the actual voxel data comes back through tensorstore's s3 driver.
-    read = idi.to_ndarray_ts(idi.roi)
+    read = idi.to_ndarray_ts()
     np.testing.assert_array_equal(read, data)
 
 
@@ -203,8 +203,8 @@ def test_s3_read_picks_correct_multiscale_level(tmp_path, s3_env):
     # s0: vs=4, corner = 0 − 4/2 = −2.
     idi0 = ImageDataInterface(f"s3://{bucket}/data.zarr/seg/s0")
     assert tuple(idi0.voxel_size) == (4, 4, 4)
-    assert tuple(idi0.offset) == (-2, -2, -2)
-    assert np.all(idi0.to_ndarray_ts(idi0.roi) == 1)
+    assert tuple(idi0.corner) == (-2, -2, -2)
+    assert np.all(idi0.to_ndarray_ts() == 1)
 
     # s1: vs=8, trans=2 → corner = 2 − 8/2 = −2. Same corner as s0 (the
     # OME pyramid invariant) -- the LEVEL is what we have to pick
@@ -214,5 +214,5 @@ def test_s3_read_picks_correct_multiscale_level(tmp_path, s3_env):
         f"expected s1 voxel_size 8 but got {tuple(idi1.voxel_size)} -- "
         f"this is the datasets[0]-hardcoding regression if it fails"
     )
-    assert tuple(idi1.offset) == (-2, -2, -2)
-    assert np.all(idi1.to_ndarray_ts(idi1.roi) == 2)
+    assert tuple(idi1.corner) == (-2, -2, -2)
+    assert np.all(idi1.to_ndarray_ts() == 2)

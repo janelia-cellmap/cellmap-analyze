@@ -4,16 +4,25 @@ import struct
 
 import numpy as np
 import pytest
+from cellmap_analyze.util.grid_util import make_grid, resampled
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
-from funlib.geometry import Roi, Coordinate
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset
 
 
-def _write(path, data, voxel_size, total_roi):
-    """``data`` as s0 of an OME-Zarr group at ``path``, in one chunk; ``voxel_size`` and
-    ``total_roi`` in integer nm."""
-    vol = create_multiscale_dataset(path, data.dtype, voxel_size, total_roi, total_roi.shape)
+def _write(path, data, voxel_size):
+    """``data`` as s0 of an OME-Zarr group at ``path``, in one chunk, voxel 0's corner
+    at the origin."""
+    vol = create_multiscale_dataset(
+        path, data.dtype, make_grid(data.shape, voxel_size, chunks=data.shape)
+    )
     vol.write_index((0, 0, 0), vol.shape, data)
+
+
+def _read_at(path, voxel_size, **kwargs):
+    """The dataset at ``path`` read onto ``voxel_size`` voxels covering it."""
+    idi = ImageDataInterface(path, **kwargs)
+    idi.output_grid = resampled(idi.grid, voxel_size)
+    return idi.to_ndarray_ts()
 
 
 class TestNonIntegerResampling:
@@ -21,98 +30,47 @@ class TestNonIntegerResampling:
 
     def test_non_integer_upsampling(self, tmp_zarr):
         """Test that non-integer upsampling produces correct dimensions."""
-        # Create test data at 8nm resolution
-        input_voxel_size = Coordinate((8, 8, 8))
-        output_voxel_size = Coordinate((5, 5, 5))  # Factor 1.6x upsampling
+        input_voxel_size = (8, 8, 8)
+        output_voxel_size = (5, 5, 5)  # Factor 1.6x upsampling
         test_data = np.arange(1, 28).reshape((3, 3, 3)).astype(np.uint8)
+        _write(f"{tmp_zarr}/test_upsample", test_data, input_voxel_size)
 
-        # Create ROI for dataset
-        total_roi = Roi((0, 0, 0), test_data.shape) * input_voxel_size
+        result = _read_at(f"{tmp_zarr}/test_upsample/s0", output_voxel_size)
 
-        # Create dataset
-        ds_path = f"{tmp_zarr}/test_upsample/s0"
-        _write(f"{tmp_zarr}/test_upsample", test_data, input_voxel_size, total_roi)
-
-        # Read with output voxel size
-        idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
-        result = idi.to_ndarray_ts()
-
-        # Expected shape: 3 voxels * 8nm / 5nm = 4.8 voxels per axis
-        # zoom will produce approximately this size
-        expected_shape_approx = tuple(
-            int(test_data.shape[i] * input_voxel_size[i] / output_voxel_size[i])
-            for i in range(3)
-        )
-
-        # Check shape is close to expected (within 1 voxel due to rounding)
-        for i in range(3):
-            assert abs(result.shape[i] - expected_shape_approx[i]) <= 1
-
+        # 3 voxels * 8nm / 5nm = 4.8 voxels per axis, so 5 cover it
+        assert result.shape == (5, 5, 5)
         # Verify labels preserved (no new values introduced)
         assert set(np.unique(result)).issubset(set(np.unique(test_data)))
 
     def test_non_integer_downsampling(self, tmp_zarr):
         """Test that non-integer downsampling produces correct dimensions."""
-        # Create test data at 4nm resolution
-        input_voxel_size = Coordinate((4, 4, 4))
-        output_voxel_size = Coordinate((10, 10, 10))  # Factor 0.4x downsampling
+        input_voxel_size = (4, 4, 4)
+        output_voxel_size = (10, 10, 10)  # Factor 0.4x downsampling
         test_data = np.random.randint(1, 10, (10, 10, 10), dtype=np.uint8)
+        _write(f"{tmp_zarr}/test_downsample", test_data, input_voxel_size)
 
-        # Create ROI for dataset
-        total_roi = Roi((0, 0, 0), test_data.shape) * input_voxel_size
+        result = _read_at(f"{tmp_zarr}/test_downsample/s0", output_voxel_size)
 
-        # Create dataset
-        ds_path = f"{tmp_zarr}/test_downsample/s0"
-        _write(f"{tmp_zarr}/test_downsample", test_data, input_voxel_size, total_roi)
-
-        # Read with output voxel size
-        idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
-        result = idi.to_ndarray_ts()
-
-        # Expected shape: 10 voxels * 4nm / 10nm = 4 voxels per axis
-        expected_shape = tuple(
-            int(test_data.shape[i] * input_voxel_size[i] / output_voxel_size[i])
-            for i in range(3)
-        )
-
-        # Check shape matches expected
-        for i in range(3):
-            assert abs(result.shape[i] - expected_shape[i]) <= 1
-
-        # Verify labels preserved
+        # 10 voxels * 4nm / 10nm = 4 voxels per axis
+        assert result.shape == (4, 4, 4)
         assert set(np.unique(result)).issubset(set(np.unique(test_data)))
 
     def test_anisotropic_non_integer(self, tmp_zarr):
         """Test mixed integer and non-integer factors per axis."""
-        input_voxel_size = Coordinate((8, 10, 5))
-        output_voxel_size = Coordinate((5, 4, 5))  # Factors: (1.6, 2.5, 1.0)
+        input_voxel_size = (8, 10, 5)
+        output_voxel_size = (5, 4, 5)  # Factors: (1.6, 2.5, 1.0)
         test_data = np.random.randint(1, 10, (4, 4, 4), dtype=np.uint8)
+        _write(f"{tmp_zarr}/test_anisotropic", test_data, input_voxel_size)
 
-        # Create ROI for dataset
-        total_roi = Roi((0, 0, 0), test_data.shape) * input_voxel_size
+        result = _read_at(f"{tmp_zarr}/test_anisotropic/s0", output_voxel_size)
 
-        # Create dataset
-        ds_path = f"{tmp_zarr}/test_anisotropic/s0"
-        _write(f"{tmp_zarr}/test_anisotropic", test_data, input_voxel_size, total_roi)
-
-        # Read with output voxel size
-        idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
-        result = idi.to_ndarray_ts()
-
-        # Expected shape calculation per axis
-        expected_shape = tuple(
-            int(test_data.shape[i] * input_voxel_size[i] / output_voxel_size[i])
-            for i in range(3)
-        )
-
-        # Check shape is close to expected
-        for i in range(3):
-            assert abs(result.shape[i] - expected_shape[i]) <= 1
+        # ceil(32/5), 40/4, 20/5
+        assert result.shape == (7, 10, 4)
 
     def test_label_preservation_order_0(self, tmp_zarr):
         """Verify no new label values introduced with order=0."""
-        input_voxel_size = Coordinate((8, 8, 8))
-        output_voxel_size = Coordinate((5, 5, 5))
+        input_voxel_size = (8, 8, 8)
+        output_voxel_size = (5, 5, 5)
         # Create data with specific labels
         test_data = np.array([[[1, 2, 1],
                                [2, 3, 2],
@@ -123,117 +81,62 @@ class TestNonIntegerResampling:
                               [[1, 2, 1],
                                [2, 3, 2],
                                [1, 2, 1]]], dtype=np.uint8)
-
-        # Create ROI for dataset
-        total_roi = Roi((0, 0, 0), test_data.shape) * input_voxel_size
-
-        # Create dataset
-        ds_path = f"{tmp_zarr}/test_labels/s0"
-        _write(f"{tmp_zarr}/test_labels", test_data, input_voxel_size, total_roi)
+        _write(f"{tmp_zarr}/test_labels", test_data, input_voxel_size)
 
         # Read with interpolation_order=0 (nearest-neighbor)
-        idi = ImageDataInterface(
-            ds_path,
-            output_voxel_size=output_voxel_size,
-            interpolation_order=0
+        result = _read_at(
+            f"{tmp_zarr}/test_labels/s0", output_voxel_size, interpolation_order=0
         )
-        result = idi.to_ndarray_ts()
-
-        # Original labels: {1, 2, 3, 4}
-        original_labels = set(np.unique(test_data))
-        result_labels = set(np.unique(result))
 
         # Result should only contain original labels (no fuzzy interpolation)
-        assert result_labels.issubset(original_labels)
-
-    def test_roi_extraction_non_integer(self, tmp_zarr):
-        """Test that ROI extraction works correctly with non-integer scaling."""
-        input_voxel_size = Coordinate((8, 8, 8))
-        output_voxel_size = Coordinate((5, 5, 5))
-        test_data = np.random.randint(1, 10, (10, 10, 10), dtype=np.uint8)
-
-        # Create ROI for dataset
-        total_roi = Roi((0, 0, 0), test_data.shape) * input_voxel_size
-
-        # Create dataset
-        ds_path = f"{tmp_zarr}/test_roi_non_integer/s0"
-        _write(f"{tmp_zarr}/test_roi_non_integer", test_data, input_voxel_size, total_roi)
-
-        # Read a specific ROI in physical coordinates
-        roi = Roi((16, 16, 16), (32, 32, 32))  # Physical coordinates (nm)
-        idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
-        result = idi.to_ndarray_ts(roi)
-
-        # Expected shape: 32nm / 5nm = 6.4 voxels per axis
-        expected_shape = tuple(int(s / vs) for s, vs in zip(roi.shape, output_voxel_size))
-
-        # Check shape is close
-        for i in range(3):
-            assert abs(result.shape[i] - expected_shape[i]) <= 1
-
-
-class TestIntegerFastPaths:
-    """Test that integer scale factors still use fast paths."""
-
-    def test_integer_upsampling_uses_repeat(self, tmp_zarr):
-        """Test that integer factors use repeat() not zoom()."""
-        input_voxel_size = Coordinate((8, 8, 8))
-        output_voxel_size = Coordinate((4, 4, 4))  # Exact 2x upsampling
-        test_data = np.arange(1, 28).reshape((3, 3, 3)).astype(np.uint8)
-
-        # Create ROI for dataset
-        total_roi = Roi((0, 0, 0), test_data.shape) * input_voxel_size
-
-        ds_path = f"{tmp_zarr}/test_int_upsample/s0"
-        _write(f"{tmp_zarr}/test_int_upsample", test_data, input_voxel_size, total_roi)
-
-        idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
-        result = idi.to_ndarray_ts()
-
-        # Should produce exactly 2x the original size
-        expected_shape = tuple(s * 2 for s in test_data.shape)
-        assert result.shape == expected_shape
-
-    def test_integer_downsampling_uses_slicing(self, tmp_zarr):
-        """Test that integer downsampling uses slicing."""
-        input_voxel_size = Coordinate((4, 4, 4))
-        output_voxel_size = Coordinate((8, 8, 8))  # Exact 2x downsampling
-        test_data = np.random.randint(1, 10, (10, 10, 10), dtype=np.uint8)
-
-        # Create ROI for dataset
-        total_roi = Roi((0, 0, 0), test_data.shape) * input_voxel_size
-
-        ds_path = f"{tmp_zarr}/test_int_downsample/s0"
-        _write(f"{tmp_zarr}/test_int_downsample", test_data, input_voxel_size, total_roi)
-
-        idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
-        result = idi.to_ndarray_ts()
-
-        # Should produce exactly half the original size
-        expected_shape = tuple(s // 2 for s in test_data.shape)
-        assert result.shape == expected_shape
-
-        # Labels should be preserved exactly (slicing doesn't aggregate)
         assert set(np.unique(result)).issubset(set(np.unique(test_data)))
 
-    def test_close_to_integer_uses_fast_path(self, tmp_zarr):
-        """Test that factors close to integers (1.999) use fast paths."""
-        input_voxel_size = Coordinate((8.004, 8.004, 8.004))  # Close to 8
-        output_voxel_size = Coordinate((4, 4, 4))  # Factor ~2.001
+    def test_roi_extraction_non_integer(self, tmp_zarr):
+        """A box of output voxels from a nm corner reads that many voxels."""
+        test_data = np.random.randint(1, 10, (10, 10, 10), dtype=np.uint8)
+        _write(f"{tmp_zarr}/test_roi_non_integer", test_data, (8, 8, 8))
+
+        idi = ImageDataInterface(f"{tmp_zarr}/test_roi_non_integer/s0")
+        # 6 voxels of 5 nm from 16 nm, which does not sit on the 8 nm grid
+        idi.output_grid = make_grid((6, 6, 6), (5, 5, 5), corner=(16, 16, 16))
+        result = idi.to_ndarray_ts()
+        assert result.shape == (6, 6, 6)
+        # nearest: output voxel i is centred at 16 + 5 i + 2.5 nm
+        source = ((16 + 5 * np.arange(6) + 2.5) // 8).astype(int)
+        assert np.array_equal(result, test_data[np.ix_(source, source, source)])
+
+
+class TestIntegerRatios:
+    """Integer voxel-size ratios repeat or pick voxels exactly."""
+
+    def test_integer_upsampling_repeats(self, tmp_zarr):
         test_data = np.arange(1, 28).reshape((3, 3, 3)).astype(np.uint8)
+        _write(f"{tmp_zarr}/test_int_upsample", test_data, (8, 8, 8))
 
-        # Create ROI for dataset
-        total_roi = Roi((0, 0, 0), test_data.shape) * input_voxel_size
+        result = _read_at(f"{tmp_zarr}/test_int_upsample/s0", (4, 4, 4))
 
-        ds_path = f"{tmp_zarr}/test_close_int/s0"
-        _write(f"{tmp_zarr}/test_close_int", test_data, input_voxel_size, total_roi)
+        assert np.array_equal(result, test_data.repeat(2, 0).repeat(2, 1).repeat(2, 2))
 
-        idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
+    def test_integer_downsampling_picks_voxels(self, tmp_zarr):
+        test_data = np.random.randint(1, 10, (10, 10, 10), dtype=np.uint8)
+        _write(f"{tmp_zarr}/test_int_downsample", test_data, (4, 4, 4))
+
+        result = _read_at(f"{tmp_zarr}/test_int_downsample/s0", (8, 8, 8))
+
+        assert result.shape == (5, 5, 5)
+        # Labels should be preserved exactly (nearest doesn't aggregate)
+        assert set(np.unique(result)).issubset(set(np.unique(test_data)))
+
+    def test_close_to_integer_ratio_repeats(self, tmp_zarr):
+        """A ratio of ~2.001 still gives every voxel twice over the 2x grid."""
+        test_data = np.arange(1, 28).reshape((3, 3, 3)).astype(np.uint8)
+        _write(f"{tmp_zarr}/test_close_int", test_data, (8.004, 8.004, 8.004))
+
+        idi = ImageDataInterface(f"{tmp_zarr}/test_close_int/s0")
+        idi.output_grid = make_grid((6, 6, 6), (4, 4, 4))
         result = idi.to_ndarray_ts()
 
-        # Should use repeat and produce 2x size
-        expected_shape = tuple(s * 2 for s in test_data.shape)
-        assert result.shape == expected_shape
+        assert np.array_equal(result, test_data.repeat(2, 0).repeat(2, 1).repeat(2, 2))
 
 
 class TestVoxelCoverageAccuracy:
@@ -241,181 +144,60 @@ class TestVoxelCoverageAccuracy:
 
     def test_physical_dimensions_preserved(self, tmp_zarr):
         """Verify that physical dimensions are preserved through resampling."""
-        input_voxel_size = Coordinate((8, 8, 8))
-        output_voxel_size = Coordinate((5, 5, 5))
+        input_voxel_size = (8, 8, 8)
+        output_voxel_size = (5, 5, 5)
         test_shape = (10, 10, 10)
         test_data = np.random.randint(1, 10, test_shape, dtype=np.uint8)
+        _write(f"{tmp_zarr}/test_physical_dims", test_data, input_voxel_size)
 
-        # Create ROI for dataset
-        total_roi = Roi((0, 0, 0), test_shape) * input_voxel_size
+        result = _read_at(f"{tmp_zarr}/test_physical_dims/s0", output_voxel_size)
 
-        ds_path = f"{tmp_zarr}/test_physical_dims/s0"
-        _write(f"{tmp_zarr}/test_physical_dims", test_data, input_voxel_size, total_roi)
-
-        idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
-        result = idi.to_ndarray_ts()
-
-        # Physical size in nm
-        input_physical_size = tuple(s * vs for s, vs in zip(test_shape, input_voxel_size))
-        output_physical_size = tuple(s * vs for s, vs in zip(result.shape, output_voxel_size))
-
-        # Physical sizes should match (within 1 voxel tolerance)
+        # Physical sizes should match (within 1 output voxel)
         for i in range(3):
-            # Allow up to 1 output voxel difference
-            assert abs(input_physical_size[i] - output_physical_size[i]) <= output_voxel_size[i]
+            input_size = test_shape[i] * input_voxel_size[i]
+            output_size = result.shape[i] * output_voxel_size[i]
+            assert 0 <= output_size - input_size < output_voxel_size[i]
 
 
 class TestCrossDatasetAlignment:
-    """Test exact shape matching across datasets with different input voxel sizes."""
+    """Datasets with different voxel sizes read onto one grid line up voxel for voxel."""
 
     def test_exact_shape_match_different_voxel_sizes(self, tmp_zarr):
-        """Verify datasets with different input voxel sizes return identical shapes.
+        # 3 nm voxels over (138, 144, 150) + (171, 141, 45) nm
+        grid = make_grid((57, 47, 15), (3, 3, 3), corner=(138, 144, 150))
 
-        This is the critical test for global grid alignment. When two datasets with
-        different input voxel sizes are resampled to the same output voxel size and
-        queried with the same ROI, they MUST return exactly the same shape.
-        """
-        # Use the specific example from the user's question
-        # ROI: (137, 1449, 1424) + (173, 142, 47) nm
-        # Dataset A: voxel size (7, 11, 13)
-        # Dataset B: voxel size (5, 9, 17)
-        # Output: (3, 3, 3)
-
-        output_voxel_size = Coordinate((3, 3, 3))
-
-        # ROI aligned to output voxel grid (multiples of 3)
-        # Use simpler coordinates that fit within reasonable dataset sizes
-        # Start: (138, 144, 150) - all multiples of 3
-        # Size: (171, 141, 45) - all multiples of 3
-        roi_begin = Coordinate((138, 144, 150))
-        roi_size = Coordinate((171, 141, 45))
-        roi = Roi(roi_begin, roi_size)
-
-        # Dataset A with voxel size (7, 11, 13)
-        input_voxel_size_A = Coordinate((7, 11, 13))
-        # Need to cover ROI (138, 144, 150) + (171, 141, 45) = up to (309, 285, 195)
-        # In voxels: ceil(309/7)=45, ceil(285/11)=26, ceil(195/13)=15
-        test_shape_A = (45, 26, 15)
-        test_data_A = np.random.randint(1, 10, test_shape_A, dtype=np.uint8)
-        total_roi_A = Roi((0, 0, 0), test_shape_A) * input_voxel_size_A
-
-        ds_path_A = f"{tmp_zarr}/test_dataset_A/s0"
-        _write(f"{tmp_zarr}/test_dataset_A", test_data_A, input_voxel_size_A, total_roi_A)
-
+        # Dataset A with voxel size (7, 11, 13), covering the grid
+        test_data_A = np.random.randint(1, 10, (45, 26, 15), dtype=np.uint8)
+        _write(f"{tmp_zarr}/test_dataset_A", test_data_A, (7, 11, 13))
         # Dataset B with voxel size (5, 9, 17)
-        input_voxel_size_B = Coordinate((5, 9, 17))
-        # Need to cover same ROI: ceil(309/5)=62, ceil(285/9)=32, ceil(195/17)=12
-        test_shape_B = (62, 32, 12)
-        test_data_B = np.random.randint(1, 10, test_shape_B, dtype=np.uint8)
-        total_roi_B = Roi((0, 0, 0), test_shape_B) * input_voxel_size_B
+        test_data_B = np.random.randint(1, 10, (62, 32, 12), dtype=np.uint8)
+        _write(f"{tmp_zarr}/test_dataset_B", test_data_B, (5, 9, 17))
 
-        ds_path_B = f"{tmp_zarr}/test_dataset_B/s0"
-        _write(f"{tmp_zarr}/test_dataset_B", test_data_B, input_voxel_size_B, total_roi_B)
-
-        # Query both datasets with the same ROI at the same output voxel size
-        idi_A = ImageDataInterface(ds_path_A, output_voxel_size=output_voxel_size)
-        result_A = idi_A.to_ndarray_ts(roi)
-
-        idi_B = ImageDataInterface(ds_path_B, output_voxel_size=output_voxel_size)
-        result_B = idi_B.to_ndarray_ts(roi)
-
-        # CRITICAL: Shapes must be EXACTLY the same (not ±1 voxel)
-        print(f"Dataset A shape: {result_A.shape}")
-        print(f"Dataset B shape: {result_B.shape}")
-        assert result_A.shape == result_B.shape, (
-            f"Shapes must be identical for exact alignment! "
-            f"Got {result_A.shape} vs {result_B.shape}"
-        )
-
-        # Expected shape should be roi_size / output_voxel_size
-        expected_shape = tuple(
-            int(roi_size[i] / output_voxel_size[i]) for i in range(3)
-        )
-        assert result_A.shape == expected_shape, (
-            f"Expected shape {expected_shape}, got {result_A.shape}"
-        )
+        results = []
+        for name, data, vs in (("A", test_data_A, (7, 11, 13)), ("B", test_data_B, (5, 9, 17))):
+            idi = ImageDataInterface(f"{tmp_zarr}/test_dataset_{name}/s0", output_grid=grid)
+            result = idi.to_ndarray_ts()
+            # nearest: each 3 nm voxel takes the source voxel its centre is in
+            centres = [138 + 3 * np.arange(57) + 1.5, 144 + 3 * np.arange(47) + 1.5, 150 + 3 * np.arange(15) + 1.5]
+            source = [(c // v).astype(int) for c, v in zip(centres, vs)]
+            assert np.array_equal(result, data[np.ix_(*source)])
+            results.append(result)
+        assert results[0].shape == results[1].shape == grid.shape
 
 
-class TestBoundaryBlockShapeMatch:
-    """Regression test for an off-by-one at dataset-boundary blocks.
+class TestOffsetAlignment:
+    """Reads land on the output grid's voxels wherever the dataset's corner is."""
 
-    A remainder ROI (not a multiple of output_voxel_size) must still crop to
-    exactly round(roi.shape / output_voxel_size) after the integer
-    repeat()/slicing fast path. Previously the final crop was computed via
-    funlib.geometry.Coordinate division, which truncates (floors) rather
-    than rounds; offset and end floor independently, so they can disagree
-    with round(shape / ovs) by 1 voxel in either direction whenever the
-    offset isn't voxel-aligned -- exactly the situation at a dataset
-    boundary. This is the class of bug behind `IndexError: boolean index did
-    not match indexed array along axis 0; size of axis is 57 but size of
-    corresponding boolean axis is 56` when masking a raw EM block against a
-    segmentation block.
-    """
-
-    def test_remainder_roi_integer_upsampling_exact_shape(self, tmp_zarr):
-        # A boundary/remainder block whose physical size is NOT an exact
-        # multiple of output_voxel_size: previously the crop was computed as
-        # int(end/ovs) - int(offset/ovs), i.e. two independently truncated
-        # (floored) divisions, which disagreed with round(shape/ovs) by
-        # exactly 1 voxel whenever the offset wasn't voxel-aligned -- exactly
-        # the situation at a dataset boundary. Values found by brute-force
-        # search over (voxel_size, output_voxel_size, begin, size); with the
-        # old code this reproducibly returned one voxel too many. The ratio
-        # voxel_size/output_voxel_size (4) is an exact integer so this
-        # exercises the repeat()-based fast path, not the zoom/interpolation
-        # branch (which already computed its output size via round()).
-        input_voxel_size = Coordinate((32, 1, 1))
-        output_voxel_size = Coordinate((8, 1, 1))
-        begin = 119
-        size = 99  # not a multiple of 8 -> expected 12 output voxels, old code gave 13
-        test_shape = (7, 1, 1)
-        test_data = np.random.randint(1, 10, test_shape, dtype=np.uint8)
-
-        total_roi = Roi((0, 0, 0), test_shape) * input_voxel_size
-        ds_path = f"{tmp_zarr}/test_boundary_block/s0"
-        _write(f"{tmp_zarr}/test_boundary_block", test_data, input_voxel_size, total_roi)
-
-        roi = Roi((begin, 0, 0), (size, 1, 1))
-        idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
-        result = idi.to_ndarray_ts(roi)
-
-        expected_shape = tuple(round(roi.shape[i] / output_voxel_size[i]) for i in range(3))
-        assert expected_shape == (12, 1, 1)
-        assert result.shape == expected_shape
-
-
-class TestRescaleOffsetAlignment:
-    """Regression test for the resampled fast-path crop using the wrong grid
-    anchor when the dataset's own coordinate offset isn't a multiple of its
-    native voxel size.
-
-    Every dataset created with the default OME voxel-center convention and
-    zero translation has offset == -voxel_size/2 (see
-    test_nonzero_translation_center_corner_convention), which is NEVER a
-    multiple of voxel_size. The fast-path crop snapped the ROI to the native
-    grid anchored at 0 instead of at `offset` (unlike the actual read a few
-    lines below it, which already subtracted offset first) -- so the crop
-    window silently returned data from the wrong native voxels, off by a
-    fraction of a native voxel, even though the returned shape was correct.
-    """
-
-    def test_exact_single_native_voxel_roi_returns_that_voxel(self, tmp_zarr):
-        input_voxel_size = Coordinate((32, 1, 1))
-        output_voxel_size = Coordinate((8, 1, 1))
+    def test_exact_single_native_voxel_box_returns_that_voxel(self, tmp_zarr):
         test_data = np.arange(10, dtype=np.uint8).reshape(10, 1, 1)
+        _write(f"{tmp_zarr}/test_offset_align", test_data, (32, 1, 1))
 
-        total_roi = Roi((0, 0, 0), test_data.shape) * input_voxel_size
-        ds_path = f"{tmp_zarr}/test_offset_align/s0"
-        _write(f"{tmp_zarr}/test_offset_align", test_data, input_voxel_size, total_roi)
-
-        idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
-        offset0 = idi.offset[0]
-
-        # Request exactly the physical extent of native voxel 3 -- every
-        # returned output voxel should be the value 3, not a mix of 2 and 3.
-        roi = Roi((offset0 + 3 * 32, 0, 0), (32, 1, 1))
-        result = idi.to_ndarray_ts(roi)
-        assert np.array_equal(result.ravel(), np.full(4, 3))
+        idi = ImageDataInterface(f"{tmp_zarr}/test_offset_align/s0")
+        # exactly the physical extent of native voxel 3, in 8 nm voxels: every
+        # returned voxel should be 3, not a mix of 2 and 3.
+        corner = (idi.corner[0] + 3 * 32, idi.corner[1], idi.corner[2])
+        idi.output_grid = make_grid((4, 1, 1), (8, 1, 1), corner)
+        assert np.array_equal(idi.to_ndarray_ts().ravel(), np.full(4, 3))
 
 
 class TestRawValidMask:
@@ -429,52 +211,30 @@ class TestRawValidMask:
             .reshape(shape)
             .astype(np.uint16)
         )
-        total_roi = Roi((0, 0, 0), shape) * input_voxel_size
-        ds_path = f"{tmp_zarr}/{name}/s0"
-        _write(f"{tmp_zarr}/{name}", test_data, input_voxel_size, total_roi)
-        return ds_path
+        _write(f"{tmp_zarr}/{name}", test_data, input_voxel_size)
+        return ImageDataInterface(f"{tmp_zarr}/{name}/s0")
 
-    def test_no_overlap_roi_is_entirely_invalid(self, tmp_zarr):
-        input_voxel_size = Coordinate((32, 32, 32))
-        output_voxel_size = Coordinate((8, 8, 8))
-        ds_path = self._make_dataset(
-            tmp_zarr, "test_valid_no_overlap", input_voxel_size, (5, 5, 5)
-        )
-        idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
-
+    def test_no_overlap_box_is_entirely_invalid(self, tmp_zarr):
+        idi = self._make_dataset(tmp_zarr, "test_valid_no_overlap", (32, 32, 32), (5, 5, 5))
         # Entirely past the dataset's own extent -> no real data anywhere.
-        roi = Roi(tuple(idi.roi.end), (80, 80, 80))
-        data, valid = idi.to_ndarray_ts(roi, return_valid_mask=True)
+        idi.output_grid = make_grid((10, 10, 10), (8, 8, 8), corner=idi.grid.box.end)
+        data, valid = idi.to_ndarray_ts(return_valid_mask=True)
         assert data.shape == valid.shape
         assert not valid.any()
 
-    def test_fully_inside_roi_is_entirely_valid(self, tmp_zarr):
-        input_voxel_size = Coordinate((32, 32, 32))
-        output_voxel_size = Coordinate((8, 8, 8))
-        ds_path = self._make_dataset(
-            tmp_zarr, "test_valid_inside", input_voxel_size, (5, 5, 5)
-        )
-        idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
-
-        roi = idi.roi
-        data, valid = idi.to_ndarray_ts(roi, return_valid_mask=True)
+    def test_fully_inside_box_is_entirely_valid(self, tmp_zarr):
+        idi = self._make_dataset(tmp_zarr, "test_valid_inside", (32, 32, 32), (5, 5, 5))
+        idi.output_grid = resampled(idi.grid, (8, 8, 8))
+        data, valid = idi.to_ndarray_ts(return_valid_mask=True)
         assert data.shape == valid.shape
         assert valid.all()
 
     def test_partial_overlap_marks_only_the_covered_region_valid(self, tmp_zarr):
-        input_voxel_size = Coordinate((32, 32, 32))
-        output_voxel_size = Coordinate((8, 8, 8))
-        ds_path = self._make_dataset(
-            tmp_zarr, "test_valid_partial", input_voxel_size, (5, 5, 5)
-        )
-        idi = ImageDataInterface(ds_path, output_voxel_size=output_voxel_size)
-
+        idi = self._make_dataset(tmp_zarr, "test_valid_partial", (32, 32, 32), (5, 5, 5))
+        idi.output_grid = resampled(idi.grid, (8, 8, 8))
         # Straddle the dataset's far edge on axis 0 only: half real data,
         # half padding.
-        begin = list(idi.roi.begin)
-        begin[0] = idi.roi.end[0] - 32
-        roi = Roi(tuple(begin), (64, 32, 32))
-        data, valid = idi.to_ndarray_ts(roi, return_valid_mask=True)
+        data, valid = idi.to_ndarray_ts((16, 0, 0), (24, 4, 4), return_valid_mask=True)
 
         assert data.shape == valid.shape
         assert valid[:4].all()
@@ -542,62 +302,17 @@ def tmp_n5(tmp_path):
 
 
 class TestN5AnisotropicSwapAxes:
-    """Test that N5 datasets with anisotropic voxel sizes read correct shapes.
+    """N5 stores x,y,z; the IDI presents z,y,x, voxel sizes included."""
 
-    N5 format requires axis swapping (swap_axes=True). When voxel sizes are
-    anisotropic, the swap must also apply to voxel_size so that snap_to_grid
-    uses the correct component per axis.
-    """
-
-    def test_single_voxel_roi_z_axis(self, tmp_n5):
-        """A 1-voxel-thick ROI in z should return shape 1 in that dimension."""
+    def test_voxel_size_and_shape_are_zyx(self, tmp_n5):
         idi = ImageDataInterface(tmp_n5)
-        # Anchor at idi.roi.begin: with no OME translation the offset is treated
-        # as a voxel CENTER, so the grid-aligned corner is begin = -vs/2, not 0.
-        vz, vy, vx = idi.voxel_size
-        roi = Roi(idi.roi.begin, Coordinate(vz, 10 * vy, 10 * vx))
-        result = idi.to_ndarray_ts(roi)
-        assert result.shape[0] == 1, (
-            f"Expected 1 voxel in z, got {result.shape[0]} (shape={result.shape})"
-        )
+        assert idi.voxel_size == (5.24, 4.0, 4.0)
+        # N5 on-disk shape is (20,25,10) in x,y,z; IDI presents as (10,25,20) in z,y,x
+        assert idi.grid.shape == (10, 25, 20)
+        assert idi.to_ndarray_ts().shape == (10, 25, 20)
 
-    def test_single_voxel_roi_x_axis(self, tmp_n5):
-        """A 1-voxel-thick ROI in x should return shape 1 in that dimension."""
+    def test_box_beyond_dataset_returns_zeros(self, tmp_n5):
         idi = ImageDataInterface(tmp_n5)
-        # Anchor at idi.roi.begin (= -vs/2) since the offset is treated as a
-        # voxel CENTER when no OME translation is present.
-        vz, vy, vx = idi.voxel_size
-        roi = Roi(idi.roi.begin, Coordinate(10 * vz, 10 * vy, vx))
-        result = idi.to_ndarray_ts(roi)
-        assert result.shape[2] == 1, (
-            f"Expected 1 voxel in x, got {result.shape[2]} (shape={result.shape})"
-        )
-
-    def test_roi_beyond_dataset_returns_correct_axes(self, tmp_n5):
-        """A ROI fully outside the dataset should return zeros in z,y,x order."""
-        idi = ImageDataInterface(tmp_n5)
-        # ROI completely past the dataset end in z; should be 1 voxel in z
-        vz, vy, vx = idi.voxel_size
-        roi = Roi(
-            Coordinate(idi.roi.end[0], 0, 0),
-            Coordinate(vz, 10 * vy, 10 * vx),
-        )
-        result = idi.to_ndarray_ts(roi)
-        assert result.shape[0] == 1, (
-            f"Expected 1 voxel in z (no-overlap path), got shape {result.shape}"
-        )
+        result = idi.to_ndarray_ts((10, 0, 0), (11, 10, 10))
+        assert result.shape == (1, 10, 10)
         assert np.all(result == 0)
-
-    def test_full_dataset_no_roi(self, tmp_n5):
-        """Reading full dataset (roi=None) should return correct axis order."""
-        idi = ImageDataInterface(tmp_n5)
-        result = idi.to_ndarray_ts()
-        # N5 on-disk shape is (20,25,10) in x,y,z; IDI presents as (10,25,20) in z,y,x
-        assert result.shape == (10, 25, 20)
-
-    def test_full_roi_shape(self, tmp_n5):
-        """Full dataset ROI should return the correct array shape."""
-        idi = ImageDataInterface(tmp_n5)
-        result = idi.to_ndarray_ts(idi.roi)
-        # N5 on-disk shape is (20,25,10) in x,y,z; IDI presents as (10,25,20) in z,y,x
-        assert result.shape == (10, 25, 20)

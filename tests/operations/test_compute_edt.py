@@ -1,21 +1,17 @@
 import edt as edt_module
 import numpy as np
-from funlib.geometry import Coordinate, Roi
 
 from cellmap_analyze.process.compute_edt import ComputeEDT
+from cellmap_analyze.util.grid_util import make_grid
 from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset
 
 
 def _write_segmentation(path, seg, voxel_size=(1.0, 1.0, 1.0)):
-    total_roi = Roi((0, 0, 0), Coordinate(seg.shape) * Coordinate(voxel_size))
     ds = create_multiscale_dataset(
         path,
         dtype=seg.dtype,
-        voxel_size=voxel_size,
-        total_roi=total_roi,
-        write_size=Coordinate(10, 10, 10) * Coordinate(voxel_size),
-        original_voxel_size=voxel_size,
+        grid=make_grid(seg.shape, voxel_size, chunks=(10, 10, 10)),
     )
     ds.write_index((0, 0, 0), ds.shape, seg)
     return f"{path}/s0"
