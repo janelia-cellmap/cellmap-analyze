@@ -1,17 +1,24 @@
 import os
 import shutil
 
+import tensorstore as ts
 import worldarray as wa
 
 from cellmap_analyze.util.io_util import split_dataset_path
 
 
 def concurrency_context(concurrency_limit):
-    """The per-handle context cellmap-analyze has always used: data copies and file IO
-    capped, network request pools left at tensorstore's defaults."""
-    if not concurrency_limit:
-        return None
-    return wa.capped_context(concurrency=concurrency_limit, network=False)
+    """The per-handle context cellmap-analyze uses: data copies and file IO capped (when
+    a limit is given), network request pools left at tensorstore's defaults, and chunk
+    writes as zarr-python made them, without a lock or an fsync. Every writer owns whole
+    chunks no other writer touches, and on NFS under load tensorstore's default lock (a
+    blocking fcntl per chunk write) can wait forever."""
+    spec = {}
+    if concurrency_limit:
+        spec = wa.capped_context_spec(concurrency=concurrency_limit, network=False)
+    spec["file_io_locking"] = {"mode": "none"}
+    spec["file_io_sync"] = False
+    return ts.Context(spec)
 
 
 def open_dataset(
@@ -60,5 +67,6 @@ def create_multiscale_dataset(output_path, dtype, grid, scale=0, **open_kwargs):
         grid.voxel_size,
         grid.translation,
         chunks=grid.chunks,
+        context=concurrency_context(None),
     )
     return open_dataset(f"{output_path}/s{scale}", mode="r+", **open_kwargs)

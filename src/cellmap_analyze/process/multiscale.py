@@ -11,6 +11,7 @@ import zarr
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util.io_util import TimingMessager, is_remote_path
 from cellmap_analyze.util.mixins import ComputeConfigMixin
+from cellmap_analyze.util.zarr_util import concurrency_context
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -123,7 +124,7 @@ class Multiscale(ComputeConfigMixin):
         block_index, source_path, dest_path, driver, factors, blocks, method, concurrency_limit
     ):
         block = blocks[block_index]
-        context = wa.capped_context(concurrency=concurrency_limit, network=False)
+        context = concurrency_context(concurrency_limit)
         source = wa.open(source_path, context=context)
         # The finer voxels under this block, clipped to the array: an edge
         # window past it is summarised from the voxels it has.

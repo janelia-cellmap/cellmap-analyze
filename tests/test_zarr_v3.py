@@ -6,7 +6,11 @@ import os
 import numpy as np
 import pytest
 
-from cellmap_analyze.util.zarr_util import create_multiscale_dataset, open_dataset
+from cellmap_analyze.util.zarr_util import (
+    concurrency_context,
+    create_multiscale_dataset,
+    open_dataset,
+)
 from cellmap_analyze.util.grid_util import grid_of, make_grid
 
 
@@ -41,7 +45,7 @@ class TestZarrV3Format:
         test_data[7:9, 7:9, 7:9] = 2
         ds.write_index((0, 0, 0), ds.shape, test_data)
 
-        # Read back via IDI
+        # Read it back
         vol = open_dataset(output_path + "/s0")
         assert tuple(vol.voxel_size) == (4, 4, 4)
         block = vol.read_index((0, 0, 0), shape)
@@ -59,6 +63,14 @@ class TestZarrV3Format:
 
         # Read back
         assert np.array_equal(write_data, vol.read_onto(grid_of(vol)))
+
+    @pytest.mark.parametrize("concurrency_limit", [None, 1, 4])
+    def test_writes_take_no_file_lock_or_fsync(self, concurrency_limit):
+        """Every writer owns whole chunks, so chunk writes skip tensorstore's per-write
+        fcntl lock (which can wait forever on NFS under load) and its fsync."""
+        spec = concurrency_context(concurrency_limit).spec.to_json()
+        assert spec["file_io_locking"] == {"mode": "none"}
+        assert spec["file_io_sync"] is False
 
 
 class TestZarrV2BackwardCompat:
