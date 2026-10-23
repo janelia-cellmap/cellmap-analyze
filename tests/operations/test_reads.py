@@ -1,32 +1,25 @@
 import numpy as np
 import pytest
-from cellmap_analyze.util.image_data_interface import (
-    ImageDataInterface,
-)
-
-from funlib.geometry import Roi, Coordinate
+from cellmap_analyze.util.zarr_util import open_dataset
+from tests.test_utils import read_all
 
 
-def test_image_data_interface_whole(
+def test_read_whole(
     tmp_zarr,
     image_with_holes_filled,
 ):
-    test_data = ImageDataInterface(
-        f"{tmp_zarr}/image_with_holes_filled/s0"
-    ).to_ndarray_ts()
+    test_data = read_all(f"{tmp_zarr}/image_with_holes_filled/s0")
     assert np.array_equal(
         test_data,
         image_with_holes_filled,
     )
 
 
-def test_image_data_interface_roi(tmp_zarr, image_with_holes_filled):
-    idi = ImageDataInterface(f"{tmp_zarr}/image_with_holes_filled/s0")
+def test_read_box(tmp_zarr, image_with_holes_filled):
+    vol = open_dataset(f"{tmp_zarr}/image_with_holes_filled/s0")
 
-    roi = Roi((1, 1, 1), (5, 5, 5))
-    # Use IDI's voxel_size (scaled integers) for ROI operations
-    test_data = idi.to_ndarray_ts(roi * idi.voxel_size)
-    ground_truth = image_with_holes_filled[roi.to_slices()]
+    test_data = vol.read_index((1, 1, 1), (6, 6, 6))
+    ground_truth = image_with_holes_filled[1:6, 1:6, 1:6]
     assert np.array_equal(
         test_data,
         ground_truth,
@@ -34,15 +27,14 @@ def test_image_data_interface_roi(tmp_zarr, image_with_holes_filled):
 
 
 @pytest.mark.parametrize("fill_value", [0, 100])
-def test_image_data_interface_constant_fill_values(
+def test_read_constant_fill_values(
     tmp_zarr, image_with_holes_filled, fill_value
 ):
-    idi = ImageDataInterface(
-        f"{tmp_zarr}/image_with_holes_filled/s0", custom_fill_value=fill_value
+    vol = open_dataset(
+        f"{tmp_zarr}/image_with_holes_filled/s0", padding=fill_value
     )
 
-    roi = Roi((-1, -1, -1), (6, 6, 6))
-    test_data = idi.to_ndarray_ts(roi * idi.voxel_size)
+    test_data = vol.read_index((-1, -1, -1), (5, 5, 5))
     ground_truth = np.pad(
         image_with_holes_filled[:5, :5, :5],
         pad_width=((1, 0), (1, 0), (1, 0)),
@@ -56,13 +48,12 @@ def test_image_data_interface_constant_fill_values(
     )
 
 
-def test_image_data_interface_reflect(tmp_zarr, image_with_holes_filled):
-    idi = ImageDataInterface(
-        f"{tmp_zarr}/image_with_holes_filled/s0", custom_fill_value="edge"
+def test_read_edge_fill(tmp_zarr, image_with_holes_filled):
+    vol = open_dataset(
+        f"{tmp_zarr}/image_with_holes_filled/s0", padding="edge"
     )
 
-    roi = Roi((-1, -1, -1), (6, 6, 6))
-    test_data = idi.to_ndarray_ts(roi * idi.voxel_size)
+    test_data = vol.read_index((-1, -1, -1), (5, 5, 5))
     ground_truth = np.pad(
         image_with_holes_filled[:5, :5, :5],
         pad_width=((1, 0), (1, 0), (1, 0)),
@@ -79,51 +70,41 @@ def test_nonzero_translation_center_corner_convention(tmp_path, voxel_size):
     """Regression for the OME voxel-CENTER convention with a NON-ZERO
     translation (the rest of the suite only exercises translation 0).
 
-    The stored OME translation is the voxel CENTER of voxel [0,0,0]; internally
-    the IDI exposes the funlib CORNER (= translation - vs/2). Writing converts
-    corner -> center, so the stored translation round-trips, and measure reports
-    COMs at true OME centers.
+    The stored OME translation is the voxel CENTER of voxel [0,0,0]; the IDI
+    exposes its CORNER (= translation - vs/2). Writing converts corner -> center,
+    so the stored translation round-trips, and measure reports COMs at true OME
+    centers.
     """
+    from cellmap_analyze.util.grid_util import make_grid
     from cellmap_analyze.util.zarr_util import create_multiscale_dataset
-    from cellmap_analyze.util.voxel_size_utils import scale_voxel_size_to_integers
     from cellmap_analyze.analyze.measure import Measure
     import zarr
 
     vs = tuple(float(v) for v in voxel_size)
-    scaled_vs, sf = scale_voxel_size_to_integers(vs)
-    # Pick a clean integer corner (5 voxels in) so there is no rounding slack;
-    # the corresponding OME center is corner + vs/2 = 5.5 voxels.
-    corner_scaled = tuple(5 * s for s in scaled_vs)
-    expected_translation = tuple(c / sf + v / 2 for c, v in zip(corner_scaled, vs))
+    # voxel 0's corner 5 voxels in; its OME center is corner + vs/2 = 5.5 voxels.
+    corner = tuple(5 * v for v in vs)
+    expected_translation = tuple(c + v / 2 for c, v in zip(corner, vs))
 
     shape = (8, 8, 8)
-    total_roi = Roi(
-        Coordinate(corner_scaled), Coordinate(shape) * Coordinate(scaled_vs)
-    )
     path = str(tmp_path / "data.zarr/seg")
     ds = create_multiscale_dataset(
-        path,
-        dtype=np.uint8,
-        voxel_size=list(scaled_vs),
-        total_roi=total_roi,
-        write_size=Coordinate(shape) * Coordinate(scaled_vs),
-        original_voxel_size=list(vs),
+        path, np.uint8, make_grid(shape, vs, corner, chunks=shape)
     )
     idx = (1, 2, 3)
     arr = np.zeros(shape, dtype=np.uint8)
     arr[idx] = 1
-    ds.data[:] = arr
+    ds.write_index((0, 0, 0), ds.shape, arr)
 
     # stored OME translation is the CENTER
     zattrs = dict(zarr.open_group(path, mode="r").attrs)
-    stored = zattrs["multiscales"][0]["datasets"][0]["coordinateTransformations"][
+    stored = zattrs["ome"]["multiscales"][0]["datasets"][0]["coordinateTransformations"][
         1
     ]["translation"]
     assert np.allclose(stored, expected_translation)
 
     # IDI exposes the CORNER = translation - vs/2 (round-trips the corner)
-    idi = ImageDataInterface(f"{path}/s0")
-    assert tuple(idi.offset) == corner_scaled
+    vol = open_dataset(f"{path}/s0")
+    assert np.allclose(vol.corner, corner)
 
     # measure COM lands on the OME center of the object voxel: T + idx*vs
     m = Measure(input_path=f"{path}/s0", output_path=str(tmp_path / "csvs"), num_workers=1)
@@ -138,40 +119,31 @@ def test_raw_intensity_excludes_voxels_outside_raw_coverage(tmp_path):
     actually have real EM data -- not have the missing region's padding
     (0) silently averaged in as if it were real signal.
     """
-    from cellmap_analyze.util.zarr_io import prepare_ds
     from cellmap_analyze.analyze.measure import Measure
+    from cellmap_analyze.util.grid_util import make_grid
+    from cellmap_analyze.util.zarr_util import create_multiscale_dataset
 
-    voxel_size = Coordinate((10, 10, 10))
+    voxel_size = (10, 10, 10)
 
     # Segmentation: a single solid object filling a (10, 3, 3) block.
     seg_shape = (10, 3, 3)
     seg_data = np.ones(seg_shape, dtype=np.uint8)
-    seg_total_roi = Roi((0, 0, 0), seg_shape) * voxel_size
     seg_path = str(tmp_path / "data.zarr/seg")
-    seg_ds = prepare_ds(
-        seg_path,
-        "s0",
-        total_roi=seg_total_roi,
-        voxel_size=voxel_size,
-        dtype=seg_data.dtype,
+    seg_ds = create_multiscale_dataset(
+        seg_path, seg_data.dtype, make_grid(seg_shape, voxel_size, chunks=seg_shape)
     )
-    seg_ds[seg_total_roi] = seg_data
+    seg_ds.write_index((0, 0, 0), seg_shape, seg_data)
 
     # Raw EM only covers x in [0, 6) of the same voxel grid -- the object's
     # x in [6, 10) has no real EM data at all.
     raw_shape = (6, 3, 3)
     raw_value = 100
     raw_data = np.full(raw_shape, raw_value, dtype=np.uint16)
-    raw_total_roi = Roi((0, 0, 0), raw_shape) * voxel_size
     raw_path = str(tmp_path / "data.zarr/raw")
-    raw_ds = prepare_ds(
-        raw_path,
-        "s0",
-        total_roi=raw_total_roi,
-        voxel_size=voxel_size,
-        dtype=raw_data.dtype,
+    raw_ds = create_multiscale_dataset(
+        raw_path, raw_data.dtype, make_grid(raw_shape, voxel_size, chunks=raw_shape)
     )
-    raw_ds[raw_total_roi] = raw_data
+    raw_ds.write_index((0, 0, 0), raw_shape, raw_data)
 
     m = Measure(
         input_path=f"{seg_path}/s0",

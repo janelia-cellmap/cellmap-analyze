@@ -1,25 +1,18 @@
 import numpy as np
+import worldarray as wa
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.grid_util import crop_to_roi, grid_of, intersection
 from cellmap_analyze.util.io_util import get_leaf_name_from_path, get_output_path_from_input_path
 from cellmap_analyze.cythonizing.process_arrays import initialize_contact_site_array
 from cellmap_analyze.cythonizing.bresenham3D import bresenham_3D_lines
 import logging
 from cellmap_analyze.process.connected_components import ConnectedComponents
 from scipy.spatial import KDTree
-from cellmap_analyze.util.measure_util import trim_array, trim_array_anisotropic
 from cellmap_analyze.util.mixins import ComputeConfigMixin
-from cellmap_analyze.util.voxel_size_utils import (
-    compute_common_scale_factor,
-    scale_voxel_size_to_integers,
-)
-from cellmap_analyze.util.zarr_util import (
-    create_multiscale_dataset_idi,
-)
-from funlib.geometry import Coordinate
+from cellmap_analyze.util.zarr_util import create_multiscale_dataset, open_dataset
 import cc3d
 
 logging.basicConfig(
@@ -43,54 +36,36 @@ class ContactSites(ComputeConfigMixin):
         chunk_shape=None,
     ):
         super().__init__(num_workers)
-        self.organelle_1_idi = ImageDataInterface(
-            organelle_1_path, chunk_shape=chunk_shape
-        )
-        self.organelle_2_idi = ImageDataInterface(
-            organelle_2_path, chunk_shape=chunk_shape
-        )
-        # Align scale factors so both IDIs share the same coordinate space
-        common_sf = compute_common_scale_factor(
-            self.organelle_1_idi.voxel_size_scale_factor,
-            self.organelle_2_idi.voxel_size_scale_factor,
-        )
-        self.organelle_1_idi.rescale_to_factor(common_sf)
-        self.organelle_2_idi.rescale_to_factor(common_sf)
-
-        # Get element-wise minimum voxel size in common scaled space
-        output_voxel_size = Coordinate(
+        self.organelle_1_vol = open_dataset(organelle_1_path)
+        self.organelle_2_vol = open_dataset(organelle_2_path)
+        # Both organelles are read onto one grid: the element-wise minimum voxel
+        # size, over the box both cover (or the voxels of it in roi)
+        self.voxel_size = tuple(
             min(v1, v2)
             for v1, v2 in zip(
-                self.organelle_1_idi.voxel_size, self.organelle_2_idi.voxel_size
+                self.organelle_1_vol.voxel_size, self.organelle_2_vol.voxel_size
             )
         )
-        self.organelle_2_idi.output_voxel_size = output_voxel_size
-        self.organelle_1_idi.output_voxel_size = output_voxel_size
-        self.voxel_size = output_voxel_size
-        self.voxel_size_scale_factor = common_sf
-
-        # Compute original (true nm) output voxel size for physical calculations
-        self.original_voxel_size = tuple(
-            min(v1, v2)
-            for v1, v2 in zip(
-                self.organelle_1_idi.original_voxel_size,
-                self.organelle_2_idi.original_voxel_size,
-            )
+        self.roi = roi
+        organelle_1_grid = grid_of(self.organelle_1_vol, chunk_shape)
+        self.grid = crop_to_roi(
+            intersection(
+                [organelle_1_grid, grid_of(self.organelle_2_vol)],
+                self.voxel_size,
+                chunks=organelle_1_grid.chunks,
+            ),
+            roi,
         )
 
         # Store contact distance in nm for physical distance calculations
         self.contact_distance_nm = contact_distance_nm
 
-        # Use minimum voxel size in true nm across all dimensions
-        min_voxel_size = float(min(self.original_voxel_size))
+        # Use minimum voxel size across all dimensions
+        min_voxel_size = float(min(self.voxel_size))
         self.contact_distance_voxels = float(contact_distance_nm / min_voxel_size)
 
         self.padding_voxels = int(np.ceil(self.contact_distance_voxels) + 1)
         # add one to ensure accuracy during surface area calculation since we need to make sure that neighboring ones are calculated
-
-        self.roi = roi
-        if self.roi is None:
-            self.roi = self.organelle_1_idi.roi.intersect(self.organelle_2_idi.roi)
 
         if not get_leaf_name_from_path(output_path):
             output_path = (
@@ -107,22 +82,14 @@ class ContactSites(ComputeConfigMixin):
 
         self.minimum_volume_nm_3 = minimum_volume_nm_3
         self.num_workers = num_workers
-        # Use original (true nm) voxel size for physical unit calculations
-        self.voxel_volume = float(np.prod(self.original_voxel_size))
-        self.voxel_face_area = float(
-            self.original_voxel_size[1] * self.original_voxel_size[2]
-        )
+        self.voxel_volume = float(np.prod(self.voxel_size))
+        self.voxel_face_area = float(self.voxel_size[1] * self.voxel_size[2])
 
         # Use helper function to generate blockwise path (handles root datasets correctly)
         blockwise_path = get_output_path_from_input_path(output_path, "_blockwise")
 
-        self.contact_sites_blockwise_idi = create_multiscale_dataset_idi(
-            blockwise_path,
-            dtype=np.uint64,
-            voxel_size=self.voxel_size,
-            total_roi=self.roi,
-            write_size=self.organelle_1_idi.chunk_shape * self.voxel_size,
-            original_voxel_size=self.original_voxel_size,
+        self.contact_sites_blockwise_vol = create_multiscale_dataset(
+            blockwise_path, dtype=np.uint64, grid=self.grid
         )
 
     @staticmethod
@@ -204,125 +171,64 @@ class ContactSites(ComputeConfigMixin):
     @staticmethod
     def calculate_block_contact_sites(
         block_index,
-        organelle_1_idi: ImageDataInterface,
-        organelle_2_idi: ImageDataInterface,
-        contact_sites_blockwise_idi: ImageDataInterface,
+        grid: wa.Grid,
+        organelle_1_vol: wa.WorldArray,
+        organelle_2_vol: wa.WorldArray,
+        contact_sites_blockwise_vol: wa.WorldArray,
         contact_distance_voxels,
         padding_voxels,
-        voxel_size,
         contact_distance_nm,
     ):
-        # Per-axis padding in nm (integer multiples of voxel size per axis)
-        padding_nm = Coordinate(
-            padding_voxels * int(vs)
-            for vs in contact_sites_blockwise_idi.voxel_size
-        )
-        block = create_block_from_index(
-            contact_sites_blockwise_idi,
-            block_index,
-            padding=padding_nm,
-        )
-        organelle_1 = organelle_1_idi.to_ndarray_ts(block.read_roi)
-
-        # Calculate actual padding from array shape vs write ROI shape
-        # The write ROI is in scaled physical coordinates, convert to voxels
-        write_roi_shape_voxels = tuple(
-            int(np.round(s / vs))
-            for s, vs in zip(
-                block.write_roi.shape, contact_sites_blockwise_idi.voxel_size
-            )
-        )
-
-        # Due to snap_to_grid and upsampling, the actual array size might differ slightly
-        # from what we expect. Calculate the padding based on the difference.
-        # The padding should be approximately symmetric, but might be off by 1 due to rounding
-        total_padding_voxels = tuple(
-            organelle_1.shape[i] - write_roi_shape_voxels[i]
-            for i in range(3)
-        )
-
-        # Helper function to trim with padding (approximately centered)
-        def trim_with_padding(arr):
-            slices = []
-            for i in range(3):
-                # Split padding approximately equally, but adjust if needed
-                pad_total = total_padding_voxels[i]
-                if pad_total <= 0:
-                    # No padding or array is smaller than expected
-                    slices.append(slice(None))
-                else:
-                    # Try to center the crop
-                    pad_before = pad_total // 2
-                    pad_after = pad_total - pad_before
-                    start = pad_before
-                    end = arr.shape[i] - pad_after
-                    slices.append(slice(start, end))
-            result = arr[tuple(slices)]
-            # Verify the result has the expected shape, otherwise adjust
-            if result.shape != tuple(write_roi_shape_voxels):
-                # Fallback: crop/pad to exact size
-                final_slices = []
-                for i in range(3):
-                    end = min(write_roi_shape_voxels[i], result.shape[i])
-                    final_slices.append(slice(0, end))
-                result = result[tuple(final_slices)]
-            return result
-
+        block = create_block_from_index(grid, block_index, padding=padding_voxels)
+        organelle_1 = organelle_1_vol.read_onto(grid, block.read_begin, block.read_end)
         if not np.any(organelle_1):
             # if organelle_1 is empty, we can skip this block
-            contact_sites_blockwise_idi.ds[block.write_roi] = trim_with_padding(
-                np.zeros(organelle_1.shape, dtype=np.uint64)
-            )
+            contact_sites_blockwise_vol.write_index(block.begin, block.end, 0)
             return
-        organelle_2 = organelle_2_idi.to_ndarray_ts(block.read_roi)
+        organelle_2 = organelle_2_vol.read_onto(grid, block.read_begin, block.read_end)
         if not np.any(organelle_2):
             # if organelle_2 is empty, we can skip this block
-            contact_sites_blockwise_idi.ds[block.write_roi] = trim_with_padding(
-                np.zeros(organelle_1.shape, dtype=np.uint64)
-            )
+            contact_sites_blockwise_vol.write_index(block.begin, block.end, 0)
             return
-        # Calculate offset with per-axis division for anisotropic data
-        global_id_offset = block_index * np.prod(
-            block.full_block_size / contact_sites_blockwise_idi.voxel_size,
-            dtype=np.uint64,
-        )  # have to use full_block_size since before if we use write_roi, blocks on the end will be smaller and will have incorrect offsets
+        # the full block shape, so the smaller blocks at the far ends get their own ids too
+        global_id_offset = block.id * np.prod(grid.chunks, dtype=np.uint64)
         contact_sites = ContactSites.get_ndarray_contact_sites(
             organelle_1,
             organelle_2,
             contact_distance_voxels,
-            voxel_size=voxel_size,
+            voxel_size=grid.voxel_size,
             contact_distance_nm=contact_distance_nm,
         )
         contact_sites[contact_sites > 0] += global_id_offset
-        contact_sites_blockwise_idi.ds[block.write_roi] = trim_with_padding(contact_sites)
+        contact_sites_blockwise_vol.write_index(
+            block.begin, block.end, contact_sites[block.inner]
+        )
 
     def calculate_contact_sites_blockwise(self):
-        num_blocks = dask_util.get_num_blocks(
-            self.contact_sites_blockwise_idi, self.roi
-        )
+        num_blocks = dask_util.get_num_blocks(self.grid)
         dask_util.compute_blockwise_partitions(
             num_blocks,
             self.num_workers,
             self.compute_args,
             logger,
-            f"calculating blockwise contact sites between {self.organelle_1_idi.path} and {self.organelle_2_idi.path}",
+            f"calculating blockwise contact sites between {self.organelle_1_vol.level_path} and {self.organelle_2_vol.level_path}",
             ContactSites.calculate_block_contact_sites,
-            self.organelle_1_idi,
-            self.organelle_2_idi,
-            self.contact_sites_blockwise_idi,
+            self.grid,
+            self.organelle_1_vol,
+            self.organelle_2_vol,
+            self.contact_sites_blockwise_vol,
             self.contact_distance_voxels,
             self.padding_voxels,
-            self.original_voxel_size,
             self.contact_distance_nm,
         )
 
     def get_contact_sites(self):
         self.calculate_contact_sites_blockwise()
 
+        # the blockwise contact sites are already on the grid, roi and all
         cc = ConnectedComponents(
-            connected_components_blockwise_path=self.contact_sites_blockwise_idi.path,
+            connected_components_blockwise_path=self.contact_sites_blockwise_vol.level_path,
             output_path=self.output_path,
-            roi=self.roi,
             num_workers=self.num_workers,
             minimum_volume_nm_3=self.minimum_volume_nm_3,
             connectivity=3,

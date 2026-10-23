@@ -120,7 +120,8 @@ def _build_precomputed_volume(root: str, data_zyx: np.ndarray, voxel_offset_xyz,
 def test_precomputed_read_local(tmp_path):
     """Open a local precomputed volume; voxel_size + corner offset come
     from the ``info`` file, data round-trips through tensorstore."""
-    from cellmap_analyze.util.image_data_interface import ImageDataInterface
+    from cellmap_analyze.util.grid_util import grid_of
+    from cellmap_analyze.util.zarr_util import open_dataset
 
     data = np.arange(4 * 6 * 8, dtype=np.uint8).reshape(4, 6, 8)  # ZYX
     root = str(tmp_path / "vol")
@@ -128,45 +129,47 @@ def test_precomputed_read_local(tmp_path):
         root, data, voxel_offset_xyz=[10, 20, 30], resolution_xyz=[8.0, 8.0, 8.0]
     )
 
-    idi = ImageDataInterface(root)
-    assert idi.filetype == "neuroglancer_precomputed"
-    assert tuple(idi.voxel_size) == (8, 8, 8)
+    vol = open_dataset(root)
+    assert tuple(vol.voxel_size) == (8, 8, 8)
     # voxel_offset = (10, 20, 30) XYZ → ZYX corner = (30, 20, 10) * 8 = (240, 160, 80)
-    assert tuple(idi.offset) == (240, 160, 80)
-    np.testing.assert_array_equal(idi.to_ndarray_ts(idi.roi), data)
+    assert tuple(vol.corner) == (240, 160, 80)
+    np.testing.assert_array_equal(vol.read_onto(grid_of(vol)), data)
 
 
 def test_precomputed_read_with_scale_suffix(tmp_path):
     """``.../vol/s0`` selects scale ``s0`` from the info file."""
-    from cellmap_analyze.util.image_data_interface import ImageDataInterface
+    from cellmap_analyze.util.grid_util import grid_of
+    from cellmap_analyze.util.zarr_util import open_dataset
 
     data = np.arange(4 * 6 * 8, dtype=np.uint8).reshape(4, 6, 8)
     root = str(tmp_path / "vol")
     _build_precomputed_volume(root, data, [0, 0, 0], [4.0, 4.0, 4.0])
 
-    idi = ImageDataInterface(root + "/s0")
-    assert tuple(idi.voxel_size) == (4, 4, 4)
-    np.testing.assert_array_equal(idi.to_ndarray_ts(idi.roi), data)
+    vol = open_dataset(root + "/s0")
+    assert tuple(vol.voxel_size) == (4, 4, 4)
+    np.testing.assert_array_equal(vol.read_onto(grid_of(vol)), data)
 
 
 def test_precomputed_read_with_explicit_prefix(tmp_path):
     """``precomputed://`` prefix is accepted (neuroglancer-style URLs)."""
-    from cellmap_analyze.util.image_data_interface import ImageDataInterface
+    from cellmap_analyze.util.grid_util import grid_of
+    from cellmap_analyze.util.zarr_util import open_dataset
 
     data = np.arange(2 * 3 * 4, dtype=np.uint8).reshape(2, 3, 4)
     root = str(tmp_path / "vol")
     _build_precomputed_volume(root, data, [0, 0, 0], [16.0, 16.0, 16.0])
 
-    idi = ImageDataInterface("precomputed://" + root)
-    assert tuple(idi.voxel_size) == (16, 16, 16)
-    np.testing.assert_array_equal(idi.to_ndarray_ts(idi.roi), data)
+    vol = open_dataset("precomputed://" + root)
+    assert tuple(vol.voxel_size) == (16, 16, 16)
+    np.testing.assert_array_equal(vol.read_onto(grid_of(vol)), data)
 
 
 def test_precomputed_read_s3(tmp_path, s3_env):
     """Read a precomputed volume from mock S3, exercising the same code
     paths a real public-bucket read would: ``info`` via stdlib urllib,
     chunks via tensorstore's S3 driver. Mirrors test_s3_read.py."""
-    from cellmap_analyze.util.image_data_interface import ImageDataInterface
+    from cellmap_analyze.util.grid_util import grid_of
+    from cellmap_analyze.util.zarr_util import open_dataset
 
     bucket = "cellmap-precomp"
     _make_public_bucket(s3_env, bucket)
@@ -178,8 +181,7 @@ def test_precomputed_read_s3(tmp_path, s3_env):
     )
     _upload_dir_to_s3(s3_env, local_root, bucket, "data/seg")
 
-    idi = ImageDataInterface(f"s3://{bucket}/data/seg")
-    assert idi.filetype == "neuroglancer_precomputed"
-    assert tuple(idi.voxel_size) == (8, 8, 8)
-    assert tuple(idi.offset) == (240, 160, 80)
-    np.testing.assert_array_equal(idi.to_ndarray_ts(idi.roi), data)
+    vol = open_dataset(f"s3://{bucket}/data/seg")
+    assert tuple(vol.voxel_size) == (8, 8, 8)
+    assert tuple(vol.corner) == (240, 160, 80)
+    np.testing.assert_array_equal(vol.read_onto(grid_of(vol)), data)

@@ -4,12 +4,12 @@ import shutil
 import uuid
 from abc import ABC, abstractmethod
 from collections import OrderedDict
+from dataclasses import replace
 
 import edt as edt_module
 import fastremap
 import numpy as np
 import pandas as pd
-from funlib.geometry import Roi
 from scipy.ndimage import binary_dilation
 from skimage.feature import peak_local_max
 from skimage.filters import threshold_otsu
@@ -18,10 +18,10 @@ from skimage.segmentation import watershed
 from cellmap_analyze.process.clean_connected_components import CleanConnectedComponents
 from cellmap_analyze.util import dask_util, io_util
 from cellmap_analyze.util.dask_util import create_block_from_index
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.grid_util import grid_of
 from cellmap_analyze.util.io_util import get_output_path_from_input_path
 from cellmap_analyze.util.mixins import ComputeConfigMixin
-from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
+from cellmap_analyze.util.zarr_util import create_multiscale_dataset, open_dataset
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -62,7 +62,7 @@ class SplitStrategy(ABC):
                 disables it.
             distance: optional precomputed EDT, same shape as ``mask``
                 (e.g. cropped from a ``ComputeEDT`` output covering the same
-                roi). Values outside the mask are never read, so it's fine
+                voxels). Values outside the mask are never read, so it's fine
                 if they reflect neighboring objects rather than 0/background.
                 None (default) computes it locally via ``edt.edt(mask, ...)``.
             neck_radius_mode: "fixed" (default) uses ``neck_radius_voxels``
@@ -415,10 +415,9 @@ class SplitNarrowBridges(ComputeConfigMixin):
                 ``ComputeEDT`` run over ``segmentation_path``). When given,
                 each object reads its EDT window from here instead of
                 recomputing ``edt.edt(mask, ...)`` from scratch -- the
-                expensive part for very large merged objects. Must cover the
-                same voxel grid as ``segmentation_path`` (same voxel size and
-                total roi); a per-object shape mismatch raises rather than
-                silently misaligning.
+                expensive part for very large merged objects. Must have the
+                segmentation's voxel size (a mismatch raises rather than
+                silently resampling); it is read onto the segmentation's voxels.
             precompute_edt: Only consulted when ``edt_path`` is None. False
                 (default) computes ``edt.edt(mask, ...)`` per object, inside
                 the same memory-aware per-object wave dispatch
@@ -463,7 +462,7 @@ class SplitNarrowBridges(ComputeConfigMixin):
                 otherwise drop them, and spurious over-split fragments get
                 caught by min-volume filtering afterward.
             num_workers: Number of parallel dask workers.
-            timeout: Base timeout (seconds) for ImageDataInterface reads,
+            timeout: Base timeout (seconds) for segmentation/EDT reads,
                 scaled up per attempt by the read retries
                 (``timeout * attempt``, up to 10 attempts) and, when
                 ``concurrency_limit`` auto-resolves above 1 (see below),
@@ -479,7 +478,7 @@ class SplitNarrowBridges(ComputeConfigMixin):
                 the only lever on CPU use in the normal multi-worker wave
                 dispatch (``num_workers > 1``) -- there, auto-resolve keeps
                 the safe ``1`` (matches the prior hardcoded
-                ``ImageDataInterface`` default; unbounded concurrency per
+                default; unbounded concurrency per
                 worker process would let tensorstore oversubscribe cores
                 shared with sibling worker processes on the same node).
                 When ``num_workers <= 1`` (the synchronous, no-cluster path
@@ -498,7 +497,7 @@ class SplitNarrowBridges(ComputeConfigMixin):
                 either way.
                 For real lsf/slurm/sge wave dispatch (``num_workers > 1``),
                 the initial ``1`` above is only the value baked into this
-                instance's IDIs at construction; ``split_objects`` also
+                instance's datasets at construction; ``split_objects`` also
                 rescales it per-wave inside each worker (see
                 ``split_id``'s ``processes_per_job``) to that worker's fair
                 share of its *job's* real CPU affinity -- a job's cpuset is
@@ -517,7 +516,7 @@ class SplitNarrowBridges(ComputeConfigMixin):
                 memory-aware dask waves (mirrors ``Skeletonize``). Peak is
                 ``mask (bool) + distance (float64) + markers (int32) +
                 watershed labels (int32)`` = 1 + 8 + 4 + 4 = 17 bytes/voxel
-                when no EDT is precomputed (``edt_idi`` is None, so
+                when no EDT is precomputed (``edt_vol`` is None, so
                 ``find_subpieces`` calls ``edt.edt(mask, ...)`` itself,
                 needing its own float64 distance array); when an EDT is
                 precomputed, 8 bytes/voxel are subtracted (no local
@@ -547,14 +546,14 @@ class SplitNarrowBridges(ComputeConfigMixin):
             num_workers, concurrency_limit
         )
         self.segmentation_path = segmentation_path
-        self.segmentation_idi = ImageDataInterface(
+        self.segmentation_vol = open_dataset(
             segmentation_path,
             timeout=timeout,
-            chunk_shape=chunk_shape,
             concurrency_limit=self.concurrency_limit,
         )
+        # the output's voxels, and the blocks it is written in
+        self.grid = grid_of(self.segmentation_vol, chunk_shape)
         self.output_path = str(output_path).rstrip("/")
-        self.roi = self.segmentation_idi.roi
 
         # Per-instance suffix so concurrent runs sharing output_path don't
         # collide on the scratch/merge dirs. Needed early: also names the
@@ -562,12 +561,11 @@ class SplitNarrowBridges(ComputeConfigMixin):
         self._run_id = uuid.uuid4().hex[:8]
 
         self._edt_scratch_path = None
-        self.edt_idi = None
+        self.edt_vol = None
         if edt_path is not None:
-            self.edt_idi = ImageDataInterface(
+            self.edt_vol = open_dataset(
                 edt_path,
                 timeout=timeout,
-                chunk_shape=chunk_shape,
                 concurrency_limit=self.concurrency_limit,
             )
         elif precompute_edt:
@@ -576,7 +574,7 @@ class SplitNarrowBridges(ComputeConfigMixin):
             padding_nm = edt_padding_nm
             if padding_nm is None:
                 padding_nm = max(
-                    float(neck_radius_nm), min(self.segmentation_idi.original_voxel_size)
+                    float(neck_radius_nm), min(self.segmentation_vol.voxel_size)
                 )
             self._edt_scratch_path = get_output_path_from_input_path(
                 self.output_path, f"_edt_scratch_{self._run_id}"
@@ -597,11 +595,21 @@ class SplitNarrowBridges(ComputeConfigMixin):
                 num_workers=num_workers,
                 chunk_shape=chunk_shape,
             ).calculate_edt()
-            self.edt_idi = ImageDataInterface(
+            self.edt_vol = open_dataset(
                 f"{self._edt_scratch_path}/s0",
                 timeout=timeout,
-                chunk_shape=chunk_shape,
                 concurrency_limit=self.concurrency_limit,
+            )
+        # read onto the segmentation's voxels, so it must have their size
+        if self.edt_vol is not None and not np.allclose(
+            self.edt_vol.voxel_size, self.segmentation_vol.voxel_size
+        ):
+            raise ValueError(
+                f"Precomputed EDT voxel size {self.edt_vol.voxel_size} does "
+                f"not match the segmentation's "
+                f"{self.segmentation_vol.voxel_size}. edt_path must cover the "
+                f"same voxel grid as segmentation_path (e.g. produced by "
+                f"ComputeEDT run over this same segmentation)."
             )
 
         if strategy not in _STRATEGY_REGISTRY:
@@ -650,9 +658,9 @@ class SplitNarrowBridges(ComputeConfigMixin):
             )
         self.neck_radius_mode = neck_radius_mode
 
-        original_voxel_size = self.segmentation_idi.original_voxel_size
-        voxel_volume = float(np.prod(original_voxel_size))
-        self.neck_radius_voxels = float(neck_radius_nm) / min(original_voxel_size)
+        voxel_size = self.segmentation_vol.voxel_size
+        voxel_volume = float(np.prod(voxel_size))
+        self.neck_radius_voxels = float(neck_radius_nm) / min(voxel_size)
         if minimum_subregion_volume_nm_3 is None:
             # Default: derive from the final minimum_volume_nm_3 filter. A
             # split producing a piece below that threshold would just get
@@ -696,9 +704,13 @@ class SplitNarrowBridges(ComputeConfigMixin):
             # complete a single attempt -- roughly chunks/1000, seconds.
             max_chunks = max(self._estimate_num_chunks(i) for i in self.ids)
             scaled_timeout = min(max(timeout, timeout * max_chunks / 1000.0), 600.0)
-            self.segmentation_idi.timeout = scaled_timeout
-            if self.edt_idi is not None:
-                self.edt_idi.timeout = scaled_timeout
+            self.segmentation_vol = self.segmentation_vol.reopen(
+                retries=replace(self.segmentation_vol.retries, timeout=scaled_timeout)
+            )
+            if self.edt_vol is not None:
+                self.edt_vol = self.edt_vol.reopen(
+                    retries=replace(self.edt_vol.retries, timeout=scaled_timeout)
+                )
 
         logger.info(f"Loaded {len(self.ids)} IDs from {csv_path}")
         logger.info(f"Output will be written to {self.output_path}")
@@ -731,52 +743,31 @@ class SplitNarrowBridges(ComputeConfigMixin):
         return csv_path
 
     @staticmethod
-    def _object_roi(id_value, bbox_df, segmentation_idi):
+    def _object_box(id_value, bbox_df, grid):
+        """The object's voxels on the segmentation's ``grid`` and one more on every
+        side, as ``(begin, end)``. Measure's "MIN/MAX (nm)" columns are the
+        centres of its corner voxels (see measure_util.py)."""
         row = bbox_df.loc[id_value]
-        voxel_size = np.array(segmentation_idi.voxel_size, dtype=float)
-        sf = segmentation_idi.voxel_size_scale_factor
-        padding = voxel_size  # 1 voxel in each direction
-
-        # Measure's "MIN/MAX (nm)" columns are voxel-*center* coordinates
-        # (see measure_util.py), not edges. Naively doing `MIN*sf - padding`
-        # / `MAX*sf + padding` looks symmetric but isn't: MIN*sf is already
-        # half a voxel inside the object's true bounding box, so subtracting
-        # a full voxel of padding correctly reaches a full voxel past the
-        # low edge -- but MAX*sf is also half a voxel *inside* the box, so
-        # adding a full voxel of padding only reaches the far edge of the
-        # object's own last voxel, giving ~zero real margin on the high
-        # side. Shifting by voxel_size/2 first lands both bounds exactly on
-        # grid edges, so the padding added afterward is a genuine, symmetric
-        # full voxel on every side. (voxel_size is cast to float above --
-        # funlib.geometry.Coordinate does integer division, so `/2` on an
-        # odd or unit voxel_size would silently truncate the shift to 0.)
-        min_point = (
-            np.array(
-                [row["MIN Z (nm)"] * sf, row["MIN Y (nm)"] * sf, row["MIN X (nm)"] * sf]
+        voxel_size = np.array(grid.voxel_size)
+        begin, end = grid.index_box(
+            (
+                np.array([row[f"MIN {d} (nm)"] for d in "ZYX"]) - voxel_size / 2,
+                np.array([row[f"MAX {d} (nm)"] for d in "ZYX"]) + voxel_size / 2,
             )
-            - voxel_size / 2
         )
-        max_point = (
-            np.array(
-                [row["MAX Z (nm)"] * sf, row["MAX Y (nm)"] * sf, row["MAX X (nm)"] * sf]
-            )
-            + voxel_size / 2
-        )
-        start_point = min_point - padding
-        end_point = max_point + padding
-        return Roi(start_point, end_point - start_point)
+        return tuple(int(b) - 1 for b in begin), tuple(int(e) + 1 for e in end)
 
     @staticmethod
     def split_id(
         id_value,
-        segmentation_idi: ImageDataInterface,
+        segmentation_vol,
         bbox_df: pd.DataFrame,
         strategy: SplitStrategy,
         neck_radius_voxels: float,
         minimum_subregion_volume_voxels,
         max_pieces_per_object: int,
         scratch_dir: str,
-        edt_idi: ImageDataInterface = None,
+        edt_vol=None,
         neck_radius_mode: str = "fixed",
         processes_per_job: int = None,
     ):
@@ -788,8 +779,8 @@ class SplitNarrowBridges(ComputeConfigMixin):
         these on the driver before doing any blockwise writing.
 
         processes_per_job: When set (only meaningful for lsf/slurm/sge
-            waves -- see ``split_objects``), rescales ``segmentation_idi``/
-            ``edt_idi``'s ``concurrency_limit`` to this worker's fair share
+            waves -- see ``split_objects``), reopens ``segmentation_vol``/
+            ``edt_vol`` with a concurrency limit of this worker's fair share
             of its job's real CPU affinity: ``sched_getaffinity`` count //
             ``processes_per_job``. A single job's cpuset is shared by every
             dask worker *process* running inside it (cpuset affinity isn't
@@ -803,12 +794,13 @@ class SplitNarrowBridges(ComputeConfigMixin):
             (default) leaves whatever ``concurrency_limit`` was set at
             construction untouched.
         """
-        dask_util.rescale_idi_concurrency(
-            (segmentation_idi, edt_idi), processes_per_job
+        segmentation_vol, edt_vol = dask_util.rescale_concurrency(
+            (segmentation_vol, edt_vol), processes_per_job
         )
 
-        roi = SplitNarrowBridges._object_roi(id_value, bbox_df, segmentation_idi)
-        data = segmentation_idi.to_ndarray_ts(roi)
+        grid = grid_of(segmentation_vol)
+        begin, end = SplitNarrowBridges._object_box(id_value, bbox_df, grid)
+        data = segmentation_vol.read_onto(grid, begin, end)
         mask = data == id_value
         del data  # never referenced again; drop the full-dtype array before
         # the EDT/markers/labels arrays get allocated below, so peak memory
@@ -818,20 +810,12 @@ class SplitNarrowBridges(ComputeConfigMixin):
             return {"id": int(id_value), "split": False}
 
         distance = None
-        if edt_idi is not None:
-            distance = edt_idi.to_ndarray_ts(roi)
-            if distance.shape != mask.shape:
-                raise ValueError(
-                    f"Precomputed EDT shape {distance.shape} does not match "
-                    f"segmentation crop shape {mask.shape} for object "
-                    f"{id_value} (roi={roi}). edt_path must cover the same "
-                    f"voxel grid as segmentation_path (e.g. produced by "
-                    f"ComputeEDT run over this same segmentation)."
-                )
+        if edt_vol is not None:
+            distance = edt_vol.read_onto(grid, begin, end)
 
         subpieces = strategy.find_subpieces(
             mask,
-            segmentation_idi.original_voxel_size,
+            segmentation_vol.voxel_size,
             neck_radius_voxels,
             minimum_subregion_volume_voxels,
             distance=distance,
@@ -858,8 +842,8 @@ class SplitNarrowBridges(ComputeConfigMixin):
             "split": True,
             "num_pieces": num_pieces,
             "scratch_path": scratch_path,
-            "roi_begin": tuple(roi.get_begin()),
-            "roi_shape": tuple(roi.shape),
+            "begin": begin,
+            "end": end,
         }
 
     @staticmethod
@@ -873,7 +857,7 @@ class SplitNarrowBridges(ComputeConfigMixin):
 
         ``relabel_block_with_splits`` used to loop over every entry of
         ``split_lookup`` for *every* block (a Python-level
-        ``Roi.intersect()`` call each time) to find the handful that
+        box intersection each time) to find the handful that
         actually overlap -- O(blocks * split objects). On a real production
         run (jrc_mus-cerebellum-2, 1507 split objects, ~1.74M blocks) this
         made the write phase run at ~2.8 blocks/sec (measured directly
@@ -885,14 +869,8 @@ class SplitNarrowBridges(ComputeConfigMixin):
         every object in one vectorized comparison instead of a Python loop.
         """
         ids = list(split_lookup.keys())
-        begins = np.array([split_lookup[i][2].begin for i in ids], dtype=np.float64)
-        ends = np.array(
-            [
-                np.array(split_lookup[i][2].begin) + np.array(split_lookup[i][2].shape)
-                for i in ids
-            ],
-            dtype=np.float64,
-        )
+        begins = np.array([split_lookup[i][2] for i in ids], dtype=np.int64)
+        ends = np.array([split_lookup[i][3] for i in ids], dtype=np.int64)
         return ids, begins, ends
 
     @staticmethod
@@ -944,20 +922,21 @@ class SplitNarrowBridges(ComputeConfigMixin):
     @staticmethod
     def relabel_block_with_splits(
         block_index,
-        segmentation_idi: ImageDataInterface,
-        output_idi: ImageDataInterface,
+        segmentation_vol,
+        output_vol,
+        grid,
         split_lookup: dict,
         spatial_index,
         dtype,
         subpieces_cache_max_bytes,
     ):
-        block = create_block_from_index(output_idi, block_index)
-        data = segmentation_idi.to_ndarray_ts(block.write_roi).astype(dtype)
+        block = create_block_from_index(grid, block_index)
+        data = segmentation_vol.read_onto(grid, block.begin, block.end).astype(dtype)
+        block_begin = np.array(block.begin)
+        block_end = np.array(block.end)
 
         ids, begins, ends = spatial_index
         if ids:
-            block_begin = np.array(block.write_roi.begin, dtype=np.float64)
-            block_end = block_begin + np.array(block.write_roi.shape, dtype=np.float64)
             # Cheap vectorized bbox-overlap test against every split object
             # at once; only the (usually zero, rarely more than a handful)
             # candidates that pass get the exact per-axis slicing below.
@@ -968,27 +947,24 @@ class SplitNarrowBridges(ComputeConfigMixin):
             candidates = ()
 
         if len(candidates):
-            voxel_size = output_idi.voxel_size
             cache = SplitNarrowBridges._subpieces_cache
             for idx in candidates:
                 id_value = ids[idx]
-                new_id_base, scratch_path, obj_roi = split_lookup[id_value]
-                overlap = block.write_roi.intersect(obj_roi)
-                if overlap.empty:
-                    continue
+                new_id_base, scratch_path, obj_begin, _ = split_lookup[id_value]
+                overlap_begin = np.maximum(block_begin, begins[idx])
+                overlap_end = np.minimum(block_end, ends[idx])
 
                 subpieces = SplitNarrowBridges._load_subpieces_cached(
                     scratch_path, cache, subpieces_cache_max_bytes
                 )
 
-                data_offset = (overlap.begin - block.write_roi.begin) / voxel_size
-                obj_offset = (overlap.begin - obj_roi.begin) / voxel_size
-                shape = overlap.shape / voxel_size
                 data_slice = tuple(
-                    slice(int(o), int(o + s)) for o, s in zip(data_offset, shape)
+                    slice(int(b), int(e))
+                    for b, e in zip(overlap_begin - block_begin, overlap_end - block_begin)
                 )
                 obj_slice = tuple(
-                    slice(int(o), int(o + s)) for o, s in zip(obj_offset, shape)
+                    slice(int(b), int(e))
+                    for b, e in zip(overlap_begin - obj_begin, overlap_end - obj_begin)
                 )
 
                 region = data[data_slice]
@@ -1000,7 +976,7 @@ class SplitNarrowBridges(ComputeConfigMixin):
                     )
                     data[data_slice] = region
 
-        output_idi.ds[block.write_roi] = data
+        output_vol.write_index(block.begin, block.end, data)
 
     # Per-worker-process cache for relabel_block_with_splits (see
     # _load_subpieces_cached) -- a plain class attribute so it persists
@@ -1026,23 +1002,16 @@ class SplitNarrowBridges(ComputeConfigMixin):
 
     def _write_output(self, split_lookup, dtype=None, output_path=None, base_config=None):
         if dtype is None:
-            dtype = self.segmentation_idi.dtype
+            dtype = self.segmentation_vol.dtype
         if output_path is None:
             output_path = self.output_path
 
-        output_idi = create_multiscale_dataset_idi(
-            output_path,
-            dtype=dtype,
-            voxel_size=self.segmentation_idi.voxel_size,
-            total_roi=self.roi,
-            write_size=self.segmentation_idi.chunk_shape * self.segmentation_idi.voxel_size,
-            original_voxel_size=self.segmentation_idi.original_voxel_size,
-        )
+        output_vol = create_multiscale_dataset(output_path, dtype=dtype, grid=self.grid)
 
         spatial_index = SplitNarrowBridges._build_split_spatial_index(split_lookup)
         subpieces_cache_max_bytes = self._resolve_subpieces_cache_max_bytes(base_config)
 
-        num_blocks = dask_util.get_num_blocks(self.segmentation_idi, roi=self.roi)
+        num_blocks = dask_util.get_num_blocks(self.grid)
         write_label = f"writing split output to {output_path}"
 
         def _phase(workers, config):
@@ -1053,8 +1022,9 @@ class SplitNarrowBridges(ComputeConfigMixin):
                 logger,
                 write_label,
                 SplitNarrowBridges.relabel_block_with_splits,
-                self.segmentation_idi,
-                output_idi,
+                self.segmentation_vol,
+                output_vol,
+                self.grid,
                 split_lookup,
                 spatial_index,
                 dtype,
@@ -1078,12 +1048,11 @@ class SplitNarrowBridges(ComputeConfigMixin):
         by the memory (``_estimate_peak_bytes``) and read-size
         (``_estimate_num_chunks``) estimators."""
         row = self.bbox_df.loc[id_value]
-        voxel_size = self.segmentation_idi.voxel_size
-        original_vs = self.segmentation_idi.original_voxel_size
-        dx = (row["MAX X (nm)"] - row["MIN X (nm)"]) + 2 * voxel_size[0]
-        dy = (row["MAX Y (nm)"] - row["MIN Y (nm)"]) + 2 * voxel_size[1]
-        dz = (row["MAX Z (nm)"] - row["MIN Z (nm)"]) + 2 * voxel_size[2]
-        min_vs = min(original_vs)
+        vs_z, vs_y, vs_x = self.segmentation_vol.voxel_size
+        dx = (row["MAX X (nm)"] - row["MIN X (nm)"]) + 2 * vs_x
+        dy = (row["MAX Y (nm)"] - row["MIN Y (nm)"]) + 2 * vs_y
+        dz = (row["MAX Z (nm)"] - row["MIN Z (nm)"]) + 2 * vs_z
+        min_vs = min(self.segmentation_vol.voxel_size)
         return (dx * dy * dz) / (min_vs ** 3)
 
     def _estimate_peak_bytes(self, id_value):
@@ -1099,7 +1068,7 @@ class SplitNarrowBridges(ComputeConfigMixin):
         """
         iso_voxels = self._bbox_iso_voxels(id_value)
         bytes_per_voxel = self.peak_bytes_per_voxel
-        if self.edt_idi is not None:
+        if self.edt_vol is not None:
             bytes_per_voxel -= 8.0
         peak = self.peak_bytes_baseline + bytes_per_voxel * iso_voxels
         return int(peak * self.memory_safety_multiplier)
@@ -1109,7 +1078,7 @@ class SplitNarrowBridges(ComputeConfigMixin):
         spans -- read wall-clock scales with this, not with voxel count,
         since ``concurrency_limit`` gates chunk-level, not byte-level,
         parallelism."""
-        chunk_voxels = float(np.prod(self.segmentation_idi.chunk_shape))
+        chunk_voxels = float(np.prod(self.grid.chunks))
         return self._bbox_iso_voxels(id_value) / max(chunk_voxels, 1.0)
 
     def _log_wave_plan(self, waves):
@@ -1181,14 +1150,14 @@ class SplitNarrowBridges(ComputeConfigMixin):
                     id_value = _wave_ids[idx]
                     return SplitNarrowBridges.split_id(
                         id_value,
-                        self.segmentation_idi,
+                        self.segmentation_vol,
                         self.bbox_df,
                         self.strategy,
                         self.neck_radius_voxels,
                         self.minimum_subregion_volume_voxels,
                         self.max_pieces_per_object,
                         scratch_dir,
-                        self.edt_idi,
+                        self.edt_vol,
                         neck_radius_mode=self.neck_radius_mode,
                         processes_per_job=_procs,
                     )
@@ -1240,8 +1209,12 @@ class SplitNarrowBridges(ComputeConfigMixin):
                 split_lookup = {}
                 for rank, r in enumerate(split_results):
                     new_id_base = max_original_id + 1 + rank * self.max_pieces_per_object
-                    obj_roi = Roi(r["roi_begin"], r["roi_shape"])
-                    split_lookup[r["id"]] = (new_id_base, r["scratch_path"], obj_roi)
+                    split_lookup[r["id"]] = (
+                        new_id_base,
+                        r["scratch_path"],
+                        r["begin"],
+                        r["end"],
+                    )
 
                 max_new_id = (
                     max_original_id + len(split_results) * self.max_pieces_per_object

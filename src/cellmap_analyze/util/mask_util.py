@@ -1,9 +1,9 @@
 # %%
 import numpy as np
 from scipy import ndimage
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.grid_util import grid_of
+from cellmap_analyze.util.zarr_util import open_dataset
 from cellmap_analyze.util.block_util import erosion, dilation
-from cellmap_analyze.util.voxel_size_utils import compute_common_scale_factor
 from functools import partial
 
 
@@ -27,11 +27,9 @@ class Mask:
         mask_type="exclusive",
         operation="simple",
         iterations=0,
-        output_voxel_size=None,
+        output_grid=None,
         connectivity=2,
         mask_value=None,
-        chunk_shape=None,
-        caller_scale_factor=1,
     ):
         if type(operation) == str:
             operation = [operation]
@@ -42,29 +40,9 @@ class Mask:
             raise ValueError("Iterations and operation must have the same length")
 
         structuring_element = ndimage.generate_binary_structure(3, connectivity)
-        if "erosion" in operation:
-            self.idi = ImageDataInterface(
-                path,
-                custom_fill_value="edge",
-                chunk_shape=chunk_shape,
-            )
-        else:
-            self.idi = ImageDataInterface(
-                path, chunk_shape=chunk_shape
-            )
-
-        # Align scale factors: rescale mask IDI to match caller's coordinate space
-        common_sf = compute_common_scale_factor(
-            self.idi.voxel_size_scale_factor, caller_scale_factor
-        )
-        self.idi.rescale_to_factor(common_sf)
-
-        # Now set output_voxel_size (both are in the same scaled space)
-        if output_voxel_size is not None:
-            self.idi.output_voxel_size = output_voxel_size
-        self.output_voxel_size = output_voxel_size
-        if not self.output_voxel_size:
-            self.output_voxel_size = self.idi.voxel_size
+        self.vol = open_dataset(path, padding="edge" if "erosion" in operation else 0)
+        # read on the caller's grid
+        self.grid = grid_of(self.vol) if output_grid is None else output_grid
 
         if (not operation and iterations > 0) or (operation and iterations == 0):
             raise ValueError(
@@ -81,28 +59,30 @@ class Mask:
         )
 
     def _process_block(
-        self, operation, mask_type, iterations, mask_value, structuring_element, roi
+        self,
+        begin=None,
+        end=None,
+        *,
+        operation,
+        mask_type,
+        iterations,
+        mask_value,
+        structuring_element,
     ):
-        if not roi:
-            roi = self.idi.roi
+        """The mask over voxels ``[begin, end)`` of the caller's grid (all of it when
+        None)."""
+        if begin is None:
+            begin, end = (0,) * 3, self.grid.shape
 
         if operation == ["simple"]:
-            block = self.idi.to_ndarray_ts(roi)
+            block = self.vol.read_onto(self.grid, begin, end)
             if mask_value is not None:
                 block = _apply_mask_value(block, mask_value)
         else:
-            total_iterations = sum(iterations)
-            # Use minimum voxel size for uniform padding in physical units
-            min_voxel_size = min(self.output_voxel_size)
-            padding = total_iterations * min_voxel_size
-            grown_roi = roi.grow(padding, padding)
-            block = self.idi.to_ndarray_ts(grown_roi)
-
-            # Calculate actual padding from array shape vs original ROI shape
-            roi_shape_voxels = tuple(int(s / vs) for s, vs in zip(roi.shape, self.output_voxel_size))
-            actual_padding_voxels = tuple(
-                (block.shape[i] - roi_shape_voxels[i]) // 2
-                for i in range(3)
+            # each iteration reaches one voxel further on every axis
+            padding = sum(iterations)
+            block = self.vol.read_onto(
+                self.grid, np.subtract(begin, padding), np.add(end, padding)
             )
 
             if mask_value is not None:
@@ -113,14 +93,8 @@ class Mask:
                 else:
                     block = dilation(block, iterations, structuring_element)
 
-            # Trim using actual padding calculated from array shapes
-            slices = []
-            for p in actual_padding_voxels:
-                if p > 0:
-                    slices.append(slice(p, -p))
-                else:
-                    slices.append(slice(None))
-            block = block[tuple(slices)]
+            if padding:
+                block = block[(slice(padding, -padding),) * 3]
 
         if mask_type == "exclusive":
             block = block == 0
@@ -131,24 +105,21 @@ class Mask:
 
 
 class MasksFromConfig:
-    def __init__(
-        self, mask_config_dict, output_voxel_size, connectivity=2, caller_scale_factor=1
-    ):
+    def __init__(self, mask_config_dict, output_grid, connectivity=2):
         self.connectivity = connectivity
         self.mask_dict = {}
         for mask_name, mask_config in mask_config_dict.items():
             self.mask_dict[mask_name] = Mask(
                 **mask_config,
-                output_voxel_size=output_voxel_size,
+                output_grid=output_grid,
                 connectivity=connectivity,
-                caller_scale_factor=caller_scale_factor,
             )
 
-    def process_block(self, roi):
+    def process_block(self, begin=None, end=None):
         for idx, mask in enumerate(self.mask_dict.values()):
             if idx == 0:
-                block = mask.process_block(roi=roi)
+                block = mask.process_block(begin, end)
             else:
-                block &= mask.process_block(roi=roi)
+                block &= mask.process_block(begin, end)
 
         return block

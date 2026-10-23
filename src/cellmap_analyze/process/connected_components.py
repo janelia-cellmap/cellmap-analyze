@@ -1,10 +1,11 @@
 import numpy as np
+import worldarray as wa
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util import io_util
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.grid_util import crop_to_roi, grid_of
 from cellmap_analyze.util.io_util import (
     get_name_from_path,
     get_output_path_from_input_path,
@@ -21,13 +22,11 @@ from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components as csgraph_connected_components
 from cellmap_analyze.util.mask_util import MasksFromConfig
 from cellmap_analyze.util.mixins import ComputeConfigMixin
-from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
+from cellmap_analyze.util.zarr_util import create_multiscale_dataset, open_dataset
 from scipy.ndimage import gaussian_filter
 import cc3d
 from collections import Counter
 import shutil
-from cellmap_analyze.util.measure_util import trim_array_anisotropic
-from funlib.geometry import Coordinate
 from cellmap_analyze.cythonizing.touching import get_touching_ids
 
 logging.basicConfig(
@@ -103,53 +102,46 @@ class ConnectedComponents(ComputeConfigMixin):
                     f"between 1 and len(consensus_config) ({len(consensus_config)})"
                 )
 
-        self.consensus_idis = None
+        self.consensus_vols = None
         self.consensus_thresholds = None
         self.minimum_consensus_count = None
         if consensus_config:
-            self.consensus_idis = [
-                ImageDataInterface(c["path"], chunk_shape=chunk_shape)
-                for c in consensus_config
-            ]
-            template_idi = self.input_idi = self.consensus_idis[0]
+            self.consensus_vols = [open_dataset(c["path"]) for c in consensus_config]
+            template_vol = self.input_vol = self.consensus_vols[0]
         elif input_path:
-            template_idi = self.input_idi = ImageDataInterface(
-                input_path, chunk_shape=chunk_shape
-            )
+            template_vol = self.input_vol = open_dataset(input_path)
         else:
-            template_idi = self.connected_components_blockwise_idi = ImageDataInterface(
-                connected_components_blockwise_path, chunk_shape=chunk_shape
+            template_vol = self.connected_components_blockwise_vol = open_dataset(
+                connected_components_blockwise_path
             )
 
-        self.object_labels_idi = None
+        self.object_labels_vol = None
         if object_labels_path:
-            self.object_labels_idi = ImageDataInterface(
-                object_labels_path, chunk_shape=chunk_shape
-            )
+            self.object_labels_vol = open_dataset(object_labels_path)
 
         self.binarize = binarize
         self.deduplicate_ids = deduplicate_ids
         if deduplicate_ids:
-            if self.object_labels_idi is not None:
+            if self.object_labels_vol is not None:
                 raise Exception(
                     "If deduplicate_ids is True, object_labels_path must be empty"
                 )
-            self.object_labels_idi = self.input_idi
+            self.object_labels_vol = self.input_vol
             self.binarize = False
 
-        if roi is None:
-            self.roi = template_idi.roi
-        else:
-            self.roi = roi
+        # one grid for the whole run: every input is read onto it and every output
+        # is written on it
+        self.roi = roi
+        self.grid = crop_to_roi(grid_of(template_vol, chunk_shape), roi)
 
         self.calculating_holes = calculating_holes
         self.invert = invert
         self.oob_value = None
         if self.calculating_holes:
             self.invert = True
-            self.oob_value = np.prod(self.input_idi.ds.shape) * 10
+            self.oob_value = np.prod(self.input_vol.shape) * 10
 
-        self.voxel_size = template_idi.voxel_size
+        self.voxel_size = template_vol.voxel_size
 
         self.do_full_connected_components = False
         output_path = str(output_path).rstrip("/")
@@ -160,7 +152,7 @@ class ConnectedComponents(ComputeConfigMixin):
             self.intensity_threshold_minimum = intensity_threshold_minimum
             self.intensity_threshold_maximum = intensity_threshold_maximum
             if consensus_config:
-                self.input_path = self.consensus_idis[0].path
+                self.input_path = self.consensus_vols[0].level_path
                 self.consensus_thresholds = [
                     (
                         c.get("intensity_threshold_minimum", -1),
@@ -185,20 +177,13 @@ class ConnectedComponents(ComputeConfigMixin):
             if not blockwise_path.startswith(output_ds_basepath):
                 os.makedirs(os.path.dirname(blockwise_path), exist_ok=True)
 
-            self.connected_components_blockwise_idi = create_multiscale_dataset_idi(
+            self.connected_components_blockwise_vol = create_multiscale_dataset(
                 blockwise_path,
                 dtype=np.uint64,
-                voxel_size=self.voxel_size,
-                total_roi=self.roi,
-                write_size=template_idi.chunk_shape * self.voxel_size,
-                custom_fill_value=self.oob_value,
-                original_voxel_size=template_idi.original_voxel_size,
+                grid=self.grid,
+                padding=0 if self.oob_value is None else self.oob_value,
             )
             self.do_full_connected_components = True
-        else:
-            self.connected_components_blockwise_idi = ImageDataInterface(
-                connected_components_blockwise_path, chunk_shape=chunk_shape
-            )
         self.gaussian_smoothing_sigma_nm = gaussian_smoothing_sigma_nm
         # Use the stripped version of output_path
         self.output_path = output_path
@@ -211,8 +196,7 @@ class ConnectedComponents(ComputeConfigMixin):
         if type(maximum_volume_nm_3) == str:
             maximum_volume_nm_3 = float(maximum_volume_nm_3)
 
-        # Use original (true nm) voxel size for physical volume calculations
-        voxel_volume = float(np.prod(template_idi.original_voxel_size))
+        voxel_volume = float(np.prod(self.grid.voxel_size))
         self.minimum_volume_voxels = float(minimum_volume_nm_3 / voxel_volume)
         self.maximum_volume_voxels = float(maximum_volume_nm_3 / voxel_volume)
 
@@ -220,9 +204,8 @@ class ConnectedComponents(ComputeConfigMixin):
         if mask_config:
             self.mask = MasksFromConfig(
                 mask_config,
-                output_voxel_size=self.voxel_size,
+                output_grid=self.grid,
                 connectivity=connectivity,
-                caller_scale_factor=template_idi.voxel_size_scale_factor,
             )
 
         self.connectivity = connectivity
@@ -234,45 +217,44 @@ class ConnectedComponents(ComputeConfigMixin):
         self._run_id = uuid.uuid4().hex[:8]
 
     @staticmethod
-    def _gaussian_padding_nm(idi: ImageDataInterface, gaussian_smoothing_sigma_nm, truncate=4.0):
-        """Physical, per-axis Gaussian smoothing padding (exact multiples of
-        voxel size, for exact voxel alignment after trimming). Coordinate of
-        all zeros if smoothing is disabled (falsy/all-zero sigma)."""
+    def _gaussian_padding_voxels(grid: wa.Grid, gaussian_smoothing_sigma_nm, truncate=4.0):
+        """Per-axis Gaussian smoothing padding, in voxels of ``grid``. All zeros if
+        smoothing is disabled (falsy/all-zero sigma)."""
         has_gaussian_smoothing = gaussian_smoothing_sigma_nm is not None and (
             np.isscalar(gaussian_smoothing_sigma_nm) and gaussian_smoothing_sigma_nm > 0
             or hasattr(gaussian_smoothing_sigma_nm, "__iter__")
             and np.any(np.array(gaussian_smoothing_sigma_nm) > 0)
         )
         if not has_gaussian_smoothing:
-            return Coordinate((0, 0, 0))
-        gaussian_smoothing_sigma_voxels = tuple(
-            gaussian_smoothing_sigma_nm / vs for vs in idi.original_voxel_size
-        )
-        padding_voxels_per_axis = tuple(
-            int(truncate * sigma + 0.5) for sigma in gaussian_smoothing_sigma_voxels
-        )
-        return Coordinate(
-            p * int(vs) for p, vs in zip(padding_voxels_per_axis, idi.voxel_size)
+            return (0, 0, 0)
+        return tuple(
+            int(truncate * sigma + 0.5)
+            for sigma in ConnectedComponents._gaussian_sigma_voxels(
+                grid, gaussian_smoothing_sigma_nm
+            )
         )
 
     @staticmethod
-    def _threshold_consensus_input_data(data, idi, intensity_threshold_minimum, intensity_threshold_maximum, gaussian_smoothing_sigma_nm, invert, padding_nm):
-        gaussian_padding_nm = ConnectedComponents._gaussian_padding_nm(
-            idi, gaussian_smoothing_sigma_nm
+    def _gaussian_sigma_voxels(grid: wa.Grid, gaussian_smoothing_sigma_nm):
+        return tuple(gaussian_smoothing_sigma_nm / vs for vs in grid.voxel_size)
+
+    @staticmethod
+    def _threshold_consensus_input_data(data, grid, intensity_threshold_minimum, intensity_threshold_maximum, gaussian_smoothing_sigma_nm, invert, inner):
+        gaussian_padding = ConnectedComponents._gaussian_padding_voxels(
+            grid, gaussian_smoothing_sigma_nm
         )
-        if np.any(np.array(tuple(gaussian_padding_nm)) > 0):
-            gaussian_smoothing_sigma_voxels = tuple(
-                gaussian_smoothing_sigma_nm / vs for vs in idi.original_voxel_size
-            )
+        if np.any(np.array(gaussian_padding) > 0):
             data = gaussian_filter(
                 data.astype(np.float32),
-                sigma=gaussian_smoothing_sigma_voxels,
+                sigma=ConnectedComponents._gaussian_sigma_voxels(
+                    grid, gaussian_smoothing_sigma_nm
+                ),
                 mode="nearest",
             )
-        # trim with the block's (possibly larger, to accommodate whichever
+        # trim to the block with its (possibly larger, to accommodate whichever
         # input needs the most smoothing context) padding, not this input's
         # own -- every input here was read over the same block
-        data = trim_array_anisotropic(data, padding_nm, idi.voxel_size)
+        data = data[inner]
 
         if invert:
             return data == 0
@@ -281,8 +263,8 @@ class ConnectedComponents(ComputeConfigMixin):
     @staticmethod
     def _calculate_consensus_block_connected_components(
         block_index,
-        connected_components_blockwise_idi,
-        consensus_idis,
+        grid,
+        consensus_vols,
         consensus_thresholds,
         minimum_consensus_count,
         mask: MasksFromConfig = None,
@@ -290,30 +272,25 @@ class ConnectedComponents(ComputeConfigMixin):
         # Padding must be uniform across inputs since every input is read
         # over the same block -- use whichever input needs the most
         # Gaussian-smoothing context.
-        padding_nm = Coordinate((0, 0, 0))
-        for idi, (_, _, sigma_nm, _) in zip(consensus_idis, consensus_thresholds):
-            padding_nm = Coordinate(
-                np.maximum(padding_nm, ConnectedComponents._gaussian_padding_nm(idi, sigma_nm))
+        padding = (0, 0, 0)
+        for _, _, sigma_nm, _ in consensus_thresholds:
+            padding = tuple(
+                np.maximum(padding, ConnectedComponents._gaussian_padding_voxels(grid, sigma_nm))
             )
 
-        block = create_block_from_index(
-            connected_components_blockwise_idi, block_index, padding=padding_nm
-        )
+        block = create_block_from_index(grid, block_index, padding=padding)
 
         mask_data = None
         if mask:
-            mask_block = create_block_from_index(
-                connected_components_blockwise_idi, block_index
-            )
-            mask_data = mask.process_block(roi=mask_block.read_roi)
+            mask_data = mask.process_block(block.begin, block.end)
 
         votes = None
-        for idi, (thresh_min, thresh_max, sigma_nm, input_invert) in zip(
-            consensus_idis, consensus_thresholds
+        for vol, (thresh_min, thresh_max, sigma_nm, input_invert) in zip(
+            consensus_vols, consensus_thresholds
         ):
-            data = idi.to_ndarray_ts(block.read_roi)
+            data = vol.read_onto(grid, block.read_begin, block.read_end)
             input_mask = ConnectedComponents._threshold_consensus_input_data(
-                data, idi, thresh_min, thresh_max, sigma_nm, input_invert, padding_nm
+                data, grid, thresh_min, thresh_max, sigma_nm, input_invert, block.inner
             )
             votes = (
                 input_mask.astype(np.uint8) if votes is None else votes + input_mask
@@ -328,8 +305,9 @@ class ConnectedComponents(ComputeConfigMixin):
     @staticmethod
     def calculate_block_connected_components(
         block_index,
-        input_idi: ImageDataInterface,
-        connected_components_blockwise_idi: ImageDataInterface,
+        grid: wa.Grid,
+        input_vol: wa.WorldArray,
+        connected_components_blockwise_vol: wa.WorldArray,
         intensity_threshold_minimum=-1,
         intensity_threshold_maximum=np.inf,
         gaussian_smoothing_sigma_nm=None,
@@ -339,7 +317,7 @@ class ConnectedComponents(ComputeConfigMixin):
         mask: MasksFromConfig = None,
         connectivity=2,
         binarize=True,
-        consensus_idis=None,
+        consensus_vols=None,
         consensus_thresholds=None,
         minimum_consensus_count=None,
     ):
@@ -348,11 +326,11 @@ class ConnectedComponents(ComputeConfigMixin):
 
         cc3d_connectivity = 6 + 12 * (connectivity >= 2) + 8 * (connectivity >= 3)
 
-        if consensus_idis:
+        if consensus_vols:
             block, thresholded = ConnectedComponents._calculate_consensus_block_connected_components(
                 block_index,
-                connected_components_blockwise_idi,
-                consensus_idis,
+                grid,
+                consensus_vols,
                 consensus_thresholds,
                 minimum_consensus_count,
                 mask,
@@ -364,40 +342,32 @@ class ConnectedComponents(ComputeConfigMixin):
                 out_dtype=np.uint64,
             )
         else:
-            padding_nm = ConnectedComponents._gaussian_padding_nm(
-                input_idi, gaussian_smoothing_sigma_nm
+            padding = ConnectedComponents._gaussian_padding_voxels(
+                grid, gaussian_smoothing_sigma_nm
             )
-            has_gaussian_smoothing = np.any(np.array(tuple(padding_nm)) > 0)
-            if has_gaussian_smoothing:
-                gaussian_smoothing_sigma_voxels = tuple(
-                    gaussian_smoothing_sigma_nm / vs
-                    for vs in input_idi.original_voxel_size
-                )
+            has_gaussian_smoothing = np.any(np.array(padding) > 0)
 
-            block = create_block_from_index(
-                connected_components_blockwise_idi, block_index, padding=padding_nm
-            )
+            block = create_block_from_index(grid, block_index, padding=padding)
             if mask:
-                # mask block will always just be the normal size, regardless of smoothing and associated padding
-                mask_block = create_block_from_index(
-                    connected_components_blockwise_idi, block_index
-                )
-                mask_data = mask.process_block(roi=mask_block.read_roi)
+                # the mask covers just the block, regardless of smoothing and associated padding
+                mask_data = mask.process_block(block.begin, block.end)
 
                 if not np.any(mask_data):
-                    connected_components_blockwise_idi.ds[block.write_roi] = 0
+                    connected_components_blockwise_vol.write_index(block.begin, block.end, 0)
                     return
 
-            input = input_idi.to_ndarray_ts(block.read_roi)
+            input = input_vol.read_onto(grid, block.read_begin, block.read_end)
 
             if has_gaussian_smoothing:
                 # Apply anisotropic Gaussian filter with per-axis sigma
                 input = gaussian_filter(
                     input.astype(np.float32),
-                    sigma=gaussian_smoothing_sigma_voxels,  # tuple for anisotropic
+                    sigma=ConnectedComponents._gaussian_sigma_voxels(
+                        grid, gaussian_smoothing_sigma_nm
+                    ),  # tuple for anisotropic
                     mode="nearest",
                 )
-                input = trim_array_anisotropic(input, padding_nm, input_idi.voxel_size)
+                input = input[block.inner]
 
             if binarize:
                 if invert:
@@ -426,16 +396,14 @@ class ConnectedComponents(ComputeConfigMixin):
                     out_dtype=np.uint64,
                 )
 
-        # Calculate offset with per-axis division for anisotropic data
-        global_id_offset = block_index * np.prod(
-            block.full_block_size / connected_components_blockwise_idi.voxel_size,
-            dtype=np.uint64,
-        )
+        # the full block shape, so the smaller blocks at the far ends get their own ids too
+        global_id_offset = block.id * np.prod(grid.chunks, dtype=np.uint64)
 
         connected_components[connected_components > 0] += global_id_offset
 
-        if calculating_holes and block.read_roi.shape != block.read_roi.intersect(
-            input_idi.roi
+        if calculating_holes and (
+            np.any(np.less(block.read_begin, 0))
+            or np.any(np.greater(block.read_end, grid.shape))
         ):
             idxs = np.where(input == oob_value)
             if len(idxs) > 0:
@@ -452,19 +420,22 @@ class ConnectedComponents(ComputeConfigMixin):
                     in_place=True,
                 )
 
-        connected_components_blockwise_idi.ds[block.write_roi] = connected_components
+        connected_components_blockwise_vol.write_index(
+            block.begin, block.end, connected_components
+        )
 
     def calculate_connected_components_blockwise(self):
-        num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
+        num_blocks = dask_util.get_num_blocks(self.grid)
         dask_util.compute_blockwise_partitions(
             num_blocks,
             self.num_workers,
             self.compute_args,
             logger,
-            f"calculating blockwise connected components for {self.input_idi.path}",
+            f"calculating blockwise connected components for {self.input_vol.level_path}",
             ConnectedComponents.calculate_block_connected_components,
-            self.input_idi,
-            self.connected_components_blockwise_idi,
+            self.grid,
+            self.input_vol,
+            self.connected_components_blockwise_vol,
             self.intensity_threshold_minimum,
             self.intensity_threshold_maximum,
             self.gaussian_smoothing_sigma_nm,
@@ -474,7 +445,7 @@ class ConnectedComponents(ComputeConfigMixin):
             self.mask,
             self.connectivity,
             self.binarize,
-            self.consensus_idis,
+            self.consensus_vols,
             self.consensus_thresholds,
             self.minimum_consensus_count,
         )
@@ -540,25 +511,28 @@ class ConnectedComponents(ComputeConfigMixin):
     @staticmethod
     def get_connected_component_information_blockwise(
         block_index,
-        connected_components_blockwise_idi: ImageDataInterface,
+        grid: wa.Grid,
+        connected_components_blockwise_vol: wa.WorldArray,
         connectivity,
-        object_labels_idi=None,
+        object_labels_vol=None,
     ):
         try:
             block = create_block_from_index(
-                connected_components_blockwise_idi,
+                grid,
                 block_index,
-                padding=connected_components_blockwise_idi.voxel_size,
+                padding=1,
                 padding_direction="neg_with_edge_pos",
             )
             # need to pad into external space (for holes) which - if we only pad in the negative direction - will not happen on the positive ends
 
-            data = connected_components_blockwise_idi.to_ndarray_ts(
-                block.read_roi,
+            data = connected_components_blockwise_vol.read_onto(
+                grid, block.read_begin, block.read_end
             )
             object_labels = None
-            if object_labels_idi is not None:
-                object_labels = object_labels_idi.to_ndarray_ts(block.read_roi)
+            if object_labels_vol is not None:
+                object_labels = object_labels_vol.read_onto(
+                    grid, block.read_begin, block.read_end
+                )
 
             mask = data.astype(bool)
             mask[2:, 2:, 2:] = False
@@ -566,13 +540,7 @@ class ConnectedComponents(ComputeConfigMixin):
             # are using the same connectivity for blockwise and this. however if we generated blockwise
             # independently and want to ensure that is consistent, then we need this
             original_data_region_mask = np.zeros_like(data, dtype=np.bool)
-            if (
-                block.read_roi.shape - block.write_roi.shape
-            ) == connected_components_blockwise_idi.voxel_size * 2:
-                # then we have expanded in the positive direction as well:
-                original_data_region_mask[1:-1, 1:-1, 1:-1] = True
-            else:
-                original_data_region_mask[1:, 1:, 1:] = True
+            original_data_region_mask[block.inner] = True
 
             touching_ids = get_touching_ids(
                 data,
@@ -582,22 +550,15 @@ class ConnectedComponents(ComputeConfigMixin):
                 object_labels=object_labels,
             )
             # get information only from actual block(not including padding)
-            actual_padding = np.array(
-                block.read_roi.shape / connected_components_blockwise_idi.voxel_size
-                - connected_components_blockwise_idi.chunk_shape
-            )
-            if np.any(actual_padding == 2):
-                data = data[1:-1, 1:-1, 1:-1]
-            else:
-                data = data[1:, 1:, 1:]
+            data = data[block.inner]
 
             id_to_volume_dict = ConnectedComponents.get_object_sizes(data)
         except Exception as e:
             raise Exception(
-                f"Error {e} in get_connected_component_information_blockwise {block_index}, {connected_components_blockwise_idi.voxel_size}"
+                f"Error {e} in get_connected_component_information_blockwise {block_index}, {connected_components_blockwise_vol.voxel_size}"
             )
 
-        if object_labels_idi is not None:
+        if object_labels_vol is not None:
             unique_object_labels = fastremap.unique(object_labels[object_labels > 0])
             return (
                 set(unique_object_labels),
@@ -634,17 +595,18 @@ class ConnectedComponents(ComputeConfigMixin):
             return (id_to_volume_dict, touching_ids)
 
     def get_connected_component_information(self):
-        num_blocks = dask_util.get_num_blocks(self.connected_components_blockwise_idi)
+        num_blocks = dask_util.get_num_blocks(self.grid)
         output_tuple = dask_util.compute_blockwise_partitions(
             num_blocks,
             self.num_workers,
             self.compute_args,
             logger,
-            f"getting blockwise connected component information for {self.connected_components_blockwise_idi.path}",
+            f"getting blockwise connected component information for {self.connected_components_blockwise_vol.level_path}",
             ConnectedComponents.get_connected_component_information_blockwise,
-            self.connected_components_blockwise_idi,
+            self.grid,
+            self.connected_components_blockwise_vol,
             self.connectivity,
-            self.object_labels_idi,
+            self.object_labels_vol,
             merge_info=(
                 ConnectedComponents._merge_tuples,
                 get_output_path_from_input_path(
@@ -653,7 +615,7 @@ class ConnectedComponents(ComputeConfigMixin):
                 ) + "/",
             ),
         )
-        if self.object_labels_idi:
+        if self.object_labels_vol:
             (
                 self.original_ids,
                 self.id_to_volume_dict,
@@ -786,23 +748,21 @@ class ConnectedComponents(ComputeConfigMixin):
     @staticmethod
     def relabel_block_from_path(
         block_index,
-        input_idi: ImageDataInterface,
-        output_idi: ImageDataInterface,
+        grid: wa.Grid,
+        input_vol: wa.WorldArray,
+        output_vol: wa.WorldArray,
         relabeling_dict_path: str,
         mask: MasksFromConfig = None,
     ):
-        # create block from index
-        block = create_block_from_index(input_idi, block_index)
+        block = create_block_from_index(grid, block_index)
         if mask:
-            mask_block = mask.process_block(roi=block.read_roi)
+            mask_block = mask.process_block(block.begin, block.end)
             if not np.any(mask_block):
-                output_idi.ds[block.write_roi] = 0
+                output_vol.write_index(block.begin, block.end, 0)
                 return
 
         # All ids must be accounted for in the relabeling dict
-        data = input_idi.to_ndarray_ts(
-            block.read_roi,
-        )
+        data = input_vol.read_onto(grid, block.begin, block.end)
         ids = fastremap.unique(data[data > 0])
         relabeling_dict = ConnectedComponents.get_updated_relabeling_dict(
             ids, relabeling_dict_path
@@ -818,41 +778,39 @@ class ConnectedComponents(ComputeConfigMixin):
                 )
             except:
                 raise Exception(
-                    f"Error in relabel_block {block.read_roi}, {list(relabeling_dict.keys())}, {list(relabeling_dict.values())}"
+                    f"Error in relabel_block {block.begin}-{block.end}, {list(relabeling_dict.keys())}, {list(relabeling_dict.values())}"
                 )
 
-        output_idi.ds[block.write_roi] = data
+        output_vol.write_index(
+            block.begin, block.end, data.astype(output_vol.dtype, copy=False)
+        )
 
     @staticmethod
     def relabel_dataset(
-        original_idi,
+        original_vol,
+        grid,
         output_path,
-        roi,
         dtype,
         relabeling_dict_path,
         num_workers,
         compute_args,
         mask=None,
     ):
-        output_idi = create_multiscale_dataset_idi(
-            output_path,
-            dtype=dtype,
-            voxel_size=original_idi.voxel_size,
-            total_roi=roi,
-            write_size=original_idi.chunk_shape * original_idi.voxel_size,
-            original_voxel_size=original_idi.original_voxel_size,
-        )
+        """Relabel ``original_vol``, read onto ``grid``, into a new dataset at
+        ``output_path`` on ``grid``."""
+        output_vol = create_multiscale_dataset(output_path, dtype=dtype, grid=grid)
 
-        num_blocks = dask_util.get_num_blocks(original_idi, roi=roi)
+        num_blocks = dask_util.get_num_blocks(grid)
         dask_util.compute_blockwise_partitions(
             num_blocks,
             num_workers,
             compute_args,
             logger,
-            f"relabeling dataset for {original_idi.path}",
+            f"relabeling dataset for {original_vol.level_path}",
             ConnectedComponents.relabel_block_from_path,
-            original_idi,
-            output_idi,
+            grid,
+            original_vol,
+            output_vol,
             relabeling_dict_path,
             mask=mask,
         )
@@ -869,9 +827,9 @@ class ConnectedComponents(ComputeConfigMixin):
 
         if self.continue_processing:
             self.relabel_dataset(
-                self.connected_components_blockwise_idi,
+                self.connected_components_blockwise_vol,
+                self.grid,
                 self.output_path,
-                self.roi,
                 self.new_dtype,
                 self.relabeling_dict_path,
                 self.num_workers,
@@ -881,7 +839,7 @@ class ConnectedComponents(ComputeConfigMixin):
 
         if self.delete_tmp:
             dask_util.delete_tmp_dir_blockwise(
-                self.connected_components_blockwise_idi,
+                self.connected_components_blockwise_vol,
                 self.num_workers,
                 self.compute_args,
             )

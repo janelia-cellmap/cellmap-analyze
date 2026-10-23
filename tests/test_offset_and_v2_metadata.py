@@ -7,7 +7,7 @@ import pytest
 import zarr
 
 from cellmap_analyze.util.dask_util import get_num_blocks, get_zarr_chunk_path_from_block_index
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.zarr_util import open_dataset
 
 
 def _write(root, voxel_size, translation, offset_attr):
@@ -35,9 +35,8 @@ def test_funlib_corner_offset_is_accepted(tmp_path, voxel_size):
     vs = [float(v) for v in voxel_size]
     translation = [1000.0 + v / 2 for v in vs]
     corner = [t - v / 2 for t, v in zip(translation, vs)]
-    idi = ImageDataInterface(_write(tmp_path / "a.zarr", vs, translation, corner))
-    s = idi.voxel_size_scale_factor
-    assert tuple(idi.roi.offset) == tuple(int(round(c * s)) for c in corner)
+    vol = open_dataset(_write(tmp_path / "a.zarr", vs, translation, corner))
+    assert np.allclose(vol.corner, corner)
 
 
 def test_conflicting_offset_warns_and_uses_the_translation(tmp_path, voxel_size, caplog):
@@ -45,19 +44,18 @@ def test_conflicting_offset_warns_and_uses_the_translation(tmp_path, voxel_size,
     translation = [1000.0 + v / 2 for v in vs]
     offset_attr = [translation[0] + 100.0, *translation[1:]]   # neither center nor corner
     with caplog.at_level(logging.WARNING, logger="worldarray"):
-        idi = ImageDataInterface(_write(tmp_path / "a.zarr", vs, translation, offset_attr))
+        vol = open_dataset(_write(tmp_path / "a.zarr", vs, translation, offset_attr))
     assert "neither the OME translation" in caplog.text
     # placed by the OME translation: voxel 0's corner is half a voxel below it
-    s = idi.voxel_size_scale_factor
-    assert tuple(idi.roi.offset) == tuple(int(round((t - v / 2) * s)) for t, v in zip(translation, vs))
+    assert np.allclose(vol.corner, [t - v / 2 for t, v in zip(translation, vs)])
 
 
 def test_zarr_v2_chunk_paths(tmp_path, voxel_size):
     vs = [float(v) for v in voxel_size]
     center = [v / 2 for v in vs]
-    idi = ImageDataInterface(_write(tmp_path / "v2.zarr", vs, center, center))
-    num_blocks = get_num_blocks(idi, idi.roi)
+    vol = open_dataset(_write(tmp_path / "v2.zarr", vs, center, center))
+    num_blocks = get_num_blocks(vol)
     assert num_blocks > 1
     missing = [i for i in range(num_blocks)
-               if not os.path.exists(get_zarr_chunk_path_from_block_index(i, idi, depth=3))]
+               if not os.path.exists(get_zarr_chunk_path_from_block_index(i, vol, depth=3))]
     assert not missing, f"no chunk file at the path given for blocks {missing[:5]}"

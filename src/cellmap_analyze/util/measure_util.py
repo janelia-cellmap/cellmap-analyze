@@ -19,40 +19,6 @@ def trim_array(array, trim=1):
     return array
 
 
-def trim_array_anisotropic(array, padding_nm, voxel_size):
-    """Trim array with per-axis padding calculated from physical padding.
-
-    Args:
-        array: The array to trim
-        padding_nm: Physical padding in nanometers. Can be a scalar (uniform)
-            or a per-axis iterable (e.g. Coordinate or tuple).
-        voxel_size: Tuple of voxel sizes per axis (z, y, x)
-
-    Returns:
-        Trimmed array
-    """
-    # Calculate padding in voxels for each axis
-    if np.isscalar(padding_nm):
-        padding_voxels = tuple(int(np.round(padding_nm / vs)) for vs in voxel_size)
-    else:
-        padding_voxels = tuple(
-            int(np.round(pnm / vs)) for pnm, vs in zip(padding_nm, voxel_size)
-        )
-
-    # Handle case where padding might be 0 or array is too small
-    if all(p == 0 for p in padding_voxels):
-        return array
-
-    slices = []
-    for i, (p, dim_size) in enumerate(zip(padding_voxels, array.shape)):
-        if 2 * p >= dim_size:
-            # Padding is larger than array dimension - return empty array
-            return array[0:0]
-        slices.append(slice(p, dim_size - p) if p > 0 else slice(None))
-
-    return array[tuple(slices)]
-
-
 # chatgpt
 def calculate_surface_areas_voxelwise(
     data: np.ndarray, voxel_face_areas: tuple = (1, 1, 1), do_zero_padding: bool = True

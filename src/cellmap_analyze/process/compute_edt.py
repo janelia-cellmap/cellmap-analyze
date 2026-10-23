@@ -3,16 +3,14 @@ import os
 
 import edt as edt_module
 import numpy as np
-from funlib.geometry import Coordinate
 
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util.dask_util import create_block_from_index
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.grid_util import crop_to_roi, grid_of
 from cellmap_analyze.util.io_util import split_dataset_path
 from cellmap_analyze.util.mask_util import MasksFromConfig
-from cellmap_analyze.util.measure_util import trim_array_anisotropic
 from cellmap_analyze.util.mixins import ComputeConfigMixin
-from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
+from cellmap_analyze.util.zarr_util import create_multiscale_dataset, open_dataset
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -69,99 +67,76 @@ class ComputeEDT(ComputeConfigMixin):
     ):
         super().__init__(num_workers)
         self.segmentation_path = segmentation_path
-        self.segmentation_idi = ImageDataInterface(
-            segmentation_path, chunk_shape=chunk_shape
-        )
+        self.segmentation_vol = open_dataset(segmentation_path)
         self.output_path = str(output_path).rstrip("/")
         os.makedirs(split_dataset_path(self.output_path)[0], exist_ok=True)
-        self.roi = roi if roi is not None else self.segmentation_idi.roi
 
         self.padding_nm = float(padding_nm)
 
+        # one block per output chunk
         if block_shape_voxels is not None:
-            self.block_size = (
-                Coordinate(block_shape_voxels) * self.segmentation_idi.voxel_size
-            )
+            block_shape = tuple(int(b) for b in block_shape_voxels)
         else:
-            self.block_size = (
-                self.segmentation_idi.chunk_shape * int(block_multiplier)
-            ) * self.segmentation_idi.voxel_size
+            block_shape = tuple(
+                c * int(block_multiplier)
+                for c in grid_of(self.segmentation_vol, chunk_shape).chunks
+            )
+        self.grid = crop_to_roi(grid_of(self.segmentation_vol, block_shape), roi)
 
         self.mask = None
         if mask_config:
             self.mask = MasksFromConfig(
                 mask_config,
-                output_voxel_size=self.segmentation_idi.voxel_size,
+                output_grid=self.grid,
                 connectivity=2,
-                caller_scale_factor=self.segmentation_idi.voxel_size_scale_factor,
             )
 
         self.delete_tmp = delete_tmp
 
-        self.output_idi = create_multiscale_dataset_idi(
-            self.output_path,
-            dtype=np.float32,
-            voxel_size=self.segmentation_idi.voxel_size,
-            total_roi=self.roi,
-            write_size=self.block_size,
-            original_voxel_size=self.segmentation_idi.original_voxel_size,
+        self.output_vol = create_multiscale_dataset(
+            self.output_path, dtype=np.float32, grid=self.grid
         )
 
     @staticmethod
     def calculate_block_edt(
         block_index,
-        segmentation_idi: ImageDataInterface,
-        output_idi: ImageDataInterface,
+        grid,
+        segmentation_vol,
+        output_vol,
         padding_nm: float,
-        block_size,
         mask: MasksFromConfig = None,
     ):
-        voxel_size = segmentation_idi.voxel_size
-        original_voxel_size = segmentation_idi.original_voxel_size
-        padding_voxels_per_axis = tuple(
-            int(np.ceil(padding_nm / vs)) for vs in original_voxel_size
-        )
-        padding = Coordinate(
-            p * int(vs) for p, vs in zip(padding_voxels_per_axis, voxel_size)
-        )
+        voxel_size = grid.voxel_size
+        padding = tuple(int(np.ceil(padding_nm / vs)) for vs in voxel_size)
 
-        block = create_block_from_index(
-            output_idi, block_index, padding=padding, block_size=block_size
-        )
+        block = create_block_from_index(grid, block_index, padding=padding)
 
         if mask:
-            mask_block_data = mask.process_block(roi=block.write_roi)
+            mask_block_data = mask.process_block(block.begin, block.end)
             if not np.any(mask_block_data):
-                write_shape = tuple(
-                    int(round(s / vs)) for s, vs in zip(block.write_roi.shape, voxel_size)
-                )
-                output_idi.ds[block.write_roi] = np.zeros(write_shape, dtype=np.float32)
+                output_vol.write_index(block.begin, block.end, 0)
                 return
 
-        data = segmentation_idi.to_ndarray_ts(block.read_roi)
+        data = segmentation_vol.read_onto(grid, block.read_begin, block.read_end)
         if mask:
-            mask_data = mask.process_block(roi=block.read_roi)
+            mask_data = mask.process_block(block.read_begin, block.read_end)
             data = data * mask_data
 
         if not np.any(data):
-            write_shape = tuple(
-                int(round(s / vs)) for s, vs in zip(block.write_roi.shape, voxel_size)
-            )
-            output_idi.ds[block.write_roi] = np.zeros(write_shape, dtype=np.float32)
+            output_vol.write_index(block.begin, block.end, 0)
             return
 
         # Multi-label aware: distance to the nearest voxel with a *different*
         # label (background included), computed directly on the labeled data
         # -- not a binarized mask -- so this is exact per-instance EDT, not
         # an organelle-vs-background approximation.
-        distance = edt_module.edt(data, anisotropy=tuple(original_voxel_size))
-        distance = trim_array_anisotropic(distance, padding, voxel_size)
-        output_idi.ds[block.write_roi] = distance.astype(np.float32)
+        distance = edt_module.edt(data, anisotropy=tuple(voxel_size))
+        output_vol.write_index(
+            block.begin, block.end, distance[block.inner].astype(np.float32)
+        )
 
     def calculate_edt(self):
-        num_blocks = dask_util.get_num_blocks(
-            self.segmentation_idi, roi=self.roi, block_size=self.block_size
-        )
+        num_blocks = dask_util.get_num_blocks(self.grid)
         dask_util.compute_blockwise_partitions(
             num_blocks,
             self.num_workers,
@@ -169,9 +144,9 @@ class ComputeEDT(ComputeConfigMixin):
             logger,
             f"computing blockwise EDT for {self.segmentation_path}",
             ComputeEDT.calculate_block_edt,
-            self.segmentation_idi,
-            self.output_idi,
+            self.grid,
+            self.segmentation_vol,
+            self.output_vol,
             self.padding_nm,
-            self.block_size,
             self.mask,
         )

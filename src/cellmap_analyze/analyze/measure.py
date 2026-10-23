@@ -5,7 +5,7 @@ from cellmap_analyze.util import io_util
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.grid_util import crop_to_roi, grid_of, voxel_corner
 from cellmap_analyze.util.information_holders import ObjectInformation
 from cellmap_analyze.util.io_util import (
     get_leaf_name_from_path,
@@ -14,11 +14,7 @@ import pandas as pd
 import logging
 
 from cellmap_analyze.util.measure_util import get_object_information
-from cellmap_analyze.util.voxel_size_utils import (
-    compute_common_scale_factor,
-    scale_voxel_size_to_integers,
-)
-from funlib.geometry import Coordinate, Roi
+from cellmap_analyze.util.zarr_util import open_dataset
 import os
 
 from cellmap_analyze.util.mixins import ComputeConfigMixin
@@ -49,7 +45,10 @@ class Measure(ComputeConfigMixin):
     ):
         super().__init__(num_workers)
         self.input_path = input_path
-        self.input_idi = ImageDataInterface(self.input_path, chunk_shape=chunk_shape)
+        self.input_vol = open_dataset(self.input_path)
+        # Measured on the input's voxels (within roi); every other dataset is
+        # read onto them.
+        self.grid = crop_to_roi(grid_of(self.input_vol, chunk_shape), roi)
         self.output_path = str(output_path).rstrip("/")
 
         self.contact_sites = False
@@ -66,38 +65,14 @@ class Measure(ComputeConfigMixin):
                 )
             self.organelle_1_path = kwargs["organelle_1_path"]
             self.organelle_2_path = kwargs["organelle_2_path"]
-            self.organelle_1_idi = ImageDataInterface(
-                self.organelle_1_path, chunk_shape=chunk_shape
-            )
-            self.organelle_2_idi = ImageDataInterface(
-                self.organelle_2_path, chunk_shape=chunk_shape
-            )
-            # Align scale factors across all IDIs so they share coordinate space
-            common_sf = compute_common_scale_factor(
-                self.input_idi.voxel_size_scale_factor,
-                self.organelle_1_idi.voxel_size_scale_factor,
-                self.organelle_2_idi.voxel_size_scale_factor,
-            )
-            self.input_idi.rescale_to_factor(common_sf)
-            self.organelle_1_idi.rescale_to_factor(common_sf)
-            self.organelle_2_idi.rescale_to_factor(common_sf)
+            self.organelle_1_vol = open_dataset(self.organelle_1_path)
+            self.organelle_2_vol = open_dataset(self.organelle_2_path)
 
-            # Element-wise min in the common scaled space
-            output_voxel_size = Coordinate(
-                min(v1, v2)
-                for v1, v2 in zip(
-                    self.organelle_1_idi.voxel_size,
-                    self.organelle_2_idi.voxel_size,
-                )
+            self.get_measurements_blockwise_extra_kwargs["organelle_1_vol"] = (
+                self.organelle_1_vol
             )
-            self.organelle_1_idi.output_voxel_size = output_voxel_size
-            self.organelle_2_idi.output_voxel_size = output_voxel_size
-
-            self.get_measurements_blockwise_extra_kwargs["organelle_1_idi"] = (
-                self.organelle_1_idi
-            )
-            self.get_measurements_blockwise_extra_kwargs["organelle_2_idi"] = (
-                self.organelle_2_idi
+            self.get_measurements_blockwise_extra_kwargs["organelle_2_vol"] = (
+                self.organelle_2_vol
             )
 
             self.contact_sites = True
@@ -109,21 +84,10 @@ class Measure(ComputeConfigMixin):
             # so intensities line up with minimal resampling.
             # Intensities, so when no level matches, a finer one is block-averaged
             # to the segmentation's voxel size rather than sampled one voxel per block.
-            self.raw_idi = ImageDataInterface(
-                self.raw_path,
-                chunk_shape=chunk_shape,
-                target_voxel_size=self.input_idi.original_voxel_size,
-                interpolation_order=1,
+            self.raw_vol = open_dataset(
+                self.raw_path, voxel_size=self.input_vol.voxel_size, method="linear"
             )
-            # Align scale factors between raw and input
-            raw_sf = compute_common_scale_factor(
-                self.input_idi.voxel_size_scale_factor,
-                self.raw_idi.voxel_size_scale_factor,
-            )
-            self.input_idi.rescale_to_factor(raw_sf)
-            self.raw_idi.rescale_to_factor(raw_sf)
-            self.raw_idi.output_voxel_size = self.input_idi.voxel_size
-            self.get_measurements_blockwise_extra_kwargs["raw_idi"] = self.raw_idi
+            self.get_measurements_blockwise_extra_kwargs["raw_vol"] = self.raw_vol
 
         # Handle root datasets (empty name) by using "data" as default
         input_name = get_leaf_name_from_path(self.input_path)
@@ -134,75 +98,54 @@ class Measure(ComputeConfigMixin):
         )
         self.global_offset = np.zeros((3,))
         self.num_workers = num_workers
-        if roi is None:
-            self.roi = self.input_idi.roi
-        else:
-            self.roi = roi
-        self.voxel_size = self.input_idi.voxel_size
+        self.voxel_size = self.input_vol.voxel_size
 
     @staticmethod
     def pad_with_face_neighbor_blocks(
-        idi, block, voxel_size, return_none_if_main_block_empty=False
+        vol, grid, block, return_none_if_main_block_empty=False
     ):
-        main_block = idi.to_ndarray_ts(block.read_roi)
+        """The block's voxels of ``grid``, read from ``vol``, with the one-voxel-thick
+        faces of its six neighbours around them (the corners and edges stay 0); reads
+        past the data are filled."""
+        main_block = vol.read_onto(grid, block.begin, block.end)
         if return_none_if_main_block_empty and not np.any(main_block):
             return None
         data = np.zeros(np.array(main_block.shape) + 2, dtype=main_block.dtype)
         data[1:-1, 1:-1, 1:-1] = main_block
-        roi_starts = np.array(block.read_roi.begin)
-        roi_ends = np.array(block.read_roi.end)
         interior = [slice(1, -1)] * 3
 
         for d in range(3):
-            roi_shape = np.array(block.read_roi.shape)
-            # Use per-axis voxel_size
-            roi_shape[d] = voxel_size[d]
-
-            neg_off = roi_starts.copy()
-            pos_off = roi_starts.copy()
-
-            neg_off[d] -= voxel_size[d]
-            pos_off[d] = roi_ends[d]
-
-            negative_roi = Roi(neg_off, roi_shape)
-            positive_roi = Roi(pos_off, roi_shape)
+            neg_begin, neg_end = list(block.begin), list(block.end)
+            neg_begin[d], neg_end[d] = block.begin[d] - 1, block.begin[d]
+            pos_begin, pos_end = list(block.begin), list(block.end)
+            pos_begin[d], pos_end[d] = block.end[d], block.end[d] + 1
 
             # build slice objects dynamically
             neg_idx = interior.copy()
             neg_idx[d] = slice(0, 1)  # face at the “minus” side
-            data[tuple(neg_idx)] = idi.to_ndarray_ts(negative_roi)
+            data[tuple(neg_idx)] = vol.read_onto(grid, neg_begin, neg_end)
 
             pos_idx = interior.copy()
             pos_idx[d] = slice(-1, None)  # face at the “plus” side
-            if positive_roi.begin[d] >= idi.roi.end[d]:
-                # need this check since positive side can extend beyond roi
-                data[tuple(pos_idx)] = (
-                    idi.custom_fill_value if idi.custom_fill_value is not None else 0
-                )
-            else:
-                data[tuple(pos_idx)] = idi.to_ndarray_ts(positive_roi)
+            data[tuple(pos_idx)] = vol.read_onto(grid, pos_begin, pos_end)
 
         return data
 
     @staticmethod
     def get_measurements_blockwise(
         block_index,
-        input_idi: ImageDataInterface,
-        roi,
+        input_vol,
+        grid,
         global_offset,
         contact_sites,
         **kwargs,
     ):
-        block = create_block_from_index(
-            input_idi,
-            block_index,
-            roi=roi,
-        )
+        block = create_block_from_index(grid, block_index)
         # main block
         data = Measure.pad_with_face_neighbor_blocks(
-            input_idi,
+            input_vol,
+            grid,
             block,
-            voxel_size=input_idi.voxel_size,
             return_none_if_main_block_empty=True,
         )
         if data is None:
@@ -210,36 +153,32 @@ class Measure(ComputeConfigMixin):
 
         extra_kwargs = {}
         if contact_sites:
-            organelle_1_idi = kwargs.get("organelle_1_idi")
-            organelle_2_idi = kwargs.get("organelle_2_idi")
+            # The contact sites were found on the organelles' finer voxels, so
+            # reading the organelles onto the contact sites' grid is lossless.
             extra_kwargs["organelle_1"] = Measure.pad_with_face_neighbor_blocks(
-                organelle_1_idi, block, voxel_size=input_idi.voxel_size
+                kwargs.get("organelle_1_vol"), grid, block
             )
             extra_kwargs["organelle_2"] = Measure.pad_with_face_neighbor_blocks(
-                organelle_2_idi, block, voxel_size=input_idi.voxel_size
+                kwargs.get("organelle_2_vol"), grid, block
             )
 
-        raw_idi = kwargs.get("raw_idi")
-        if raw_idi is not None:
-            # Read raw at write_roi (no face-neighbor padding needed for intensity).
+        raw_vol = kwargs.get("raw_vol")
+        if raw_vol is not None:
+            # Read raw at the block (no face-neighbor padding needed for intensity).
             # raw_valid marks voxels that came from padding/no-overlap fill
             # rather than a real read, so they can be excluded from intensity
             # stats instead of being silently counted as real intensity 0.
-            raw_data, raw_valid = raw_idi.to_ndarray_ts(
-                block.write_roi, return_valid_mask=True
+            raw_data, raw_valid = raw_vol.read_onto(
+                grid, block.begin, block.end, mask=True
             )
             extra_kwargs["raw_data"] = raw_data
             extra_kwargs["raw_valid"] = raw_valid
 
         # get information only from actual block(not including padding)
-        # Convert block offset from scaled coordinates back to true nm
-        block_offset = (
-            np.array(block.write_roi.begin) / input_idi.voxel_size_scale_factor
-            + global_offset
-        )
+        block_offset = np.array(voxel_corner(grid, block.begin)) + global_offset
         object_informations = get_object_information(
             data,
-            input_idi.original_voxel_size,
+            input_vol.voxel_size,
             trim=1,
             offset=block_offset,
             **extra_kwargs,
@@ -264,16 +203,16 @@ class Measure(ComputeConfigMixin):
         return res
 
     def measure(self):
-        num_blocks = dask_util.get_num_blocks(self.input_idi, self.roi)
+        num_blocks = dask_util.get_num_blocks(self.grid)
         self.measurements = dask_util.compute_blockwise_partitions(
             num_blocks,
             self.num_workers,
             self.compute_args,
             logger,
-            f"measuring blockwise object information for {self.input_idi.path} and putting it here: {self.output_directory}",
+            f"measuring blockwise object information for {self.input_vol.level_path} and putting it here: {self.output_directory}",
             Measure.get_measurements_blockwise,
-            self.input_idi,
-            self.roi,
+            self.input_vol,
+            self.grid,
             self.global_offset,
             self.contact_sites,
             **self.get_measurements_blockwise_extra_kwargs,

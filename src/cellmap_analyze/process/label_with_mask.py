@@ -6,12 +6,11 @@ from cellmap_analyze.util.block_util import erosion
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
-from cellmap_analyze.util.measure_util import trim_array
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.grid_util import crop_to_roi, grid_of
 
 import logging
 from cellmap_analyze.util.mixins import ComputeConfigMixin
-from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
+from cellmap_analyze.util.zarr_util import create_multiscale_dataset, open_dataset
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -36,59 +35,40 @@ class LabelWithMask(ComputeConfigMixin):
     ):
         super().__init__(num_workers)
 
-        self.input_idi = ImageDataInterface(input_path, chunk_shape=chunk_shape)
-        self.mask_idi = ImageDataInterface(
+        self.input_vol = open_dataset(input_path)
+        self.grid = crop_to_roi(grid_of(self.input_vol, chunk_shape), roi)
+        # read on the input's grid
+        self.mask_vol = open_dataset(
             mask_path,
-            chunk_shape=chunk_shape,
-            custom_fill_value="edge",  # in case of doing erosion later for surface voxel testing
+            padding="edge",  # in case of doing erosion later for surface voxel testing
         )
-        # Align scale factors so both IDIs share the same coordinate space
-        from cellmap_analyze.util.voxel_size_utils import compute_common_scale_factor
-
-        common_sf = compute_common_scale_factor(
-            self.input_idi.voxel_size_scale_factor,
-            self.mask_idi.voxel_size_scale_factor,
-        )
-        self.input_idi.rescale_to_factor(common_sf)
-        self.mask_idi.rescale_to_factor(common_sf)
-        self.mask_idi.output_voxel_size = self.input_idi.voxel_size
-
-        self.roi = roi
-        if self.roi is None:
-            self.roi = self.input_idi.roi
 
         self.intensity_threshold_minimum = intensity_threshold_minimum
         self.intensity_threshold_maximum = intensity_threshold_maximum
         self.surface_voxels_only = surface_voxels_only
-        self.output_idi = create_multiscale_dataset_idi(
-            output_path,
-            dtype=self.mask_idi.dtype,
-            voxel_size=self.input_idi.voxel_size,
-            total_roi=self.roi,
-            write_size=self.input_idi.chunk_shape * self.input_idi.voxel_size,
-            original_voxel_size=self.input_idi.original_voxel_size,
+        self.output_vol = create_multiscale_dataset(
+            output_path, dtype=self.mask_vol.dtype, grid=self.grid
         )
 
     @staticmethod
     def label_with_mask_blockwise(
         block_index,
-        input_idi: ImageDataInterface,
-        mask_idi: ImageDataInterface,
-        output_idi: ImageDataInterface,
+        grid,
+        input_vol,
+        mask_vol,
+        output_vol,
         intensity_threshold_minimum,
         intensity_threshold_maximum,
         surface_voxels_only=False,
     ):
-        padding_voxels = int(surface_voxels_only)
-        # Use minimum voxel size for uniform padding in physical units
-        padding_nm = padding_voxels * min(input_idi.voxel_size)
+        # the erosion below reaches one voxel on every axis
         block = create_block_from_index(
-            input_idi,
+            grid,
             block_index,
-            padding=padding_nm,
+            padding=int(surface_voxels_only),
         )
-        input = input_idi.to_ndarray_ts(block.read_roi)
-        mask = mask_idi.to_ndarray_ts(block.read_roi)
+        input = input_vol.read_onto(grid, block.read_begin, block.read_end)
+        mask = mask_vol.read_onto(grid, block.read_begin, block.read_end)
         if surface_voxels_only:
             eroded = erosion(mask, 1, ndimage.generate_binary_structure(3, 2))
             mask = mask - eroded
@@ -96,21 +76,23 @@ class LabelWithMask(ComputeConfigMixin):
             (input >= intensity_threshold_minimum)
             & (input < intensity_threshold_maximum)
         ) * mask
-        # Erosion operates uniformly in voxel space, so use uniform trimming
-        output_idi.ds[block.write_roi] = trim_array(output, padding_voxels)
+        output_vol.write_index(
+            block.begin, block.end, output[block.inner].astype(output_vol.dtype, copy=False)
+        )
 
     def get_label_with_mask(self):
-        num_blocks = dask_util.get_num_blocks(self.input_idi, roi=self.roi)
+        num_blocks = dask_util.get_num_blocks(self.grid)
         dask_util.compute_blockwise_partitions(
             num_blocks,
             self.num_workers,
             self.compute_args,
             logger,
-            f"labeling {self.input_idi.path} with mask {self.mask_idi.path}",
+            f"labeling {self.input_vol.level_path} with mask {self.mask_vol.level_path}",
             LabelWithMask.label_with_mask_blockwise,
-            self.input_idi,
-            self.mask_idi,
-            self.output_idi,
+            self.grid,
+            self.input_vol,
+            self.mask_vol,
+            self.output_vol,
             self.intensity_threshold_minimum,
             self.intensity_threshold_maximum,
             self.surface_voxels_only,

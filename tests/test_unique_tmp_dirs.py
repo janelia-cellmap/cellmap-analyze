@@ -14,7 +14,6 @@ import numpy as np
 import pandas as pd
 import pytest
 import zarr
-from funlib.geometry import Coordinate, Roi
 
 from cellmap_analyze.process.skeletonize import Skeletonize
 from cellmap_analyze.process.connected_components import ConnectedComponents
@@ -23,6 +22,7 @@ from cellmap_analyze.process.clean_connected_components import (
 )
 from cellmap_analyze.process.fill_holes import FillHoles
 from cellmap_analyze.analyze.assign_to_organelles import AssignToOrganelles
+from cellmap_analyze.util.grid_util import make_grid
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset
 
 
@@ -31,18 +31,10 @@ HEX8 = re.compile(r"^[0-9a-f]{8}$")
 
 def _make_seg(path, shape=(8, 8, 8), vs=(8, 8, 8)):
     """Helper: write a small labelled zarr."""
-    total_roi = Roi(Coordinate(0, 0, 0), Coordinate(shape) * Coordinate(vs))
-    ds = create_multiscale_dataset(
-        path,
-        dtype=np.uint8,
-        voxel_size=list(vs),
-        total_roi=total_roi,
-        write_size=Coordinate(shape) * Coordinate(vs),
-        original_voxel_size=list(vs),
-    )
+    ds = create_multiscale_dataset(path, np.uint8, make_grid(shape, vs, chunks=shape))
     arr = np.zeros(shape, dtype=np.uint8)
     arr[2:5, 2:5, 2:5] = 1
-    ds.data[:] = arr
+    ds.write_index((0, 0, 0), ds.shape, arr)
     return f"{path}/s0"
 
 

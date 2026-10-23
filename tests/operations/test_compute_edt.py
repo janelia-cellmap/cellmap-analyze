@@ -1,23 +1,19 @@
 import edt as edt_module
 import numpy as np
-from funlib.geometry import Coordinate, Roi
 
 from cellmap_analyze.process.compute_edt import ComputeEDT
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.grid_util import make_grid
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset
+from tests.test_utils import read_all
 
 
 def _write_segmentation(path, seg, voxel_size=(1.0, 1.0, 1.0)):
-    total_roi = Roi((0, 0, 0), Coordinate(seg.shape) * Coordinate(voxel_size))
     ds = create_multiscale_dataset(
         path,
         dtype=seg.dtype,
-        voxel_size=voxel_size,
-        total_roi=total_roi,
-        write_size=Coordinate(10, 10, 10) * Coordinate(voxel_size),
-        original_voxel_size=voxel_size,
+        grid=make_grid(seg.shape, voxel_size, chunks=(10, 10, 10)),
     )
-    ds.data[:] = seg
+    ds.write_index((0, 0, 0), ds.shape, seg)
     return f"{path}/s0"
 
 
@@ -47,7 +43,7 @@ def test_compute_edt_matches_whole_array_multi_label(tmp_path):
     )
     cedt.calculate_edt()
 
-    blockwise = ImageDataInterface(f"{output_path}/s0").to_ndarray_ts()
+    blockwise = read_all(f"{output_path}/s0")
     whole_array = edt_module.edt(seg, anisotropy=(1.0, 1.0, 1.0))
 
     # Padding (8) comfortably exceeds the block-tiling granularity here, so

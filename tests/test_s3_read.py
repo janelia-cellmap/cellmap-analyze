@@ -7,7 +7,7 @@ native S3 driver pointed at the same endpoint.
 Coverage:
 - IDI accepts ``s3://`` URIs and reports the right voxel_size /
   translation (which lives in the parent group's OME multiscales).
-- ``to_ndarray_ts`` reads voxel data through tensorstore's S3 driver and
+- reads voxel data through tensorstore's S3 driver and
   returns the same bytes that were uploaded.
 - Multiscale level selection works over S3 (PR #73's ``datasets[0]``
   fix continuing to work when metadata is fetched over the wire).
@@ -41,7 +41,7 @@ def s3_server():
 
 @pytest.fixture
 def s3_env(monkeypatch, s3_server):
-    """Point boto3 / tensorstore / our own ``url_to_public_https`` at moto."""
+    """Point boto3 and worldarray at moto."""
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
     monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
@@ -150,10 +150,11 @@ def _build_local_ome_zarr(
     ]
 
 
-def test_s3_read_zarr_via_idi(tmp_path, s3_env):
+def test_s3_read_zarr(tmp_path, s3_env):
     """Open s3://.../seg/s0 via IDI; voxel_size, offset, and data come
     back correctly through the parent group's OME multiscales."""
-    from cellmap_analyze.util.image_data_interface import ImageDataInterface
+    from cellmap_analyze.util.grid_util import grid_of
+    from cellmap_analyze.util.zarr_util import open_dataset
 
     bucket = "cellmap-test"
     _make_bucket(s3_env, bucket)
@@ -166,16 +167,16 @@ def test_s3_read_zarr_via_idi(tmp_path, s3_env):
     )
     _upload_dir_to_s3(s3_env, str(local_root), bucket, "data.zarr/seg")
 
-    idi = ImageDataInterface(f"s3://{bucket}/data.zarr/seg/s0")
+    vol = open_dataset(f"s3://{bucket}/data.zarr/seg/s0")
 
     # Metadata round-trips through the parent group's OME multiscales.
-    assert tuple(idi.voxel_size) == (8, 8, 8)
+    assert tuple(vol.voxel_size) == (8, 8, 8)
     # OME translation = voxel CENTER; v0.3.0 internally exposes the corner.
     # trans=4, vs=8 → corner = 4 − 8/2 = 0.
-    assert tuple(idi.offset) == (0, 0, 0)
+    assert tuple(vol.corner) == (0, 0, 0)
 
     # And the actual voxel data comes back through tensorstore's s3 driver.
-    read = idi.to_ndarray_ts(idi.roi)
+    read = vol.read_onto(grid_of(vol))
     np.testing.assert_array_equal(read, data)
 
 
@@ -183,7 +184,8 @@ def test_s3_read_picks_correct_multiscale_level(tmp_path, s3_env):
     """The level-selection fix (PR #73) also has to work over s3:// --
     opening s1 picks the s1 transform from the parent's multiscales
     metadata, not s0's."""
-    from cellmap_analyze.util.image_data_interface import ImageDataInterface
+    from cellmap_analyze.util.grid_util import grid_of
+    from cellmap_analyze.util.zarr_util import open_dataset
 
     bucket = "cellmap-test-multiscale"
     _make_bucket(s3_env, bucket)
@@ -201,18 +203,18 @@ def test_s3_read_picks_correct_multiscale_level(tmp_path, s3_env):
     _upload_dir_to_s3(s3_env, str(local_root), bucket, "data.zarr/seg")
 
     # s0: vs=4, corner = 0 − 4/2 = −2.
-    idi0 = ImageDataInterface(f"s3://{bucket}/data.zarr/seg/s0")
-    assert tuple(idi0.voxel_size) == (4, 4, 4)
-    assert tuple(idi0.offset) == (-2, -2, -2)
-    assert np.all(idi0.to_ndarray_ts(idi0.roi) == 1)
+    vol0 = open_dataset(f"s3://{bucket}/data.zarr/seg/s0")
+    assert tuple(vol0.voxel_size) == (4, 4, 4)
+    assert tuple(vol0.corner) == (-2, -2, -2)
+    assert np.all(vol0.read_onto(grid_of(vol0)) == 1)
 
     # s1: vs=8, trans=2 → corner = 2 − 8/2 = −2. Same corner as s0 (the
     # OME pyramid invariant) -- the LEVEL is what we have to pick
     # correctly here.
-    idi1 = ImageDataInterface(f"s3://{bucket}/data.zarr/seg/s1")
-    assert tuple(idi1.voxel_size) == (8, 8, 8), (
-        f"expected s1 voxel_size 8 but got {tuple(idi1.voxel_size)} -- "
+    vol1 = open_dataset(f"s3://{bucket}/data.zarr/seg/s1")
+    assert tuple(vol1.voxel_size) == (8, 8, 8), (
+        f"expected s1 voxel_size 8 but got {tuple(vol1.voxel_size)} -- "
         f"this is the datasets[0]-hardcoding regression if it fails"
     )
-    assert tuple(idi1.offset) == (-2, -2, -2)
-    assert np.all(idi1.to_ndarray_ts(idi1.roi) == 2)
+    assert tuple(vol1.corner) == (-2, -2, -2)
+    assert np.all(vol1.read_onto(grid_of(vol1)) == 2)

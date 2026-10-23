@@ -2,10 +2,7 @@ import pytest
 from cellmap_analyze.process.mutex_watershed import MutexWatershed
 import fastmorph
 import fastremap
-from cellmap_analyze.util.image_data_interface import (
-    ImageDataInterface,
-)
-from tests.test_utils import arrays_equal_up_to_id_ordering
+from tests.test_utils import arrays_equal_up_to_id_ordering, read_all
 
 
 @pytest.mark.parametrize("do_opening", [True, False])
@@ -23,9 +20,7 @@ def test_mutex_watershed(tmp_zarr, segmentation_cylinders, do_opening):
         do_opening=do_opening,
     )
     mw.get_connected_components()
-    test_data = ImageDataInterface(
-        f"{tmp_zarr}/test_mws_{do_opening}/s0"
-    ).to_ndarray_ts()
+    test_data = read_all(f"{tmp_zarr}/test_mws_{do_opening}/s0")
     ground_truth = segmentation_cylinders.copy()
 
     if do_opening:

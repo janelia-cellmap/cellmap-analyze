@@ -2,15 +2,14 @@
 
 import pytest
 import numpy as np
-from funlib.geometry import Coordinate, Roi
 from skimage import measure
-from cellmap_analyze.util.voxel_size_utils import scale_voxel_size_to_integers
+from cellmap_analyze.util.grid_util import make_grid
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset
 import os
 from scipy import ndimage
 import pandas as pd
 from tests.test_utils import simple_object_information_dict
-from cellmap_analyze.util.zarr_io import prepare_ds
+import zarr
 from tests.contact_site_fixture_helper import compute_contact_sites_ground_truth
 
 
@@ -546,54 +545,41 @@ def write_zarrs(tmp_zarr, test_image_dict, voxel_size, chunk_size):
         )
         data_path = f"{tmp_zarr}/{data_name}"
 
-        # Scale voxel_size to integers for funlib compatibility (handles floats)
-        original_voxel_size = tuple(float(v) for v in current_voxel_size)
-        scaled_voxel_size, scale_factor = scale_voxel_size_to_integers(
-            original_voxel_size
-        )
-
         data_shape = data.shape
         if len(data_shape) == 4:
             data_shape = data_shape[1:]
 
-        total_roi = Roi(
-            (0, 0, 0), Coordinate(data_shape) * Coordinate(scaled_voxel_size)
-        )
-        write_size = (
-            Coordinate(chunk_size) * Coordinate(scaled_voxel_size)
+        chunks = (
+            tuple(chunk_size)
             if (
                 data_name != "segmentation_cylinders"
                 and data_name != "affinities_cylinders"
                 and data_name != "segmentation_spheres"
                 and data_name != "segmentation_for_skeleton"
             )
-            else Coordinate(20, 20, 20) * Coordinate(scaled_voxel_size)
+            else (20, 20, 20)
         )
 
         if "affinities" in data_name:
-            ds = prepare_ds(
-                tmp_zarr,
-                data_name,
-                total_roi=total_roi,
-                write_size=write_size,
-                voxel_size=scaled_voxel_size,
+            # a bare 4D array placed by funlib attributes, as other tools write them
+            ds = zarr.open_array(
+                data_path,
+                mode="w",
+                shape=data.shape,
+                chunks=(data.shape[0],) + chunks,
                 dtype=np.uint8,
-                num_channels=np.shape(data)[0],
             )
-            # New convention: voxel_size attr holds the true physical value
-            # (prepare_ds wrote the scaled integer; overwrite with the truth).
-            ds.data.attrs["voxel_size"] = list(original_voxel_size)
+            ds.attrs.update(
+                voxel_size=[float(v) for v in current_voxel_size], offset=[0, 0, 0]
+            )
+            ds[:] = data
         else:
             ds = create_multiscale_dataset(
                 data_path,
                 dtype=data.dtype,
-                voxel_size=scaled_voxel_size,
-                total_roi=total_roi,
-                write_size=write_size,
-                original_voxel_size=original_voxel_size,
+                grid=make_grid(data_shape, current_voxel_size, chunks=chunks),
             )
-
-        ds.data[:] = data
+            ds.write_index((0, 0, 0), ds.shape, data)
 
 
 @pytest.fixture(autouse=True, scope="session")

@@ -6,9 +6,8 @@ from importlib import reload
 reload(cellmap_analyze.analyze.assign_to_organelles)
 
 from cellmap_analyze.analyze.assign_to_organelles import AssignToOrganelles
-from cellmap_analyze.util.image_data_interface import (
-    ImageDataInterface,
-)
+from cellmap_analyze.util.zarr_util import open_dataset
+from tests.test_utils import read_all
 import numpy as np
 from scipy.spatial.distance import cdist
 import pandas as pd
@@ -28,15 +27,15 @@ def get_id_if_in_organelle(coord, organelle_data):
 
 def gt_assignments(organelle_csv, target_organelle_ds_path, n):
     # Instantiate your image data interface and get the 3D array.
-    organelle_idi = ImageDataInterface(target_organelle_ds_path)
-    organelle_data = organelle_idi.to_ndarray_ts()
+    organelle_vol = open_dataset(target_organelle_ds_path)
+    organelle_data = read_all(target_organelle_ds_path)
 
     # Read the COMs from the CSV file.
     # The CSV is expected to have columns: "Object ID", "COM Z (nm)", "COM Y (nm)", "COM X (nm)"
     df_com = pd.read_csv(organelle_csv)
     # Extract COM coordinates in (Z, Y, X) order to match organelle_coords.
     coms = df_com[["COM Z (nm)", "COM Y (nm)", "COM X (nm)"]].to_numpy()
-    com_coords = np.array(coms // np.array(organelle_idi.original_voxel_size), dtype=int)
+    com_coords = np.array(coms // np.array(organelle_vol.voxel_size), dtype=int)
 
     # Prepare lists to store the assignments for each object.
     assignment_ids = []
@@ -53,7 +52,7 @@ def gt_assignments(organelle_csv, target_organelle_ds_path, n):
     organelle_indices = np.argwhere(organelle_data)
 
     # Compute the physical coordinates by scaling indices with voxel size.
-    organelle_coords = (organelle_indices + 0.5) * np.array(organelle_idi.original_voxel_size)
+    organelle_coords = (organelle_indices + 0.5) * np.array(organelle_vol.voxel_size)
 
     # Extract the corresponding organelle IDs from the organelle_data array.
     organelle_ids = organelle_data[tuple(organelle_indices.T)]

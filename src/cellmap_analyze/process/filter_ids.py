@@ -1,7 +1,7 @@
 from typing import List, Union
 import numpy as np
 from cellmap_analyze.process.connected_components import ConnectedComponents
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.grid_util import crop_to_roi, grid_of
 from cellmap_analyze.util.io_util import get_output_path_from_input_path
 import logging
 import os
@@ -9,6 +9,7 @@ import pandas as pd
 import shutil
 
 from cellmap_analyze.util.mixins import ComputeConfigMixin
+from cellmap_analyze.util.zarr_util import open_dataset
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -75,12 +76,10 @@ class FilterIDs(ComputeConfigMixin):
             )
 
         self.input_path = input_path
-        self.input_idi = ImageDataInterface(self.input_path, chunk_shape=chunk_shape)
-        if roi is None:
-            self.roi = self.input_idi.roi
-        else:
-            self.roi = roi
-        self.voxel_size = self.input_idi.voxel_size
+        self.input_vol = open_dataset(self.input_path)
+        self.roi = roi
+        self.grid = crop_to_roi(grid_of(self.input_vol, chunk_shape), roi)
+        self.voxel_size = self.input_vol.voxel_size
 
         if output_path is None:
             output_path = get_output_path_from_input_path(input_path, "_filteredIDs")
@@ -96,9 +95,9 @@ class FilterIDs(ComputeConfigMixin):
             self.global_relabeling_dict, self.relabeling_dict_path
         )
         ConnectedComponents.relabel_dataset(
-            self.input_idi,
+            self.input_vol,
+            self.grid,
             self.output_path,
-            self.roi,
             self.new_dtype,
             self.relabeling_dict_path,
             self.num_workers,

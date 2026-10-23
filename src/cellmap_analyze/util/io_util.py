@@ -9,7 +9,6 @@ from datetime import datetime
 import argparse
 import yaml
 from yaml.loader import SafeLoader
-from funlib.geometry import Roi
 import re
 
 # Much below taken from flyemflows: https://github.com/janelia-flyem/flyemflows/blob/master/flyemflows/util/util.py
@@ -234,13 +233,10 @@ def read_run_config(config_path):
     """
 
     def get_roi_from_string(roi_string):
-        # roi will look like this ["z_start:z_end", "y_start:y_end", "x_start:x_end"]. split it and convert to tuple
-        roi_start = [int(d.split(":")[0]) for d in roi_string]
-        roi_ends = [int(d.split(":")[1]) for d in roi_string]
-
-        roi_extents = [int(roi_ends[i] - roi_start[i]) for i in range(len(roi_string))]
-        roi = Roi(roi_start, roi_extents)
-        return roi
+        # ["z_start:z_end", "y_start:y_end", "x_start:x_end"] in nm, to the world box
+        # ((z_start, y_start, x_start), (z_end, y_end, x_end))
+        bounds = [[float(v) for v in d.split(":")] for d in roi_string]
+        return tuple(b for b, _ in bounds), tuple(e for _, e in bounds)
 
     with open(f"{config_path}/run-config.yaml") as f:
         config = yaml.load(f, Loader=SafeLoader)
@@ -389,185 +385,18 @@ def tee_streams(output_path, append=False):
         raise
 
 
-# ----- Remote (S3 / GCS / HTTP) read support -----------------------------
-#
-# cellmap-analyze otherwise assumes POSIX-mounted storage. The helpers
-# below let the READ path accept remote URIs (``s3://``, ``gs://``,
-# ``http(s)://``) so a dataset can live in object storage or a web mirror.
-#
-# Architecture: for metadata reads (.zattrs, zarr.json, multiscales) we
-# go through stdlib ``urllib.request.urlopen`` directly on the JSON file
-# URL -- no fsspec, no s3fs, no zarr-python fsspec backend (and so no
-# async-vs-aiobotocore-vs-zarr version churn between those libraries).
-# For data reads, tensorstore has its own native drivers for s3, gcs,
-# and http kvstores. This module just routes URIs to the right
-# tensorstore kvstore spec and reads JSON metadata over the wire.
-#
-# WRITES to remote paths are NOT supported -- the tmp-dir / merge-dir /
-# rename machinery is built on POSIX semantics (atomic same-parent
-# rename, real directories) that object stores don't provide.
+# Reads may come from object storage or a web mirror (worldarray handles the
+# transport); writes are local only, since the tmp-dir / merge-dir / rename
+# machinery relies on POSIX semantics that object stores don't provide.
 
-import json as _json
-import posixpath
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse, urlunparse
-from urllib.request import Request, urlopen
+from urllib.parse import urlparse
 
 _REMOTE_SCHEMES = {"http", "https", "gs", "s3"}
 
-PRECOMPUTED_PREFIX = "precomputed://"
-
 
 def is_remote_path(path) -> bool:
-    """True if ``path`` is a remote URI (s3://, gs://, http(s)://)."""
+    """True if ``path`` is a remote URI (s3://, gs://, http(s)://), with or without
+    Neuroglancer's ``precomputed://`` prefix."""
     if path is None:
         return False
-    return urlparse(str(strip_precomputed_prefix(path))).scheme in _REMOTE_SCHEMES
-
-
-def is_precomputed_path(path) -> bool:
-    """True if ``path`` carries the explicit ``precomputed://`` prefix.
-
-    The prefix is no longer required — content probing for an ``info``
-    marker in :func:`_detect_zarr_driver` is the canonical signal — but
-    it's still honored for copy-paste from neuroglancer.
-    """
-    return isinstance(path, str) and path.startswith(PRECOMPUTED_PREFIX)
-
-
-def strip_precomputed_prefix(path):
-    """Return ``path`` with any leading ``precomputed://`` removed."""
-    if is_precomputed_path(path):
-        return path[len(PRECOMPUTED_PREFIX):]
-    return path
-
-
-def path_join(base, *parts):
-    """Join URL or local-filesystem path components.
-
-    For URLs, manipulates only the path component (via ``posixpath``) and
-    reassembles via ``urlunparse`` so query strings and fragments survive.
-    """
-    base = str(base)
-    if not parts:
-        return base
-    if is_remote_path(base):
-        parsed = urlparse(base)
-        new_path = parsed.path.rstrip("/")
-        for p in parts:
-            new_path = posixpath.join(new_path, str(p).lstrip("/"))
-        return urlunparse(parsed._replace(path=new_path))
-    return os.path.join(base, *(str(p) for p in parts))
-
-
-def path_dirname(path):
-    """Parent path for a URL or a local-filesystem path."""
-    path = str(path)
-    if is_remote_path(path):
-        parsed = urlparse(path)
-        dirname = posixpath.dirname(parsed.path.rstrip("/"))
-        return urlunparse(parsed._replace(path=dirname or "/"))
-    return os.path.dirname(path)
-
-
-def path_basename(path):
-    """Final component of a URL or a local-filesystem path."""
-    path = str(path)
-    if is_remote_path(path):
-        return posixpath.basename(urlparse(path).path.rstrip("/"))
-    return os.path.basename(path)
-
-
-def url_to_public_https(path):
-    """Translate ``s3://`` / ``gs://`` to a public HTTPS URL.
-
-    Used for metadata probes so we can read JSON via ``urlopen`` without
-    needing s3fs / google-cloud-storage / auth setup. Public buckets just
-    work; private buckets will return 403 from the probe, which is the
-    correct signal -- the subsequent tensorstore open would also need
-    authentication (handled there, not here). Honors ``AWS_ENDPOINT_URL``
-    so MinIO / moto / non-AWS S3-compatible services work.
-    """
-    parsed = urlparse(str(path))
-    if parsed.scheme == "gs":
-        return f"https://storage.googleapis.com/{parsed.netloc}{parsed.path}"
-    if parsed.scheme == "s3":
-        endpoint = os.environ.get("AWS_ENDPOINT_URL")
-        if endpoint:
-            base = endpoint.rstrip("/")
-            return f"{base}/{parsed.netloc}{parsed.path}"
-        return f"https://{parsed.netloc}.s3.amazonaws.com{parsed.path}"
-    return str(path)
-
-
-def read_json_path(path, timeout: float = 10.0):
-    """Read a JSON file from a local path or remote URL.
-
-    Returns the parsed dict on success, or ``None`` if the file is
-    missing / not JSON / unreachable. Never raises -- callers test the
-    return value (mirrors how zarr/n5 metadata probes can legitimately
-    miss when an array doesn't have its own attrs).
-    """
-    try:
-        if is_remote_path(path):
-            url = url_to_public_https(path)
-            request = Request(url, headers={"Accept": "application/json"})
-            with urlopen(request, timeout=timeout) as f:
-                return _json.load(f)
-        with open(path) as f:
-            return _json.load(f)
-    except (
-        FileNotFoundError,
-        OSError,
-        HTTPError,
-        URLError,
-        TimeoutError,
-        _json.JSONDecodeError,
-    ):
-        return None
-
-
-def kvstore_for_path(path):
-    """Build a tensorstore kvstore spec for ``path`` (any supported scheme).
-
-    Returns ``(kvstore_spec, key)`` where ``key`` is the path within the
-    kvstore that the caller should set as ``kvstore_spec["path"]`` (or
-    append a trailing slash to, depending on the tensorstore driver).
-
-    Supported schemes: ``s3``, ``gs``, ``http``, ``https``, ``file``,
-    plus bare local-filesystem paths. Honors ``AWS_ENDPOINT_URL`` so
-    MinIO / moto / non-AWS S3-compatible services work.
-    """
-    parsed = urlparse(str(path))
-    scheme = parsed.scheme.lower()
-    if scheme == "s3":
-        kv = {"driver": "s3", "bucket": parsed.netloc}
-        endpoint = os.environ.get("AWS_ENDPOINT_URL")
-        if endpoint:
-            kv["endpoint"] = endpoint
-        # Default to anonymous mode for public-bucket reads (OpenOrganelle,
-        # most cellmap-published data) so they don't pay multi-second
-        # IMDS / profile / web-identity timeouts in the tensorstore S3
-        # driver's credential chain. Users with private S3 access opt in
-        # via env -- any of AWS_ACCESS_KEY_ID / AWS_PROFILE /
-        # AWS_ENDPOINT_URL switches back to the default credential chain.
-        # (Moto tests already set AWS_ACCESS_KEY_ID + AWS_ENDPOINT_URL,
-        # so they're unaffected.)
-        if not any(
-            os.environ.get(k)
-            for k in ("AWS_ACCESS_KEY_ID", "AWS_PROFILE", "AWS_ENDPOINT_URL")
-        ):
-            kv["aws_credentials"] = {"type": "anonymous"}
-        return kv, parsed.path.lstrip("/")
-    if scheme == "gs":
-        return {"driver": "gcs", "bucket": parsed.netloc}, parsed.path.lstrip("/")
-    if scheme in ("http", "https"):
-        return (
-            {"driver": "http", "base_url": f"{scheme}://{parsed.netloc}"},
-            parsed.path.lstrip("/"),
-        )
-    if scheme == "file":
-        return {"driver": "file"}, parsed.path
-    if scheme == "":
-        return {"driver": "file"}, os.path.abspath(str(path))
-    raise ValueError(f"Unsupported URL scheme: {scheme!r} in {path!r}")
+    return urlparse(str(path).removeprefix("precomputed://")).scheme in _REMOTE_SCHEMES

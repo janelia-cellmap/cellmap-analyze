@@ -184,7 +184,7 @@ def test_measure_blockwise(shared_tmpdir, tmp_zarr, segmentation_name, request):
     )
     m.measure()
     assert m.measurements == simple_object_information_dict(
-        request.getfixturevalue(segmentation_name), m.input_idi.original_voxel_size
+        request.getfixturevalue(segmentation_name), m.input_vol.voxel_size
     )
 
 
@@ -338,21 +338,15 @@ def test_measure_blockwise_with_raw(
 
 def _write_level(path, data, voxel_size):
     """data as s0 of a group at `path`, its corner at the origin."""
-    from funlib.geometry import Coordinate, Roi
-    from cellmap_analyze.util.voxel_size_utils import scale_voxel_size_to_integers
+    from cellmap_analyze.util.grid_util import make_grid
     from cellmap_analyze.util.zarr_util import create_multiscale_dataset
 
-    original = tuple(float(v) for v in voxel_size)
-    scaled, _ = scale_voxel_size_to_integers(original)
     ds = create_multiscale_dataset(
         path,
         dtype=data.dtype,
-        voxel_size=scaled,
-        total_roi=Roi((0, 0, 0), Coordinate(data.shape) * Coordinate(scaled)),
-        write_size=Coordinate(data.shape) * Coordinate(scaled),
-        original_voxel_size=original,
+        grid=make_grid(data.shape, voxel_size, chunks=data.shape),
     )
-    ds.data[:] = data
+    ds.write_index((0, 0, 0), ds.shape, data)
 
 
 def test_measure_raw_finer_than_segmentation_is_block_averaged(tmp_path, voxel_size):

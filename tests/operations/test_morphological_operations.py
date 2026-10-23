@@ -2,9 +2,7 @@ import pytest
 from cellmap_analyze.process.morphological_operations import MorphologicalOperations
 import fastmorph
 import numpy as np
-from cellmap_analyze.util.image_data_interface import (
-    ImageDataInterface,
-)
+from tests.test_utils import read_all
 
 
 def _reference_morphology(ground_truth, operation, num_iterations):
@@ -45,9 +43,7 @@ def test_morphological_operations(
         iterations=num_iterations,
     )
     mo.perform_morphological_operation()
-    test_data = ImageDataInterface(
-        f"{tmp_zarr}/test_morphological_{operation}_{num_iterations}/s0"
-    ).to_ndarray_ts()
+    test_data = read_all(f"{tmp_zarr}/test_morphological_{operation}_{num_iterations}/s0")
 
     ground_truth = _reference_morphology(
         segmentation_cylinders.copy(), operation, num_iterations
