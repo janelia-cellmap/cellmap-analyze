@@ -1,6 +1,14 @@
 import fastremap
 import numpy as np
+from cellmap_analyze.util.grid_util import grid_of
 from cellmap_analyze.util.information_holders import ObjectInformation
+from cellmap_analyze.util.zarr_util import open_dataset
+
+
+def read_all(path, **open_kwargs):
+    """All of the dataset at ``path`` (a multiscale group's first level)."""
+    vol = open_dataset(path, **open_kwargs)
+    return vol.read_onto(grid_of(vol))
 
 
 def arrays_equal_up_to_id_ordering(arr1, arr2):

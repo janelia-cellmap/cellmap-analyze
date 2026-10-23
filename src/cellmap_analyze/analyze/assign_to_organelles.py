@@ -5,12 +5,11 @@ from cellmap_analyze.util.io_util import (
     get_leaf_name_from_path,
     get_output_path_from_input_path,
 )
-from cellmap_analyze.util.image_data_interface import (
-    ImageDataInterface,
-)
+from cellmap_analyze.util.grid_util import grid_of
 from cellmap_analyze.util.mixins import ComputeConfigMixin
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util.dask_util import create_block_from_index
+from cellmap_analyze.util.zarr_util import open_dataset
 import logging
 import pandas as pd
 import numpy as np
@@ -52,7 +51,7 @@ class AssignToOrganelles(ComputeConfigMixin):
                 df = df.iloc[:, :-2]
             self.organelle_info_dict[organelle_csv] = df
 
-        self.organelle_idi = ImageDataInterface(target_organelle_ds_path)
+        self.organelle_vol = open_dataset(target_organelle_ds_path)
         self.organelle_name = get_leaf_name_from_path(
             target_organelle_ds_path
         ).capitalize()
@@ -65,19 +64,19 @@ class AssignToOrganelles(ComputeConfigMixin):
         self._run_id = uuid.uuid4().hex[:8]
 
     @staticmethod
-    def _voxel_indices(coms_nm, organelle_idi):
+    def _voxel_indices(coms_nm, organelle_vol):
         """The voxel of the organelle dataset each COM (nm) falls in."""
         return np.floor(
-            (np.asarray(coms_nm) - organelle_idi.corner) / organelle_idi.voxel_size
+            (np.asarray(coms_nm) - organelle_vol.corner) / organelle_vol.voxel_size
         ).astype(int)
 
     @staticmethod
-    def _group_coms_by_block(coms_nm, organelle_idi, com_row_indices=None):
+    def _group_coms_by_block(coms_nm, organelle_vol, com_row_indices=None):
         """Group COM positions by block index.
 
         Args:
             coms_nm: Array of COM positions in nm, shape (N, 3).
-            organelle_idi: ImageDataInterface for the organelle dataset.
+            organelle_vol: the organelle dataset (a ``wa.WorldArray``).
             com_row_indices: Optional list of original DataFrame row indices.
                 If None, uses range(len(coms_nm)).
 
@@ -88,12 +87,13 @@ class AssignToOrganelles(ComputeConfigMixin):
         if com_row_indices is None:
             com_row_indices = list(range(len(coms_nm)))
 
-        chunk_shape = np.array(organelle_idi.chunk_shape)
-        nchunks = -(-np.array(organelle_idi.grid.shape) // chunk_shape)
+        grid = grid_of(organelle_vol)
+        chunk_shape = np.array(grid.chunks)
+        nchunks = -(-np.array(grid.shape) // chunk_shape)
 
         # Compute block coordinates for each COM, clamp to valid range
         block_coords = (
-            AssignToOrganelles._voxel_indices(coms_nm, organelle_idi) // chunk_shape
+            AssignToOrganelles._voxel_indices(coms_nm, organelle_vol) // chunk_shape
         )
         block_coords = np.clip(block_coords, 0, nchunks - 1)
 
@@ -112,7 +112,7 @@ class AssignToOrganelles(ComputeConfigMixin):
     @staticmethod
     def _process_containing_block(
         partition_index,
-        organelle_idi,
+        organelle_vol,
         coms_path,
         block_indices,
         block_to_com_rows,
@@ -122,13 +122,14 @@ class AssignToOrganelles(ComputeConfigMixin):
 
         coms_nm = np.load(coms_path, mmap_mode="r")
 
-        block = create_block_from_index(organelle_idi, block_index)
-        seg = organelle_idi.to_ndarray_ts(block.read_begin, block.read_end)
+        grid = grid_of(organelle_vol)
+        block = create_block_from_index(grid, block_index)
+        seg = organelle_vol.read_onto(grid, block.read_begin, block.read_end)
 
         results = {}
         for row_idx in com_rows:
             local_idx = (
-                AssignToOrganelles._voxel_indices(coms_nm[row_idx], organelle_idi)
+                AssignToOrganelles._voxel_indices(coms_nm[row_idx], organelle_vol)
                 - block.read_begin
             )
 
@@ -144,7 +145,7 @@ class AssignToOrganelles(ComputeConfigMixin):
     @staticmethod
     def _process_n_nearest_block(
         partition_index,
-        organelle_idi,
+        organelle_vol,
         coms_path,
         block_indices,
         block_to_com_rows,
@@ -156,15 +157,16 @@ class AssignToOrganelles(ComputeConfigMixin):
 
         coms_nm = np.load(coms_path, mmap_mode="r")
 
-        voxel_size = np.array(organelle_idi.voxel_size)
-        corner = np.array(organelle_idi.corner)
-        dataset_shape = np.array(organelle_idi.grid.shape)
+        grid = grid_of(organelle_vol)
+        voxel_size = np.array(grid.voxel_size)
+        corner = np.array(grid.corner)
+        dataset_shape = np.array(grid.shape)
         padding = initial_padding
         results = {}
 
         while True:
             block = create_block_from_index(
-                organelle_idi,
+                grid,
                 block_index,
                 padding=padding,
                 read_beyond_roi=False,
@@ -175,7 +177,7 @@ class AssignToOrganelles(ComputeConfigMixin):
             at_ds_begin = read_begin == 0
             at_ds_end = read_end == dataset_shape
             covers_full_dataset = np.all(at_ds_begin) and np.all(at_ds_end)
-            seg = organelle_idi.to_ndarray_ts(read_begin, read_end)
+            seg = organelle_vol.read_onto(grid, read_begin, read_end)
 
             roi_begin = corner + read_begin * voxel_size
             roi_end = corner + read_end * voxel_size
@@ -223,7 +225,7 @@ class AssignToOrganelles(ComputeConfigMixin):
 
             # Containing organelle check (vectorized)
             local_inds = (
-                AssignToOrganelles._voxel_indices(pending_coms, organelle_idi)
+                AssignToOrganelles._voxel_indices(pending_coms, organelle_vol)
                 - read_begin
             )
             in_bounds = np.all(local_inds >= 0, axis=1) & np.all(
@@ -315,7 +317,7 @@ class AssignToOrganelles(ComputeConfigMixin):
         coms = df[["COM Z (nm)", "COM Y (nm)", "COM X (nm)"]].to_numpy()
         coms_path = self._save_coms_to_tmp(coms)
 
-        block_to_com_rows, _ = self._group_coms_by_block(coms, self.organelle_idi)
+        block_to_com_rows, _ = self._group_coms_by_block(coms, self.organelle_vol)
         block_indices = sorted(block_to_com_rows.keys())
 
         if not block_indices:
@@ -331,7 +333,7 @@ class AssignToOrganelles(ComputeConfigMixin):
             logger,
             f"assigning containing {organelle_name}",
             AssignToOrganelles._process_containing_block,
-            self.organelle_idi,
+            self.organelle_vol,
             coms_path,
             block_indices,
             block_to_com_rows,
@@ -349,14 +351,14 @@ class AssignToOrganelles(ComputeConfigMixin):
         coms = df[["COM Z (nm)", "COM Y (nm)", "COM X (nm)"]].to_numpy()
         coms_path = self._save_coms_to_tmp(coms)
 
-        voxel_size = np.array(self.organelle_idi.voxel_size)
-        block_size_nm = np.array(self.organelle_idi.chunk_shape) * voxel_size
+        voxel_size = np.array(self.organelle_vol.voxel_size)
+        block_size_nm = np.array(grid_of(self.organelle_vol).chunks) * voxel_size
 
         # Initial padding (voxels): half the longest block side on every axis
         half_block = max(block_size_nm) / 2
         padding = np.ceil(half_block / voxel_size).astype(int)
 
-        block_to_com_rows, _ = self._group_coms_by_block(coms, self.organelle_idi)
+        block_to_com_rows, _ = self._group_coms_by_block(coms, self.organelle_vol)
         block_indices = sorted(block_to_com_rows.keys())
 
         if not block_indices:
@@ -373,7 +375,7 @@ class AssignToOrganelles(ComputeConfigMixin):
             logger,
             f"assigning {n} nearest {organelle_name}",
             AssignToOrganelles._process_n_nearest_block,
-            self.organelle_idi,
+            self.organelle_vol,
             coms_path,
             block_indices,
             block_to_com_rows,

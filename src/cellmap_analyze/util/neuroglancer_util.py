@@ -3,7 +3,8 @@ import neuroglancer
 import os
 import struct
 import json
-from .image_data_interface import ImageDataInterface
+from .grid_util import grid_of
+from .zarr_util import open_dataset
 
 
 def view_in_neuroglancer(**kwargs):  # pragma: no cover
@@ -14,7 +15,8 @@ def view_in_neuroglancer(**kwargs):  # pragma: no cover
         for array_name, array in kwargs.items():
 
             if type(array) != np.ndarray:
-                array = ImageDataInterface(array).to_ndarray_ts()
+                vol = open_dataset(array)
+                array = vol.read_onto(grid_of(vol))
 
             if (
                 array.dtype in (float, np.float32)

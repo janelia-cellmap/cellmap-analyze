@@ -4,9 +4,9 @@ import struct
 
 import numpy as np
 import pytest
-from cellmap_analyze.util.grid_util import make_grid, resampled
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
-from cellmap_analyze.util.zarr_util import create_multiscale_dataset
+import worldarray as wa
+from cellmap_analyze.util.grid_util import make_grid
+from cellmap_analyze.util.zarr_util import create_multiscale_dataset, open_dataset
 
 
 def _write(path, data, voxel_size):
@@ -20,9 +20,8 @@ def _write(path, data, voxel_size):
 
 def _read_at(path, voxel_size, **kwargs):
     """The dataset at ``path`` read onto ``voxel_size`` voxels covering it."""
-    idi = ImageDataInterface(path, **kwargs)
-    idi.output_grid = resampled(idi.grid, voxel_size)
-    return idi.to_ndarray_ts()
+    vol = open_dataset(path, **kwargs)
+    return vol.read_onto(wa.Grid.from_meta(vol.meta, voxel_size=voxel_size))
 
 
 class TestNonIntegerResampling:
@@ -83,9 +82,9 @@ class TestNonIntegerResampling:
                                [1, 2, 1]]], dtype=np.uint8)
         _write(f"{tmp_zarr}/test_labels", test_data, input_voxel_size)
 
-        # Read with interpolation_order=0 (nearest-neighbor)
+        # Read nearest-neighbor
         result = _read_at(
-            f"{tmp_zarr}/test_labels/s0", output_voxel_size, interpolation_order=0
+            f"{tmp_zarr}/test_labels/s0", output_voxel_size, method="nearest"
         )
 
         # Result should only contain original labels (no fuzzy interpolation)
@@ -96,10 +95,9 @@ class TestNonIntegerResampling:
         test_data = np.random.randint(1, 10, (10, 10, 10), dtype=np.uint8)
         _write(f"{tmp_zarr}/test_roi_non_integer", test_data, (8, 8, 8))
 
-        idi = ImageDataInterface(f"{tmp_zarr}/test_roi_non_integer/s0")
+        vol = open_dataset(f"{tmp_zarr}/test_roi_non_integer/s0")
         # 6 voxels of 5 nm from 16 nm, which does not sit on the 8 nm grid
-        idi.output_grid = make_grid((6, 6, 6), (5, 5, 5), corner=(16, 16, 16))
-        result = idi.to_ndarray_ts()
+        result = vol.read_onto(make_grid((6, 6, 6), (5, 5, 5), corner=(16, 16, 16)))
         assert result.shape == (6, 6, 6)
         # nearest: output voxel i is centred at 16 + 5 i + 2.5 nm
         source = ((16 + 5 * np.arange(6) + 2.5) // 8).astype(int)
@@ -132,9 +130,8 @@ class TestIntegerRatios:
         test_data = np.arange(1, 28).reshape((3, 3, 3)).astype(np.uint8)
         _write(f"{tmp_zarr}/test_close_int", test_data, (8.004, 8.004, 8.004))
 
-        idi = ImageDataInterface(f"{tmp_zarr}/test_close_int/s0")
-        idi.output_grid = make_grid((6, 6, 6), (4, 4, 4))
-        result = idi.to_ndarray_ts()
+        vol = open_dataset(f"{tmp_zarr}/test_close_int/s0")
+        result = vol.read_onto(make_grid((6, 6, 6), (4, 4, 4)))
 
         assert np.array_equal(result, test_data.repeat(2, 0).repeat(2, 1).repeat(2, 2))
 
@@ -175,8 +172,7 @@ class TestCrossDatasetAlignment:
 
         results = []
         for name, data, vs in (("A", test_data_A, (7, 11, 13)), ("B", test_data_B, (5, 9, 17))):
-            idi = ImageDataInterface(f"{tmp_zarr}/test_dataset_{name}/s0", output_grid=grid)
-            result = idi.to_ndarray_ts()
+            result = open_dataset(f"{tmp_zarr}/test_dataset_{name}/s0").read_onto(grid)
             # nearest: each 3 nm voxel takes the source voxel its centre is in
             centres = [138 + 3 * np.arange(57) + 1.5, 144 + 3 * np.arange(47) + 1.5, 150 + 3 * np.arange(15) + 1.5]
             source = [(c // v).astype(int) for c, v in zip(centres, vs)]
@@ -192,12 +188,12 @@ class TestOffsetAlignment:
         test_data = np.arange(10, dtype=np.uint8).reshape(10, 1, 1)
         _write(f"{tmp_zarr}/test_offset_align", test_data, (32, 1, 1))
 
-        idi = ImageDataInterface(f"{tmp_zarr}/test_offset_align/s0")
+        vol = open_dataset(f"{tmp_zarr}/test_offset_align/s0")
         # exactly the physical extent of native voxel 3, in 8 nm voxels: every
         # returned voxel should be 3, not a mix of 2 and 3.
-        corner = (idi.corner[0] + 3 * 32, idi.corner[1], idi.corner[2])
-        idi.output_grid = make_grid((4, 1, 1), (8, 1, 1), corner)
-        assert np.array_equal(idi.to_ndarray_ts().ravel(), np.full(4, 3))
+        corner = (vol.corner[0] + 3 * 32, vol.corner[1], vol.corner[2])
+        result = vol.read_onto(make_grid((4, 1, 1), (8, 1, 1), corner))
+        assert np.array_equal(result.ravel(), np.full(4, 3))
 
 
 class TestRawValidMask:
@@ -212,29 +208,28 @@ class TestRawValidMask:
             .astype(np.uint16)
         )
         _write(f"{tmp_zarr}/{name}", test_data, input_voxel_size)
-        return ImageDataInterface(f"{tmp_zarr}/{name}/s0")
+        return open_dataset(f"{tmp_zarr}/{name}/s0")
 
     def test_no_overlap_box_is_entirely_invalid(self, tmp_zarr):
-        idi = self._make_dataset(tmp_zarr, "test_valid_no_overlap", (32, 32, 32), (5, 5, 5))
+        vol = self._make_dataset(tmp_zarr, "test_valid_no_overlap", (32, 32, 32), (5, 5, 5))
         # Entirely past the dataset's own extent -> no real data anywhere.
-        idi.output_grid = make_grid((10, 10, 10), (8, 8, 8), corner=idi.grid.box.end)
-        data, valid = idi.to_ndarray_ts(return_valid_mask=True)
+        grid = make_grid((10, 10, 10), (8, 8, 8), corner=vol.box.end)
+        data, valid = vol.read_onto(grid, mask=True)
         assert data.shape == valid.shape
         assert not valid.any()
 
     def test_fully_inside_box_is_entirely_valid(self, tmp_zarr):
-        idi = self._make_dataset(tmp_zarr, "test_valid_inside", (32, 32, 32), (5, 5, 5))
-        idi.output_grid = resampled(idi.grid, (8, 8, 8))
-        data, valid = idi.to_ndarray_ts(return_valid_mask=True)
+        vol = self._make_dataset(tmp_zarr, "test_valid_inside", (32, 32, 32), (5, 5, 5))
+        data, valid = vol.read_onto(wa.Grid.from_meta(vol.meta, voxel_size=(8, 8, 8)), mask=True)
         assert data.shape == valid.shape
         assert valid.all()
 
     def test_partial_overlap_marks_only_the_covered_region_valid(self, tmp_zarr):
-        idi = self._make_dataset(tmp_zarr, "test_valid_partial", (32, 32, 32), (5, 5, 5))
-        idi.output_grid = resampled(idi.grid, (8, 8, 8))
+        vol = self._make_dataset(tmp_zarr, "test_valid_partial", (32, 32, 32), (5, 5, 5))
+        grid = wa.Grid.from_meta(vol.meta, voxel_size=(8, 8, 8))
         # Straddle the dataset's far edge on axis 0 only: half real data,
         # half padding.
-        data, valid = idi.to_ndarray_ts((16, 0, 0), (24, 4, 4), return_valid_mask=True)
+        data, valid = vol.read_onto(grid, (16, 0, 0), (24, 4, 4), mask=True)
 
         assert data.shape == valid.shape
         assert valid[:4].all()
@@ -305,14 +300,14 @@ class TestN5AnisotropicSwapAxes:
     """N5 stores x,y,z; the IDI presents z,y,x, voxel sizes included."""
 
     def test_voxel_size_and_shape_are_zyx(self, tmp_n5):
-        idi = ImageDataInterface(tmp_n5)
-        assert idi.voxel_size == (5.24, 4.0, 4.0)
+        vol = open_dataset(tmp_n5)
+        assert vol.voxel_size == (5.24, 4.0, 4.0)
         # N5 on-disk shape is (20,25,10) in x,y,z; IDI presents as (10,25,20) in z,y,x
-        assert idi.grid.shape == (10, 25, 20)
-        assert idi.to_ndarray_ts().shape == (10, 25, 20)
+        assert vol.shape == (10, 25, 20)
+        assert vol.read_index((0, 0, 0), vol.shape).shape == (10, 25, 20)
 
     def test_box_beyond_dataset_returns_zeros(self, tmp_n5):
-        idi = ImageDataInterface(tmp_n5)
-        result = idi.to_ndarray_ts((10, 0, 0), (11, 10, 10))
+        vol = open_dataset(tmp_n5)
+        result = vol.read_index((10, 0, 0), (11, 10, 10))
         assert result.shape == (1, 10, 10)
         assert np.all(result == 0)

@@ -5,9 +5,8 @@ from cellmap_analyze.util.mask_util import MasksFromConfig
 
 import numpy as np
 
-from cellmap_analyze.util.image_data_interface import (
-    ImageDataInterface,
-)
+from cellmap_analyze.util.grid_util import grid_of
+from cellmap_analyze.util.zarr_util import open_dataset
 
 
 def test_masks(tmp_zarr, mask_one, mask_two, voxel_size):
@@ -31,7 +30,7 @@ def test_masks(tmp_zarr, mask_one, mask_two, voxel_size):
     structuring_element = ndimage.generate_binary_structure(3, connectivity)
 
     # the masks are read on mask_one's own grid
-    idi = ImageDataInterface(f"{tmp_zarr}/mask_one/s0")
+    grid = grid_of(open_dataset(f"{tmp_zarr}/mask_one/s0"))
 
     # each erosion iteration reaches one voxel further on every axis, and past
     # the edge the mask continues as its edge voxels
@@ -45,7 +44,7 @@ def test_masks(tmp_zarr, mask_one, mask_two, voxel_size):
 
     test_masks = MasksFromConfig(
         mask_dict,
-        output_grid=idi.grid,
+        output_grid=grid,
         connectivity=connectivity,
     )
     test_data = test_masks.process_block()

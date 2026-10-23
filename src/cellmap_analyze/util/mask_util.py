@@ -1,7 +1,8 @@
 # %%
 import numpy as np
 from scipy import ndimage
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.grid_util import grid_of
+from cellmap_analyze.util.zarr_util import open_dataset
 from cellmap_analyze.util.block_util import erosion, dilation
 from functools import partial
 
@@ -29,7 +30,6 @@ class Mask:
         output_grid=None,
         connectivity=2,
         mask_value=None,
-        chunk_shape=None,
     ):
         if type(operation) == str:
             operation = [operation]
@@ -40,13 +40,9 @@ class Mask:
             raise ValueError("Iterations and operation must have the same length")
 
         structuring_element = ndimage.generate_binary_structure(3, connectivity)
+        self.vol = open_dataset(path, padding="edge" if "erosion" in operation else 0)
         # read on the caller's grid
-        self.idi = ImageDataInterface(
-            path,
-            custom_fill_value="edge" if "erosion" in operation else None,
-            chunk_shape=chunk_shape,
-            output_grid=output_grid,
-        )
+        self.grid = grid_of(self.vol) if output_grid is None else output_grid
 
         if (not operation and iterations > 0) or (operation and iterations == 0):
             raise ValueError(
@@ -76,17 +72,17 @@ class Mask:
         """The mask over voxels ``[begin, end)`` of the caller's grid (all of it when
         None)."""
         if begin is None:
-            begin, end = (0,) * 3, self.idi.output_grid.shape
+            begin, end = (0,) * 3, self.grid.shape
 
         if operation == ["simple"]:
-            block = self.idi.to_ndarray_ts(begin, end)
+            block = self.vol.read_onto(self.grid, begin, end)
             if mask_value is not None:
                 block = _apply_mask_value(block, mask_value)
         else:
             # each iteration reaches one voxel further on every axis
             padding = sum(iterations)
-            block = self.idi.to_ndarray_ts(
-                np.subtract(begin, padding), np.add(end, padding)
+            block = self.vol.read_onto(
+                self.grid, np.subtract(begin, padding), np.add(end, padding)
             )
 
             if mask_value is not None:

@@ -4,12 +4,8 @@ import pytest
 import worldarray as wa
 import zarr
 
-from cellmap_analyze.util.grid_util import make_grid, same_grid
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
-from cellmap_analyze.util.zarr_util import (
-    create_multiscale_dataset,
-    create_multiscale_dataset_idi,
-)
+from cellmap_analyze.util.grid_util import grid_of, make_grid
+from cellmap_analyze.util.zarr_util import create_multiscale_dataset, open_dataset
 from cellmap_analyze.util.measure_util import get_region_properties
 
 
@@ -37,17 +33,17 @@ def non_int_zarr(tmp_path):
 class TestIDINonIntegerVoxelSize:
     def test_reads_original_voxel_size(self, non_int_zarr):
         zarr_path, original_vs, test_data = non_int_zarr
-        idi = ImageDataInterface(f"{zarr_path}/test_ds/s0")
+        vol = open_dataset(f"{zarr_path}/test_ds/s0")
 
-        assert idi.voxel_size == original_vs
-        assert idi.grid.shape == test_data.shape
+        assert vol.voxel_size == original_vs
+        assert grid_of(vol).shape == test_data.shape
 
     def test_data_read_correct(self, non_int_zarr):
         """Data should be readable without corruption."""
         zarr_path, _, test_data = non_int_zarr
-        idi = ImageDataInterface(f"{zarr_path}/test_ds/s0")
+        vol = open_dataset(f"{zarr_path}/test_ds/s0")
 
-        data = idi.to_ndarray_ts()
+        data = vol.read_onto(grid_of(vol))
         np.testing.assert_array_equal(data, test_data)
 
 
@@ -55,9 +51,9 @@ class TestMeasurementsWithNonIntegerVoxelSize:
     def test_volume_correct(self, non_int_zarr):
         """Volume should use the true voxel_size."""
         zarr_path, original_vs, test_data = non_int_zarr
-        idi = ImageDataInterface(f"{zarr_path}/test_ds/s0")
+        vol = open_dataset(f"{zarr_path}/test_ds/s0")
 
-        df = get_region_properties(test_data, voxel_size=idi.voxel_size, trim=0)
+        df = get_region_properties(test_data, voxel_size=vol.voxel_size, trim=0)
 
         true_voxel_volume = original_vs[0] * original_vs[1] * original_vs[2]
         # Label 1 has 27 voxels (3x3x3 cube)
@@ -71,9 +67,9 @@ class TestMeasurementsWithNonIntegerVoxelSize:
     def test_surface_area_correct(self, non_int_zarr):
         """Surface area should use the true voxel_size's face areas."""
         zarr_path, original_vs, test_data = non_int_zarr
-        idi = ImageDataInterface(f"{zarr_path}/test_ds/s0")
+        vol = open_dataset(f"{zarr_path}/test_ds/s0")
 
-        df = get_region_properties(test_data, voxel_size=idi.voxel_size, trim=0)
+        df = get_region_properties(test_data, voxel_size=vol.voxel_size, trim=0)
 
         # For label 2 (2x2x2 cube): 6 faces, each face has 4 exposed voxel faces
         # Face areas: YX = 4*4=16, ZX = 3.54*4=14.16, ZY = 3.54*4=14.16
@@ -127,7 +123,7 @@ class TestOutputMetadata:
         written = wa.open(output_path + "/s0").voxel_size
         for s, e in zip(written, original_vs):
             assert abs(float(s) - e) < 1e-10, "voxel size should be physical"
-        assert ImageDataInterface(output_path + "/s0").voxel_size == original_vs
+        assert open_dataset(output_path + "/s0").voxel_size == original_vs
 
     @pytest.mark.parametrize(
         "original_vs, translation",
@@ -146,13 +142,14 @@ class TestOutputMetadata:
                 {"type": "translation", "translation": list(translation)},
             ]}],
         }]
-        input_idi = ImageDataInterface(str(tmp_path / "in.zarr" / "s0"))
+        input_vol = open_dataset(str(tmp_path / "in.zarr" / "s0"))
 
-        output_idi = create_multiscale_dataset_idi(
-            str(tmp_path / "out.zarr" / "seg"), dtype=np.uint8, grid=input_idi.grid
+        output_vol = create_multiscale_dataset(
+            str(tmp_path / "out.zarr" / "seg"), dtype=np.uint8, grid=grid_of(input_vol)
         )
-        assert same_grid(output_idi.grid, input_idi.grid)
-        assert output_idi.grid.shape == input_idi.grid.shape
+        assert output_vol.shape == input_vol.shape
+        assert np.allclose(output_vol.voxel_size, input_vol.voxel_size)
+        assert np.allclose(output_vol.corner, input_vol.corner)
         written = wa.open(str(tmp_path / "out.zarr" / "seg" / "s0")).translation
         assert np.allclose(written, translation)
 
@@ -167,11 +164,9 @@ class TestMultiDatasetConsistency:
         data2 = np.arange(125, dtype=np.uint8).reshape(shape)
         ds2.write_index((0, 0, 0), shape, data2)
 
-        idi1 = ImageDataInterface(str(tmp_path / "ds1.zarr" / "a" / "s0"))
-        idi2 = ImageDataInterface(
-            str(tmp_path / "ds2.zarr" / "b" / "s0"), output_grid=idi1.grid
-        )
-        result = idi2.to_ndarray_ts()
+        vol1 = open_dataset(str(tmp_path / "ds1.zarr" / "a" / "s0"))
+        vol2 = open_dataset(str(tmp_path / "ds2.zarr" / "b" / "s0"))
+        result = vol2.read_onto(grid_of(vol1))
 
         assert result.shape == shape
         # z: the 3.54 nm voxel centres fall in 4 nm voxels 0, 1, 2, 3, 3

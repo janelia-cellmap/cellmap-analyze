@@ -8,8 +8,7 @@ from cellmap_analyze.util import dask_util
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
-from cellmap_analyze.util.grid_util import crop_to_roi, make_grid
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.grid_util import crop_to_roi, grid_of
 from cellmap_analyze.util.io_util import (
     get_name_from_path,
     get_output_path_from_input_path,
@@ -20,7 +19,7 @@ import logging
 import os
 from cellmap_analyze.util.mask_util import MasksFromConfig
 from cellmap_analyze.util.mixins import ComputeConfigMixin
-from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
+from cellmap_analyze.util.zarr_util import create_multiscale_dataset, open_dataset
 import cc3d
 
 from scipy import ndimage
@@ -73,16 +72,11 @@ class MutexWatershed(ComputeConfigMixin):
         # Support single path or list of paths (one per affinity channel)
         # , concurrency_limit=None, timeout=30
         if isinstance(affinities_path, list):
-            self.affinities_idis = [
-                ImageDataInterface(p)
-                for p in affinities_path
-            ]
-            self.affinities_idi = self.affinities_idis[0]
+            self.affinities_vols = [open_dataset(p) for p in affinities_path]
+            self.affinities_vol = self.affinities_vols[0]
         else:
-            self.affinities_idis = None
-            self.affinities_idi = ImageDataInterface(affinities_path)
-        if chunk_shape is None:
-            chunk_shape = self.affinities_idi.chunk_shape
+            self.affinities_vols = None
+            self.affinities_vol = open_dataset(affinities_path)
         # affinities information
         self.neighborhood = neighborhood
         self.adjacent_edge_bias = adjacent_edge_bias
@@ -95,12 +89,9 @@ class MutexWatershed(ComputeConfigMixin):
         self.fill_holes = fill_holes
 
         # the first affinities' grid, chunked by chunk_shape; every affinity is read on it
-        grid = crop_to_roi(self.affinities_idi.grid, roi)
-        self.grid = make_grid(grid.shape, grid.voxel_size, grid.corner, chunk_shape)
-        for idi in self.affinities_idis or [self.affinities_idi]:
-            idi.output_grid = self.grid
+        self.grid = crop_to_roi(grid_of(self.affinities_vol, chunk_shape), roi)
 
-        self.voxel_size = self.affinities_idi.voxel_size
+        self.voxel_size = self.affinities_vol.voxel_size
         self.do_full_connected_components = False
         output_ds_basepath = split_dataset_path(output_path)[0]
         os.makedirs(output_ds_basepath, exist_ok=True)
@@ -116,7 +107,7 @@ class MutexWatershed(ComputeConfigMixin):
                 os.path.dirname(self.connected_components_blockwise_path), exist_ok=True
             )
 
-        self.connected_components_blockwise_idi = create_multiscale_dataset_idi(
+        self.connected_components_blockwise_vol = create_multiscale_dataset(
             self.connected_components_blockwise_path,
             dtype=np.uint64,
             grid=self.grid,
@@ -255,8 +246,9 @@ class MutexWatershed(ComputeConfigMixin):
 
     def calculate_block_connected_components(
         block_index,
-        affinities_idi,
-        connected_components_blockwise_idi: ImageDataInterface,
+        grid,
+        affinities_vol,
+        connected_components_blockwise_vol,
         neighborhood,
         adjacent_edge_bias,
         lr_bias,
@@ -270,31 +262,31 @@ class MutexWatershed(ComputeConfigMixin):
             padding_voxels = np.amax(neighborhood)
 
         block = create_block_from_index(
-            connected_components_blockwise_idi,
+            grid,
             block_index,
             padding=padding_voxels,
         )
         if mask:
             mask_block = mask.process_block(block.read_begin, block.read_end)
             if not mask_block.any():
-                connected_components_blockwise_idi.write(block.begin, block.end, 0)
+                connected_components_blockwise_vol.write_index(block.begin, block.end, 0)
                 return
 
-        # Support list of IDIs (one per affinity channel) or single 4D IDI
-        if isinstance(affinities_idi, list):
+        # Support a list of datasets (one per affinity channel) or a single 4D one
+        if isinstance(affinities_vol, list):
             affinities = np.stack(
-                [idi.to_ndarray_ts(block.read_begin, block.read_end) for idi in affinities_idi],
+                [vol.read_onto(grid, block.read_begin, block.read_end) for vol in affinities_vol],
                 axis=0,
             )
         else:
-            affinities = affinities_idi.to_ndarray_ts(block.read_begin, block.read_end)
+            affinities = affinities_vol.read_onto(grid, block.read_begin, block.read_end)
 
         if mask:
             affinities *= mask_block[None, :, :, :]
 
         # Skip blocks with no signal before expensive float64 conversion
         if affinities.max() == 0:
-            connected_components_blockwise_idi.write(block.begin, block.end, 0)
+            connected_components_blockwise_vol.write_index(block.begin, block.end, 0)
             return
 
         segmentation = MutexWatershed.mutex_watershed(
@@ -311,27 +303,28 @@ class MutexWatershed(ComputeConfigMixin):
         # the full block's voxel count, so ids from different blocks never collide
         global_id_offset = np.uint64(
             block_index
-            * np.prod(connected_components_blockwise_idi.chunk_shape, dtype=np.uint64)
+            * np.prod(grid.chunks, dtype=np.uint64)
         )
         segmentation[segmentation > 0] += global_id_offset
-        connected_components_blockwise_idi.write(
-            block.begin, block.end, segmentation[block.inner]
+        connected_components_blockwise_vol.write_index(
+            block.begin, block.end, segmentation[block.inner].astype(np.uint64, copy=False)
         )
 
     def calculate_connected_components_blockwise(self):
-        num_blocks = dask_util.get_num_blocks(self.connected_components_blockwise_idi)
+        num_blocks = dask_util.get_num_blocks(self.grid)
         affinities_arg = (
-            self.affinities_idis if self.affinities_idis else self.affinities_idi
+            self.affinities_vols if self.affinities_vols else self.affinities_vol
         )
         dask_util.compute_blockwise_partitions(
             num_blocks,
             self.num_workers,
             self.compute_args,
             logger,
-            f"calculating blockwise connected components with mws for {self.affinities_idi.path}",
+            f"calculating blockwise connected components with mws for {self.affinities_vol.level_path}",
             MutexWatershed.calculate_block_connected_components,
+            self.grid,
             affinities_arg,
-            self.connected_components_blockwise_idi,
+            self.connected_components_blockwise_vol,
             self.neighborhood,
             self.adjacent_edge_bias,
             self.lr_bias,

@@ -6,13 +6,12 @@ from cellmap_analyze.util.block_util import erosion
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
-from cellmap_analyze.util.grid_util import crop_to_roi
+from cellmap_analyze.util.grid_util import crop_to_roi, grid_of
 from cellmap_analyze.util.mask_util import MasksFromConfig
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
 
 import logging
 from cellmap_analyze.util.mixins import ComputeConfigMixin
-from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
+from cellmap_analyze.util.zarr_util import create_multiscale_dataset, open_dataset
 
 import fastmorph
 
@@ -71,9 +70,8 @@ class MorphologicalOperations(ComputeConfigMixin):
     ):
         super().__init__(num_workers)
 
-        self.input_idi = ImageDataInterface(input_path, chunk_shape=chunk_shape)
-        self.grid = crop_to_roi(self.input_idi.grid, roi)
-        self.input_idi.output_grid = self.grid
+        self.input_vol = open_dataset(input_path)
+        self.grid = crop_to_roi(grid_of(self.input_vol, chunk_shape), roi)
 
         self.mask = None
         if mask_config:
@@ -92,15 +90,16 @@ class MorphologicalOperations(ComputeConfigMixin):
             raise ValueError("iterations must be at least 1")
 
         self.iterations = iterations
-        self.output_idi = create_multiscale_dataset_idi(
-            output_path, dtype=self.input_idi.dtype, grid=self.grid
+        self.output_vol = create_multiscale_dataset(
+            output_path, dtype=self.input_vol.dtype, grid=self.grid
         )
 
     @staticmethod
     def perform_morphological_operation_blockwise(
         block_index,
-        input_idi: ImageDataInterface,
-        output_idi: ImageDataInterface,
+        grid,
+        input_vol,
+        output_vol,
         operation: str,
         iterations: int,
         mask: MasksFromConfig = None,
@@ -124,7 +123,7 @@ class MorphologicalOperations(ComputeConfigMixin):
         # whole-array call, which has no context beyond its own edge either
         # -- so only the block's own voxels (block.inner) are written.
         block = create_block_from_index(
-            output_idi,
+            grid,
             block_index,
             padding=padding_voxels,
             read_beyond_roi=False,
@@ -132,10 +131,10 @@ class MorphologicalOperations(ComputeConfigMixin):
         if mask:
             mask_block = mask.process_block(block.read_begin, block.read_end)
             if not np.any(mask_block):
-                output_idi.write(block.begin, block.end, 0)
+                output_vol.write_index(block.begin, block.end, 0)
                 return
 
-        data = input_idi.to_ndarray_ts(block.read_begin, block.read_end)
+        data = input_vol.read_onto(grid, block.read_begin, block.read_end)
         if mask:
             data *= mask_block
 
@@ -157,19 +156,20 @@ class MorphologicalOperations(ComputeConfigMixin):
         # else: an all-background block stays all-background under every one
         # of these ops -- skip straight to the (still all-zero) write below.
 
-        output_idi.write(block.begin, block.end, data[block.inner])
+        output_vol.write_index(block.begin, block.end, data[block.inner])
 
     def perform_morphological_operation(self):
-        num_blocks = dask_util.get_num_blocks(self.output_idi)
+        num_blocks = dask_util.get_num_blocks(self.grid)
         dask_util.compute_blockwise_partitions(
             num_blocks,
             self.num_workers,
             self.compute_args,
             logger,
-            f"{self.operation} of {self.input_idi.path}",
+            f"{self.operation} of {self.input_vol.level_path}",
             MorphologicalOperations.perform_morphological_operation_blockwise,
-            self.input_idi,
-            self.output_idi,
+            self.grid,
+            self.input_vol,
+            self.output_vol,
             self.operation,
             self.iterations,
             self.mask,

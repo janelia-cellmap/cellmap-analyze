@@ -6,12 +6,11 @@ from cellmap_analyze.util.block_util import erosion
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
-from cellmap_analyze.util.grid_util import crop_to_roi
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.grid_util import crop_to_roi, grid_of
 
 import logging
 from cellmap_analyze.util.mixins import ComputeConfigMixin
-from cellmap_analyze.util.zarr_util import create_multiscale_dataset_idi
+from cellmap_analyze.util.zarr_util import create_multiscale_dataset, open_dataset
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -36,42 +35,40 @@ class LabelWithMask(ComputeConfigMixin):
     ):
         super().__init__(num_workers)
 
-        self.input_idi = ImageDataInterface(input_path, chunk_shape=chunk_shape)
-        self.grid = crop_to_roi(self.input_idi.grid, roi)
-        self.input_idi.output_grid = self.grid
+        self.input_vol = open_dataset(input_path)
+        self.grid = crop_to_roi(grid_of(self.input_vol, chunk_shape), roi)
         # read on the input's grid
-        self.mask_idi = ImageDataInterface(
+        self.mask_vol = open_dataset(
             mask_path,
-            chunk_shape=chunk_shape,
-            custom_fill_value="edge",  # in case of doing erosion later for surface voxel testing
-            output_grid=self.grid,
+            padding="edge",  # in case of doing erosion later for surface voxel testing
         )
 
         self.intensity_threshold_minimum = intensity_threshold_minimum
         self.intensity_threshold_maximum = intensity_threshold_maximum
         self.surface_voxels_only = surface_voxels_only
-        self.output_idi = create_multiscale_dataset_idi(
-            output_path, dtype=self.mask_idi.dtype, grid=self.grid
+        self.output_vol = create_multiscale_dataset(
+            output_path, dtype=self.mask_vol.dtype, grid=self.grid
         )
 
     @staticmethod
     def label_with_mask_blockwise(
         block_index,
-        input_idi: ImageDataInterface,
-        mask_idi: ImageDataInterface,
-        output_idi: ImageDataInterface,
+        grid,
+        input_vol,
+        mask_vol,
+        output_vol,
         intensity_threshold_minimum,
         intensity_threshold_maximum,
         surface_voxels_only=False,
     ):
         # the erosion below reaches one voxel on every axis
         block = create_block_from_index(
-            output_idi,
+            grid,
             block_index,
             padding=int(surface_voxels_only),
         )
-        input = input_idi.to_ndarray_ts(block.read_begin, block.read_end)
-        mask = mask_idi.to_ndarray_ts(block.read_begin, block.read_end)
+        input = input_vol.read_onto(grid, block.read_begin, block.read_end)
+        mask = mask_vol.read_onto(grid, block.read_begin, block.read_end)
         if surface_voxels_only:
             eroded = erosion(mask, 1, ndimage.generate_binary_structure(3, 2))
             mask = mask - eroded
@@ -79,20 +76,23 @@ class LabelWithMask(ComputeConfigMixin):
             (input >= intensity_threshold_minimum)
             & (input < intensity_threshold_maximum)
         ) * mask
-        output_idi.write(block.begin, block.end, output[block.inner])
+        output_vol.write_index(
+            block.begin, block.end, output[block.inner].astype(output_vol.dtype, copy=False)
+        )
 
     def get_label_with_mask(self):
-        num_blocks = dask_util.get_num_blocks(self.output_idi)
+        num_blocks = dask_util.get_num_blocks(self.grid)
         dask_util.compute_blockwise_partitions(
             num_blocks,
             self.num_workers,
             self.compute_args,
             logger,
-            f"labeling {self.input_idi.path} with mask {self.mask_idi.path}",
+            f"labeling {self.input_vol.level_path} with mask {self.mask_vol.level_path}",
             LabelWithMask.label_with_mask_blockwise,
-            self.input_idi,
-            self.mask_idi,
-            self.output_idi,
+            self.grid,
+            self.input_vol,
+            self.mask_vol,
+            self.output_vol,
             self.intensity_threshold_minimum,
             self.intensity_threshold_maximum,
             self.surface_voxels_only,

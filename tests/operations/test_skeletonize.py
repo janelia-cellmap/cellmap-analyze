@@ -198,7 +198,7 @@ def test_skeletonize_resolves_group_path_to_s0(tmp_zarr, tmp_skeletonize_csv):
         num_workers=1,
         sharded=False,
     )
-    assert sk.segmentation_idi.path.endswith("/segmentation_for_skeleton/s0")
+    assert sk.segmentation_vol.level_path.endswith("/segmentation_for_skeleton/s0")
 
 
 def _parse_skeleton_bytes(buf, n_radius_components=0):

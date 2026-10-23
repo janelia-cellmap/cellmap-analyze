@@ -1,27 +1,24 @@
 import numpy as np
 import pytest
-from cellmap_analyze.util.image_data_interface import (
-    ImageDataInterface,
-)
+from cellmap_analyze.util.zarr_util import open_dataset
+from tests.test_utils import read_all
 
 
-def test_image_data_interface_whole(
+def test_read_whole(
     tmp_zarr,
     image_with_holes_filled,
 ):
-    test_data = ImageDataInterface(
-        f"{tmp_zarr}/image_with_holes_filled/s0"
-    ).to_ndarray_ts()
+    test_data = read_all(f"{tmp_zarr}/image_with_holes_filled/s0")
     assert np.array_equal(
         test_data,
         image_with_holes_filled,
     )
 
 
-def test_image_data_interface_roi(tmp_zarr, image_with_holes_filled):
-    idi = ImageDataInterface(f"{tmp_zarr}/image_with_holes_filled/s0")
+def test_read_box(tmp_zarr, image_with_holes_filled):
+    vol = open_dataset(f"{tmp_zarr}/image_with_holes_filled/s0")
 
-    test_data = idi.to_ndarray_ts((1, 1, 1), (6, 6, 6))
+    test_data = vol.read_index((1, 1, 1), (6, 6, 6))
     ground_truth = image_with_holes_filled[1:6, 1:6, 1:6]
     assert np.array_equal(
         test_data,
@@ -30,14 +27,14 @@ def test_image_data_interface_roi(tmp_zarr, image_with_holes_filled):
 
 
 @pytest.mark.parametrize("fill_value", [0, 100])
-def test_image_data_interface_constant_fill_values(
+def test_read_constant_fill_values(
     tmp_zarr, image_with_holes_filled, fill_value
 ):
-    idi = ImageDataInterface(
-        f"{tmp_zarr}/image_with_holes_filled/s0", custom_fill_value=fill_value
+    vol = open_dataset(
+        f"{tmp_zarr}/image_with_holes_filled/s0", padding=fill_value
     )
 
-    test_data = idi.to_ndarray_ts((-1, -1, -1), (5, 5, 5))
+    test_data = vol.read_index((-1, -1, -1), (5, 5, 5))
     ground_truth = np.pad(
         image_with_holes_filled[:5, :5, :5],
         pad_width=((1, 0), (1, 0), (1, 0)),
@@ -51,12 +48,12 @@ def test_image_data_interface_constant_fill_values(
     )
 
 
-def test_image_data_interface_reflect(tmp_zarr, image_with_holes_filled):
-    idi = ImageDataInterface(
-        f"{tmp_zarr}/image_with_holes_filled/s0", custom_fill_value="edge"
+def test_read_edge_fill(tmp_zarr, image_with_holes_filled):
+    vol = open_dataset(
+        f"{tmp_zarr}/image_with_holes_filled/s0", padding="edge"
     )
 
-    test_data = idi.to_ndarray_ts((-1, -1, -1), (5, 5, 5))
+    test_data = vol.read_index((-1, -1, -1), (5, 5, 5))
     ground_truth = np.pad(
         image_with_holes_filled[:5, :5, :5],
         pad_width=((1, 0), (1, 0), (1, 0)),
@@ -106,8 +103,8 @@ def test_nonzero_translation_center_corner_convention(tmp_path, voxel_size):
     assert np.allclose(stored, expected_translation)
 
     # IDI exposes the CORNER = translation - vs/2 (round-trips the corner)
-    idi = ImageDataInterface(f"{path}/s0")
-    assert np.allclose(idi.corner, corner)
+    vol = open_dataset(f"{path}/s0")
+    assert np.allclose(vol.corner, corner)
 
     # measure COM lands on the OME center of the object voxel: T + idx*vs
     m = Measure(input_path=f"{path}/s0", output_path=str(tmp_path / "csvs"), num_workers=1)

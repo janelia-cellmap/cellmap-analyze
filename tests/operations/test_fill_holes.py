@@ -2,9 +2,7 @@ from cellmap_analyze.process.fill_holes import FillHoles
 import pytest
 import numpy as np
 
-from cellmap_analyze.util.image_data_interface import (
-    ImageDataInterface,
-)
+from tests.test_utils import read_all
 
 
 @pytest.mark.parametrize(
@@ -20,12 +18,8 @@ def test_fill_holes(tmp_zarr, image_with_hole):
     )
     fh.fill_holes()
 
-    ground_truth = ImageDataInterface(
-        f"{tmp_zarr}/{image_with_hole}_filled/s0"
-    ).to_ndarray_ts()
-    test_data = ImageDataInterface(
-        f"{tmp_zarr}/{image_with_hole}_filled_test/s0"
-    ).to_ndarray_ts()
+    ground_truth = read_all(f"{tmp_zarr}/{image_with_hole}_filled/s0")
+    test_data = read_all(f"{tmp_zarr}/{image_with_hole}_filled_test/s0")
     assert np.array_equal(
         test_data,
         ground_truth,

@@ -1,8 +1,8 @@
 """Grids: where an operation's voxels sit in the world (nm, zyx).
 
 Blockwise code works in the voxel indices of one grid per operation, and every dataset
-it reads is resampled onto that grid by worldarray, so no two datasets need to share a
-voxel size or a corner."""
+it reads is read onto that grid (``WorldArray.read_onto``), so no two datasets need to
+share a voxel size or a corner."""
 
 import numpy as np
 import worldarray as wa
@@ -29,6 +29,15 @@ def make_grid(shape, voxel_size, corner=None, chunks=None):
     )
 
 
+def grid_of(vol, chunks=None):
+    """The spatial grid of ``vol`` (a ``wa.WorldArray``), chunked by ``chunks`` (its
+    own chunks by default)."""
+    spatial = vol.spatial
+    if chunks is None:
+        chunks = [vol.meta.chunk_shape[i] for i in spatial]
+    return make_grid([vol.shape[i] for i in spatial], vol.voxel_size, vol.corner, chunks)
+
+
 def voxel_corner(grid, index):
     """Where the corner of voxel ``index`` of ``grid`` sits."""
     return tuple(c + i * v for c, i, v in zip(grid.corner, index, grid.voxel_size))
@@ -52,12 +61,6 @@ def crop_to_roi(grid, roi):
     return crop(grid, begin, end)
 
 
-def resampled(grid, voxel_size, chunks=None):
-    """A grid of ``voxel_size`` voxels from ``grid``'s corner, covering it."""
-    shape = np.ceil(_snap(np.multiply(grid.shape, grid.voxel_size) / voxel_size))
-    return make_grid(shape, voxel_size, grid.corner, chunks)
-
-
 def intersection(grids, voxel_size, chunks=None):
     """A grid of ``voxel_size`` voxels over the world box every grid in ``grids``
     covers, from its corner; the voxels that do not fit whole are dropped."""
@@ -65,15 +68,3 @@ def intersection(grids, voxel_size, chunks=None):
     end = np.min([np.add(g.corner, np.multiply(g.shape, g.voxel_size)) for g in grids], axis=0)
     shape = np.floor(_snap((end - corner) / np.asarray(voxel_size, dtype=float)))
     return make_grid(np.maximum(shape, 0), voxel_size, corner, chunks)
-
-
-def box_on(grid, begin, end, other):
-    """The voxels of ``other`` whose centres lie in voxels ``[begin, end)`` of ``grid``."""
-    return other.index_box(wa.Box.from_index(begin, end, grid.voxel_size, grid.translation))
-
-
-def same_grid(a, b):
-    """Whether ``a`` and ``b`` have the same voxels at the same place (shape aside)."""
-    return np.allclose(a.voxel_size, b.voxel_size, rtol=0, atol=1e-9) and np.allclose(
-        a.corner, b.corner, rtol=0, atol=1e-6 * min(a.voxel_size)
-    )

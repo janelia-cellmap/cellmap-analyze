@@ -6,11 +6,9 @@ from scipy.ndimage import gaussian_filter
 import numpy as np
 import networkx as nx
 
-from cellmap_analyze.util.grid_util import make_grid
-from cellmap_analyze.util.image_data_interface import (
-    ImageDataInterface,
-)
-from cellmap_analyze.util.zarr_util import create_multiscale_dataset
+from cellmap_analyze.util.grid_util import grid_of, make_grid
+from cellmap_analyze.util.zarr_util import create_multiscale_dataset, open_dataset
+from tests.test_utils import read_all
 
 import cc3d
 import os
@@ -123,9 +121,7 @@ def test_connected_components(
     ]
     relabeling_dict.update({k: i + 1 for i, k in enumerate(uniques)})
     ground_truth = np.vectorize(relabeling_dict.get)(ground_truth)
-    test_data = ImageDataInterface(
-        f"{tmp_zarr}/test_connected_components_minimum_volume_nm_3_{minimum_volume_nm_3}_maximum_volume_nm_3_{maximum_volume_nm_3}/s0"
-    ).to_ndarray_ts()
+    test_data = read_all(f"{tmp_zarr}/test_connected_components_minimum_volume_nm_3_{minimum_volume_nm_3}_maximum_volume_nm_3_{maximum_volume_nm_3}/s0")
     assert np.array_equal(
         test_data,
         ground_truth,
@@ -146,9 +142,7 @@ def test_connected_components_filled(
     )
     cc.get_connected_components()
 
-    test_data = ImageDataInterface(
-        f"{tmp_zarr}/test_connected_components_hole_filling_filled/s0"
-    ).to_ndarray_ts()
+    test_data = read_all(f"{tmp_zarr}/test_connected_components_hole_filling_filled/s0")
 
     ground_truth_filled = measure.label(image_with_holes > 0, connectivity=1).astype(
         np.uint64
@@ -172,9 +166,9 @@ def test_connected_components_chunk_shape(
     tmp_zarr,
     image_with_holes,
 ):
-    original_chunk_shape = ImageDataInterface(
-        f"{tmp_zarr}/test_connected_components_hole_filling_filled/s0"
-    ).chunk_shape
+    original_chunk_shape = grid_of(
+        open_dataset(f"{tmp_zarr}/test_connected_components_hole_filling_filled/s0")
+    ).chunks
     doubled_chunk_shape = tuple(2 * c for c in original_chunk_shape)
     cc = ConnectedComponents(
         input_path=f"{tmp_zarr}/image_with_holes/s0",
@@ -186,10 +180,10 @@ def test_connected_components_chunk_shape(
         chunk_shape=list(doubled_chunk_shape),
     )
     cc.get_connected_components()
-    test_data_idi = ImageDataInterface(
+    test_data_vol = open_dataset(
         f"{tmp_zarr}/test_connected_components_hole_filling_filled/s0"
     )
-    test_data = test_data_idi.to_ndarray_ts()
+    test_data = test_data_vol.read_onto(grid_of(test_data_vol))
 
     ground_truth_filled = measure.label(image_with_holes > 0, connectivity=1).astype(
         np.uint64
@@ -207,7 +201,7 @@ def test_connected_components_chunk_shape(
             test_data,
             ground_truth,
         )
-        and test_data_idi.chunk_shape == doubled_chunk_shape
+        and grid_of(test_data_vol).chunks == doubled_chunk_shape
     )
 
 
@@ -223,8 +217,7 @@ def test_deduplicate_ids(
         deduplicate_ids=True,
     )
     cc.get_connected_components()
-    test_data_idi = ImageDataInterface(f"{tmp_zarr}/duplicate_ids_fixed/s0")
-    test_data = test_data_idi.to_ndarray_ts()
+    test_data = read_all(f"{tmp_zarr}/duplicate_ids_fixed/s0")
 
     ground_truth = cc3d.connected_components(duplicate_ids, connectivity=6)
 
@@ -246,8 +239,7 @@ def test_noduplicate_ids(
         deduplicate_ids=True,
     )
     cc.get_connected_components()
-    test_data_idi = ImageDataInterface(f"{tmp_zarr}/no_duplicate_ids/s0")
-    test_data = test_data_idi.to_ndarray_ts()
+    test_data = read_all(f"{tmp_zarr}/no_duplicate_ids/s0")
 
     ground_truth = cc3d.connected_components(no_duplicate_ids, connectivity=6)
 
@@ -268,10 +260,7 @@ def test_binarize(tmp_zarr, binarizable_image, binarize):
         binarize=binarize,
     )
     cc.get_connected_components()
-    test_data_idi = ImageDataInterface(
-        f"{tmp_zarr}/binarizable_image_binarize_{binarize}/s0"
-    )
-    test_data = test_data_idi.to_ndarray_ts()
+    test_data = read_all(f"{tmp_zarr}/binarizable_image_binarize_{binarize}/s0")
 
     ground_truth = cc3d.connected_components(
         binarizable_image, binary_image=binarize, connectivity=6
@@ -327,9 +316,9 @@ def test_gaussian_smoothing(
         > 5
     )
     ground_truth = cc3d.connected_components(smoothed_image, connectivity=6)
-    test_data = ImageDataInterface(
+    test_data = read_all(
         f"{tmp_zarr}/test_connected_components_gaussian_smoothing_sigma_nm_{gaussian_smoothing_sigma_nm}/s0"
-    ).to_ndarray_ts()
+    )
 
     assert np.array_equal(
         test_data,
@@ -374,7 +363,7 @@ def test_connected_components_consensus_config_majority_vote(tmp_path):
     )
     cc.get_connected_components()
 
-    result = ImageDataInterface(f"{container}/consensus_out/s0").to_ndarray_ts()
+    result = read_all(f"{container}/consensus_out/s0")
     expected_mask = np.zeros(shape, dtype=bool)
     expected_mask[2:8, 2:8, 2:8] = True
     expected_mask[9:11, 9:11, 9:11] = True
@@ -407,7 +396,7 @@ def test_connected_components_consensus_config_unanimous_default(tmp_path):
     )
     cc.get_connected_components()
 
-    result = ImageDataInterface(f"{container}/consensus_out/s0").to_ndarray_ts()
+    result = read_all(f"{container}/consensus_out/s0")
     expected_mask = np.zeros(shape, dtype=bool)
     expected_mask[2:6, 2:6, 2:6] = True
 
@@ -456,9 +445,9 @@ def test_connected_components_roi(tmp_zarr, intensity_image, voxel_size):
 
     crop = tuple(slice(b, e) for b, e in zip(begin, end))
     ground_truth = measure.label(intensity_image[crop] >= 127, connectivity=1)
-    test_idi = ImageDataInterface(f"{output_path}/s0")
-    test_data = test_idi.to_ndarray_ts()
-    assert np.allclose(test_idi.corner, begin * voxel_size)
+    test_vol = open_dataset(f"{output_path}/s0")
+    test_data = test_vol.read_onto(grid_of(test_vol))
+    assert np.allclose(test_vol.corner, begin * voxel_size)
     assert test_data.shape == ground_truth.shape
     # the same objects, whatever their ids
     pairs = np.unique(np.stack([test_data.ravel(), ground_truth.ravel()]), axis=1)

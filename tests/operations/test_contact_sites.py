@@ -2,9 +2,9 @@ import pytest
 from cellmap_analyze.process.contact_sites import ContactSites
 import numpy as np
 
-from cellmap_analyze.util.grid_util import intersection, make_grid
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
-from cellmap_analyze.util.zarr_util import create_multiscale_dataset
+from cellmap_analyze.util.grid_util import grid_of, intersection, make_grid
+from cellmap_analyze.util.zarr_util import create_multiscale_dataset, open_dataset
+from tests.test_utils import read_all
 from tests.contact_site_fixture_helper import compute_contact_sites_ground_truth
 
 
@@ -54,8 +54,8 @@ def test_contact_sites_resolve_group_paths_to_s0(tmp_zarr):
         minimum_volume_nm_3=0,
         num_workers=1,
     )
-    assert cs.organelle_1_idi.path.endswith("/segmentation_1/s0")
-    assert cs.organelle_2_idi.path.endswith("/segmentation_2/s0")
+    assert cs.organelle_1_vol.level_path.endswith("/segmentation_1/s0")
+    assert cs.organelle_2_vol.level_path.endswith("/segmentation_2/s0")
 
 
 @pytest.mark.parametrize("contact_distance_nm", [8, 16, 24])
@@ -70,12 +70,8 @@ def test_contact_site_blocks(tmp_zarr, voxel_size, contact_distance_nm):
     )
     cs.get_contact_sites()
 
-    ground_truth = ImageDataInterface(
-        f"{tmp_zarr}/contact_sites_distance_{contact_distance_nm}nm/s0"
-    ).to_ndarray_ts()
-    test_data = ImageDataInterface(
-        f"{tmp_zarr}/test_contact_sites_distance_{contact_distance_nm}nm/s0"
-    ).to_ndarray_ts()
+    ground_truth = read_all(f"{tmp_zarr}/contact_sites_distance_{contact_distance_nm}nm/s0")
+    test_data = read_all(f"{tmp_zarr}/test_contact_sites_distance_{contact_distance_nm}nm/s0")
 
     # Save test results for debugging
     if not np.array_equal(test_data, ground_truth):
@@ -108,12 +104,8 @@ def test_contact_site_blocks_mismatched_voxel_sizes(tmp_zarr, voxel_size, contac
     )
     cs.get_contact_sites()
 
-    ground_truth = ImageDataInterface(
-        f"{tmp_zarr}/contact_sites_distance_{contact_distance_nm}nm/s0"
-    ).to_ndarray_ts()
-    test_data = ImageDataInterface(
-        f"{tmp_zarr}/test_downsampled_contact_sites_distance_{contact_distance_nm}nm/s0"
-    ).to_ndarray_ts()
+    ground_truth = read_all(f"{tmp_zarr}/contact_sites_distance_{contact_distance_nm}nm/s0")
+    test_data = read_all(f"{tmp_zarr}/test_downsampled_contact_sites_distance_{contact_distance_nm}nm/s0")
 
     # Save test results for debugging
     if not np.array_equal(test_data, ground_truth):
@@ -191,16 +183,15 @@ def test_contact_site_blocks_different_anisotropic_voxel_sizes(
     )
     cs.get_contact_sites()
 
-    test_data = ImageDataInterface(f"{output_path}/s0").to_ndarray_ts()
+    test_data = read_all(f"{output_path}/s0")
 
     # Compute ground truth: read both arrays resampled onto the common_voxel_size
     # grid over the box both cover, then run ndarray contact sites
-    idi_1 = ImageDataInterface(f"{zarr_path}/seg_1/s0")
-    idi_2 = ImageDataInterface(f"{zarr_path}/seg_2/s0")
-    grid = intersection([idi_1.grid, idi_2.grid], common_voxel_size)
-    idi_1.output_grid = idi_2.output_grid = grid
-    resampled_1 = idi_1.to_ndarray_ts()
-    resampled_2 = idi_2.to_ndarray_ts()
+    vol_1 = open_dataset(f"{zarr_path}/seg_1/s0")
+    vol_2 = open_dataset(f"{zarr_path}/seg_2/s0")
+    grid = intersection([grid_of(vol_1), grid_of(vol_2)], common_voxel_size)
+    resampled_1 = vol_1.read_onto(grid)
+    resampled_2 = vol_2.read_onto(grid)
 
     common_voxel_size_arr = np.array(common_voxel_size)
     ground_truth = compute_contact_sites_ground_truth(

@@ -3,18 +3,57 @@ import shutil
 
 import worldarray as wa
 
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
 from cellmap_analyze.util.io_util import split_dataset_path
 
 
-def create_multiscale_dataset(output_path, dtype, grid, scale=0):
+def concurrency_context(concurrency_limit):
+    """The per-handle context cellmap-analyze has always used: data copies and file IO
+    capped, network request pools left at tensorstore's defaults."""
+    if not concurrency_limit:
+        return None
+    return wa.capped_context(concurrency=concurrency_limit, network=False)
+
+
+def open_dataset(
+    path,
+    mode="r",
+    padding=0,
+    method="nearest",
+    concurrency_limit=1,
+    max_retries=10,
+    timeout=5,
+    voxel_size=None,
+):
+    """The array at ``path`` as a ``wa.WorldArray``: for a multiscale group its first
+    (finest) level, or with ``voxel_size`` the coarsest level no coarser than it (the
+    first when every level is coarser), at that level's own voxel size. Reads outside
+    the data are filled with ``padding`` (a value, or "edge")."""
+    kwargs = dict(
+        mode=mode,
+        padding=padding,
+        method=method,
+        context=concurrency_context(concurrency_limit),
+        retries=wa.Retry(max_attempts=max_retries, timeout=timeout),
+    )
+    if voxel_size is not None:
+        return wa.open(
+            str(path),
+            voxel_size=tuple(float(v) for v in voxel_size),
+            level_mode="floor",
+            on_mismatch="keep",
+            **kwargs,
+        )
+    return wa.open(str(path), level="first", **kwargs)
+
+
+def create_multiscale_dataset(output_path, dtype, grid, scale=0, **open_kwargs):
     """Create level ``s{scale}`` of an OME-Zarr multiscale group at ``output_path``
     on ``grid`` (its voxels, placement and chunks), replacing the group when it
-    exists. Returns the writable ``wa.WorldArray``."""
+    exists. Returns it opened for writing (``open_kwargs`` as for ``open_dataset``)."""
     filename, dataset = split_dataset_path(output_path, scale=scale)
     if ("zarr" in filename or "n5" in filename) and os.path.exists(output_path):
         shutil.rmtree(output_path)
-    return wa.create(
+    wa.create(
         f"{filename}/{dataset}",
         grid.shape,
         dtype,
@@ -22,20 +61,4 @@ def create_multiscale_dataset(output_path, dtype, grid, scale=0):
         grid.translation,
         chunks=grid.chunks,
     )
-
-
-def create_multiscale_dataset_idi(
-    output_path,
-    dtype,
-    grid,
-    scale=0,
-    custom_fill_value=None,
-    chunk_shape=None,
-):
-    create_multiscale_dataset(output_path, dtype, grid, scale=scale)
-    return ImageDataInterface(
-        output_path + f"/s{scale}",
-        mode="r+",
-        custom_fill_value=custom_fill_value,
-        chunk_shape=chunk_shape,
-    )
+    return open_dataset(f"{output_path}/s{scale}", mode="r+", **open_kwargs)

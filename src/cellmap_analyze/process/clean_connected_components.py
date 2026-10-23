@@ -1,12 +1,12 @@
 import numpy as np
+import worldarray as wa
 from cellmap_analyze.process.connected_components import ConnectedComponents
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util import io_util
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
-from cellmap_analyze.util.grid_util import crop_to_roi
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.grid_util import crop_to_roi, grid_of
 from cellmap_analyze.util.io_util import get_output_path_from_input_path
 import logging
 import uuid
@@ -14,6 +14,7 @@ import itertools
 from cellmap_analyze.util.mask_util import MasksFromConfig
 
 from cellmap_analyze.util.mixins import ComputeConfigMixin
+from cellmap_analyze.util.zarr_util import open_dataset
 import shutil
 
 logging.basicConfig(
@@ -43,12 +44,11 @@ class CleanConnectedComponents(ComputeConfigMixin):
         super().__init__(num_workers)
 
         self.input_path = input_path
-        self.input_idi = ImageDataInterface(self.input_path, chunk_shape=chunk_shape)
+        self.input_vol = open_dataset(self.input_path)
         self.roi = roi
-        self.grid = crop_to_roi(self.input_idi.grid, roi)
-        self.input_idi.output_grid = self.grid
+        self.grid = crop_to_roi(grid_of(self.input_vol, chunk_shape), roi)
 
-        self.voxel_size = self.input_idi.voxel_size
+        self.voxel_size = self.input_vol.voxel_size
 
         self.output_path = output_path
         if self.output_path is None:
@@ -104,16 +104,14 @@ class CleanConnectedComponents(ComputeConfigMixin):
     @staticmethod
     def get_connected_component_information_blockwise(
         block_index,
-        connected_components_blockwise_idi: ImageDataInterface,
+        grid: wa.Grid,
+        connected_components_blockwise_vol: wa.WorldArray,
         mask: MasksFromConfig = None,
     ):
         try:
-            block = create_block_from_index(
-                connected_components_blockwise_idi.output_grid,
-                block_index,
-            )
-            data = connected_components_blockwise_idi.to_ndarray_ts(
-                block.read_begin, block.read_end
+            block = create_block_from_index(grid, block_index)
+            data = connected_components_blockwise_vol.read_onto(
+                grid, block.read_begin, block.read_end
             )
             if mask:
                 mask_block = mask.process_block(block.read_begin, block.read_end)
@@ -123,7 +121,7 @@ class CleanConnectedComponents(ComputeConfigMixin):
             id_to_volume_dict = ConnectedComponents.get_object_sizes(data)
         except Exception as e:
             raise Exception(
-                f"Error {e} in get_connected_component_information_blockwise {block_index}, {connected_components_blockwise_idi.voxel_size}"
+                f"Error {e} in get_connected_component_information_blockwise {block_index}, {connected_components_blockwise_vol.voxel_size}"
             )
         return id_to_volume_dict, set()
 
@@ -134,9 +132,10 @@ class CleanConnectedComponents(ComputeConfigMixin):
             self.num_workers,
             self.compute_args,
             logger,
-            f"getting blockwise connected component information during cleaning for {self.input_idi.path}",
+            f"getting blockwise connected component information during cleaning for {self.input_vol.level_path}",
             CleanConnectedComponents.get_connected_component_information_blockwise,
-            self.input_idi,
+            self.grid,
+            self.input_vol,
             self.mask,
             merge_info=(
                 ConnectedComponents._merge_tuples,
@@ -183,7 +182,8 @@ class CleanConnectedComponents(ComputeConfigMixin):
         self.get_final_connected_components()
 
         ConnectedComponents.relabel_dataset(
-            self.input_idi,
+            self.input_vol,
+            self.grid,
             self.output_path,
             self.new_dtype,
             self.relabeling_dict_path,

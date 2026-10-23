@@ -130,7 +130,7 @@ def morphological_operations():
         ):
             mo = MorphologicalOperations(**rp.run_config)
             mo.perform_morphological_operation()
-            rp.add_multiscale(mo.output_idi.path, mo.num_workers)
+            rp.add_multiscale(mo.output_vol.level_path, mo.num_workers)
 
 
 def fill_holes():
@@ -172,7 +172,7 @@ def label_with_mask():
         ):
             lwm = LabelWithMask(**rp.run_config)
             lwm.get_label_with_mask()
-            rp.add_multiscale(lwm.output_idi.path, lwm.num_workers)
+            rp.add_multiscale(lwm.output_vol.level_path, lwm.num_workers)
 
 
 def measure():

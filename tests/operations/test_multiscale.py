@@ -6,9 +6,9 @@ import worldarray as wa
 import zarr
 
 from cellmap_analyze.process.multiscale import Multiscale
-from cellmap_analyze.util.grid_util import make_grid
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
-from cellmap_analyze.util.zarr_util import create_multiscale_dataset
+from cellmap_analyze.util.grid_util import grid_of, make_grid
+from cellmap_analyze.util.zarr_util import create_multiscale_dataset, open_dataset
+from tests.test_utils import read_all
 
 NOISE = 99
 
@@ -52,7 +52,7 @@ def test_levels_are_the_mode_of_the_level_below(pyramid):
     # 16^3 in 4^3 chunks: s1 is 8^3, s2 is 4^3 and fits one chunk, so it is the last.
     assert not os.path.exists(f"{path}/s3")
     for level in (1, 2):
-        data = ImageDataInterface(f"{path}/s{level}").to_ndarray_ts()
+        data = read_all(f"{path}/s{level}")
         assert np.array_equal(data, expected[level])
 
 
@@ -71,7 +71,7 @@ def test_levels_cover_the_same_physical_box(pyramid, voxel_size):
         assert np.allclose(translation, translation0 + scale0 * (factor - 1) / 2)
 
     # Read back, every level starts and ends where s0 does.
-    boxes = [ImageDataInterface(f"{path}/s{level}").grid.box for level in range(3)]
+    boxes = [grid_of(open_dataset(f"{path}/s{level}")).box for level in range(3)]
     for box in boxes:
         assert np.allclose(box.begin, boxes[0].begin) and np.allclose(box.end, boxes[0].end)
 
@@ -83,7 +83,7 @@ def test_partial_edge_blocks_are_kept(tmp_path, voxel_size):
     _write(path, data, voxel_size, chunks=(2, 2, 2))
     Multiscale(path, num_workers=1).create_multiscale()
 
-    s1 = ImageDataInterface(f"{path}/s1").to_ndarray_ts()
+    s1 = read_all(f"{path}/s1")
     assert s1.shape == (3, 2, 2)
     assert np.all(s1[2] == 3) and not np.any(s1[:2])
 
@@ -95,7 +95,7 @@ def test_floats_default_to_mean(tmp_path, voxel_size):
     _write(path, data, voxel_size, chunks=(2, 2, 2))
     Multiscale(path, num_workers=1, num_levels=1).create_multiscale()
 
-    s1 = ImageDataInterface(f"{path}/s1").to_ndarray_ts()
+    s1 = read_all(f"{path}/s1")
     assert s1[0, 0, 0] == 3.5 and not np.any(s1.ravel()[1:])
 
 
@@ -127,4 +127,4 @@ def test_existing_levels_need_overwrite(pyramid):
     with pytest.raises(FileExistsError):
         Multiscale(path, num_workers=1)
     Multiscale(path, num_workers=1, overwrite=True).create_multiscale()
-    assert np.array_equal(ImageDataInterface(f"{path}/s2").to_ndarray_ts(), expected[2])
+    assert np.array_equal(read_all(f"{path}/s2"), expected[2])

@@ -3,9 +3,9 @@ import pandas as pd
 import networkx as nx
 import edt as edt_module
 from cellmap_analyze.util import dask_util
-from cellmap_analyze.util.grid_util import voxel_corner
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.grid_util import grid_of, voxel_corner
 from cellmap_analyze.util.mixins import ComputeConfigMixin
+from cellmap_analyze.util.zarr_util import open_dataset
 from cellmap_analyze.util.skeleton_util import (
     CustomSkeleton,
     skimage_to_custom_skeleton_fast,
@@ -359,9 +359,9 @@ class Skeletonize(ComputeConfigMixin):
             min_branch_length_nm: Minimum branch length for pruning (in nm)
             tolerance_nm: Tolerance for simplification (in nm)
             num_workers: Number of parallel workers
-            timeout: Timeout for ImageDataInterface reads
+            timeout: Timeout for segmentation reads
             concurrency_limit: tensorstore concurrency limit for
-                ``segmentation_idi`` reads. None (default) auto-resolves via
+                ``segmentation_vol`` reads. None (default) auto-resolves via
                 ``dask_util.resolve_concurrency_limit`` (see
                 ``SplitNarrowBridges`` for the full rationale): safe ``1``
                 when ``num_workers > 1`` (sibling worker processes may share
@@ -370,7 +370,7 @@ class Skeletonize(ComputeConfigMixin):
                 cluster, no siblings). For real lsf/slurm/sge wave
                 dispatch, ``skeletonize()`` additionally rescales this
                 per-wave inside each worker (``dask_util.
-                rescale_idi_concurrency``) to that worker's fair share of
+                rescale_concurrency``) to that worker's fair share of
                 its *job's* real CPU affinity, since a job's cpuset is
                 shared by every worker process inside it.
             sharded: Write outputs as neuroglancer_uint64_sharded_v1 instead of
@@ -426,7 +426,7 @@ class Skeletonize(ComputeConfigMixin):
             num_workers, concurrency_limit
         )
         self.segmentation_path = segmentation_path
-        self.segmentation_idi = ImageDataInterface(
+        self.segmentation_vol = open_dataset(
             segmentation_path,
             timeout=timeout,
             concurrency_limit=self.concurrency_limit,
@@ -539,7 +539,7 @@ class Skeletonize(ComputeConfigMixin):
     @staticmethod
     def calculate_id_skeleton(
         id_value,
-        segmentation_idi: ImageDataInterface,
+        segmentation_vol,
         bbox_df: pd.DataFrame,
         output_path: str,
         morphological_operations: list,
@@ -565,12 +565,14 @@ class Skeletonize(ComputeConfigMixin):
         files are written under ``{output_path}/{full,<second_subdir>}/{id}``.
 
         processes_per_job: See ``SplitNarrowBridges.split_id``'s parameter
-            of the same name -- rescales ``segmentation_idi``'s
-            concurrency_limit to this worker's fair share of its job's real
-            CPU affinity (``dask_util.rescale_idi_concurrency``). None
+            of the same name -- reopens ``segmentation_vol`` with this
+            worker's fair share of its job's real CPU affinity as its
+            concurrency limit (``dask_util.rescale_concurrency``). None
             (default) leaves it untouched.
         """
-        dask_util.rescale_idi_concurrency((segmentation_idi,), processes_per_job)
+        (segmentation_vol,) = dask_util.rescale_concurrency(
+            (segmentation_vol,), processes_per_job
+        )
 
         result: dict = dict(Skeletonize._empty_metrics())
 
@@ -609,8 +611,8 @@ class Skeletonize(ComputeConfigMixin):
 
             # MIN/MAX (nm) are the centres of the object's corner voxels (see
             # measure_util.py). Read its voxels and one more on every side.
-            grid = segmentation_idi.grid
-            voxel_size = np.array(segmentation_idi.voxel_size)
+            grid = grid_of(segmentation_vol)
+            voxel_size = np.array(segmentation_vol.voxel_size)
             begin, end = grid.index_box(
                 (
                     np.array([min_z, min_y, min_x]) - voxel_size / 2,
@@ -625,7 +627,7 @@ class Skeletonize(ComputeConfigMixin):
             logger.info(f"Processing ID {id_value}: voxels {tuple(begin)} to {tuple(end)}")
 
             # Read data for this ID
-            data = segmentation_idi.to_ndarray_ts(begin, end)
+            data = segmentation_vol.read_onto(grid, begin, end)
             data = data == id_value
 
             # Check if there's any data
@@ -1034,14 +1036,14 @@ class Skeletonize(ComputeConfigMixin):
         absorbs cross-dataset variance from morphology/cleanup level.
         """
         row = self.bbox_df.loc[id_value]
-        vs_z, vs_y, vs_x = self.segmentation_idi.voxel_size
+        vs_z, vs_y, vs_x = self.segmentation_vol.voxel_size
         dx = (row["MAX X (nm)"] - row["MIN X (nm)"]) + 2 * vs_x
         dy = (row["MAX Y (nm)"] - row["MIN Y (nm)"]) + 2 * vs_y
         dz = (row["MAX Z (nm)"] - row["MIN Z (nm)"]) + 2 * vs_z
-        min_vs = min(self.segmentation_idi.voxel_size)
+        min_vs = min(self.segmentation_vol.voxel_size)
         iso_voxels = (dx * dy * dz) / (min_vs ** 3)
 
-        dtype_bytes = self.segmentation_idi.dtype.itemsize
+        dtype_bytes = self.segmentation_vol.dtype.itemsize
         bytes_per_voxel = max(dtype_bytes + 1, self.peak_bytes_per_voxel)
         peak = self.peak_bytes_baseline + bytes_per_voxel * iso_voxels
         return int(peak * self.memory_safety_multiplier)
@@ -1161,7 +1163,7 @@ class Skeletonize(ComputeConfigMixin):
         than an index into ``self.ids``."""
         result = Skeletonize.calculate_id_skeleton(
             id_value,
-            self.segmentation_idi,
+            self.segmentation_vol,
             self.bbox_df,
             self.output_path,
             self.morphological_operations,

@@ -1,10 +1,10 @@
 import numpy as np
+import worldarray as wa
 from cellmap_analyze.util import dask_util
 from cellmap_analyze.util.dask_util import (
     create_block_from_index,
 )
-from cellmap_analyze.util.grid_util import crop_to_roi, intersection
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.grid_util import crop_to_roi, grid_of, intersection
 from cellmap_analyze.util.io_util import get_leaf_name_from_path, get_output_path_from_input_path
 from cellmap_analyze.cythonizing.process_arrays import initialize_contact_site_array
 from cellmap_analyze.cythonizing.bresenham3D import bresenham_3D_lines
@@ -12,9 +12,7 @@ import logging
 from cellmap_analyze.process.connected_components import ConnectedComponents
 from scipy.spatial import KDTree
 from cellmap_analyze.util.mixins import ComputeConfigMixin
-from cellmap_analyze.util.zarr_util import (
-    create_multiscale_dataset_idi,
-)
+from cellmap_analyze.util.zarr_util import create_multiscale_dataset, open_dataset
 import cc3d
 
 logging.basicConfig(
@@ -38,31 +36,26 @@ class ContactSites(ComputeConfigMixin):
         chunk_shape=None,
     ):
         super().__init__(num_workers)
-        self.organelle_1_idi = ImageDataInterface(
-            organelle_1_path, chunk_shape=chunk_shape
-        )
-        self.organelle_2_idi = ImageDataInterface(
-            organelle_2_path, chunk_shape=chunk_shape
-        )
+        self.organelle_1_vol = open_dataset(organelle_1_path)
+        self.organelle_2_vol = open_dataset(organelle_2_path)
         # Both organelles are read onto one grid: the element-wise minimum voxel
         # size, over the box both cover (or the voxels of it in roi)
         self.voxel_size = tuple(
             min(v1, v2)
             for v1, v2 in zip(
-                self.organelle_1_idi.voxel_size, self.organelle_2_idi.voxel_size
+                self.organelle_1_vol.voxel_size, self.organelle_2_vol.voxel_size
             )
         )
         self.roi = roi
+        organelle_1_grid = grid_of(self.organelle_1_vol, chunk_shape)
         self.grid = crop_to_roi(
             intersection(
-                [self.organelle_1_idi.grid, self.organelle_2_idi.grid],
+                [organelle_1_grid, grid_of(self.organelle_2_vol)],
                 self.voxel_size,
-                chunks=self.organelle_1_idi.chunk_shape,
+                chunks=organelle_1_grid.chunks,
             ),
             roi,
         )
-        self.organelle_1_idi.output_grid = self.grid
-        self.organelle_2_idi.output_grid = self.grid
 
         # Store contact distance in nm for physical distance calculations
         self.contact_distance_nm = contact_distance_nm
@@ -95,7 +88,7 @@ class ContactSites(ComputeConfigMixin):
         # Use helper function to generate blockwise path (handles root datasets correctly)
         blockwise_path = get_output_path_from_input_path(output_path, "_blockwise")
 
-        self.contact_sites_blockwise_idi = create_multiscale_dataset_idi(
+        self.contact_sites_blockwise_vol = create_multiscale_dataset(
             blockwise_path, dtype=np.uint64, grid=self.grid
         )
 
@@ -178,60 +171,54 @@ class ContactSites(ComputeConfigMixin):
     @staticmethod
     def calculate_block_contact_sites(
         block_index,
-        organelle_1_idi: ImageDataInterface,
-        organelle_2_idi: ImageDataInterface,
-        contact_sites_blockwise_idi: ImageDataInterface,
+        grid: wa.Grid,
+        organelle_1_vol: wa.WorldArray,
+        organelle_2_vol: wa.WorldArray,
+        contact_sites_blockwise_vol: wa.WorldArray,
         contact_distance_voxels,
         padding_voxels,
-        voxel_size,
         contact_distance_nm,
     ):
-        block = create_block_from_index(
-            contact_sites_blockwise_idi,
-            block_index,
-            padding=padding_voxels,
-        )
-        organelle_1 = organelle_1_idi.to_ndarray_ts(block.read_begin, block.read_end)
+        block = create_block_from_index(grid, block_index, padding=padding_voxels)
+        organelle_1 = organelle_1_vol.read_onto(grid, block.read_begin, block.read_end)
         if not np.any(organelle_1):
             # if organelle_1 is empty, we can skip this block
-            contact_sites_blockwise_idi.write(block.begin, block.end, 0)
+            contact_sites_blockwise_vol.write_index(block.begin, block.end, 0)
             return
-        organelle_2 = organelle_2_idi.to_ndarray_ts(block.read_begin, block.read_end)
+        organelle_2 = organelle_2_vol.read_onto(grid, block.read_begin, block.read_end)
         if not np.any(organelle_2):
             # if organelle_2 is empty, we can skip this block
-            contact_sites_blockwise_idi.write(block.begin, block.end, 0)
+            contact_sites_blockwise_vol.write_index(block.begin, block.end, 0)
             return
         # the full block shape, so the smaller blocks at the far ends get their own ids too
-        global_id_offset = block.id * np.prod(
-            contact_sites_blockwise_idi.chunk_shape, dtype=np.uint64
-        )
+        global_id_offset = block.id * np.prod(grid.chunks, dtype=np.uint64)
         contact_sites = ContactSites.get_ndarray_contact_sites(
             organelle_1,
             organelle_2,
             contact_distance_voxels,
-            voxel_size=voxel_size,
+            voxel_size=grid.voxel_size,
             contact_distance_nm=contact_distance_nm,
         )
         contact_sites[contact_sites > 0] += global_id_offset
-        contact_sites_blockwise_idi.write(
+        contact_sites_blockwise_vol.write_index(
             block.begin, block.end, contact_sites[block.inner]
         )
 
     def calculate_contact_sites_blockwise(self):
-        num_blocks = dask_util.get_num_blocks(self.contact_sites_blockwise_idi)
+        num_blocks = dask_util.get_num_blocks(self.grid)
         dask_util.compute_blockwise_partitions(
             num_blocks,
             self.num_workers,
             self.compute_args,
             logger,
-            f"calculating blockwise contact sites between {self.organelle_1_idi.path} and {self.organelle_2_idi.path}",
+            f"calculating blockwise contact sites between {self.organelle_1_vol.level_path} and {self.organelle_2_vol.level_path}",
             ContactSites.calculate_block_contact_sites,
-            self.organelle_1_idi,
-            self.organelle_2_idi,
-            self.contact_sites_blockwise_idi,
+            self.grid,
+            self.organelle_1_vol,
+            self.organelle_2_vol,
+            self.contact_sites_blockwise_vol,
             self.contact_distance_voxels,
             self.padding_voxels,
-            self.voxel_size,
             self.contact_distance_nm,
         )
 
@@ -240,7 +227,7 @@ class ContactSites(ComputeConfigMixin):
 
         # the blockwise contact sites are already on the grid, roi and all
         cc = ConnectedComponents(
-            connected_components_blockwise_path=self.contact_sites_blockwise_idi.path,
+            connected_components_blockwise_path=self.contact_sites_blockwise_vol.level_path,
             output_path=self.output_path,
             num_workers=self.num_workers,
             minimum_volume_nm_3=self.minimum_volume_nm_3,

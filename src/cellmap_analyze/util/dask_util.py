@@ -8,7 +8,8 @@ import tempfile
 import shutil
 import pickle
 
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.grid_util import grid_of
+from cellmap_analyze.util.zarr_util import concurrency_context, open_dataset
 from cellmap_analyze.util.io_util import (
     TimingMessager,
     print_with_datetime,
@@ -41,7 +42,7 @@ def _available_cpu_count() -> int:
 
 
 def resolve_concurrency_limit(num_workers, concurrency_limit=None):
-    """Constructor-time ``ImageDataInterface.concurrency_limit`` default.
+    """Constructor-time ``concurrency_limit`` default for ``open_dataset``.
 
     Returns ``concurrency_limit`` unchanged when the caller passed one
     explicitly. Otherwise auto-resolves: ``num_workers <= 1`` means
@@ -52,18 +53,19 @@ def resolve_concurrency_limit(num_workers, concurrency_limit=None):
     worker processes may share a node/job's CPU allocation -- keep the
     conservative ``1`` (tensorstore's own historical default) rather than
     risk oversubscription; per-job fair-share rescaling for that case is
-    ``rescale_idi_concurrency``'s job, done inside each worker at runtime.
+    ``rescale_concurrency``'s job, done inside each worker at runtime.
     """
     if concurrency_limit is not None:
         return concurrency_limit
     return _available_cpu_count() if num_workers <= 1 else 1
 
 
-def rescale_idi_concurrency(idis, processes_per_job):
-    """Worker-side fair-share rescale of one or more IDIs' concurrency_limit.
+def rescale_concurrency(vols, processes_per_job):
+    """Worker-side fair-share rescale of one or more datasets' concurrency limit:
+    ``vols`` (``wa.WorldArray`` or None) reopened with it.
 
     Call this from inside a per-item worker task (e.g. a ``split_id``-style
-    staticmethod), before the first read on any of ``idis``. A single
+    staticmethod), before the first read on any of ``vols``. A single
     lsf/slurm/sge job's CPU affinity is shared by every dask worker
     *process* running inside it (cgroup/cpuset affinity isn't divided per
     sibling process), so each sibling must independently claim only its
@@ -71,23 +73,21 @@ def rescale_idi_concurrency(idis, processes_per_job):
     affinity/quota count) // ``processes_per_job`` (how many sibling worker
     processes run inside this same job -- see ``wave_uses_shared_job_cpuset``
     and ``WavePlan.processes``). ``processes_per_job`` falsy (None, 0) is a
-    no-op -- leaves whatever concurrency_limit each IDI already has.
+    no-op -- returns ``vols`` as they are.
     """
     if not processes_per_job:
-        return
-    fair_share = max(1, _available_cpu_count() // int(processes_per_job))
-    for idi in idis:
-        if idi is not None:
-            idi.concurrency_limit = fair_share
+        return tuple(vols)
+    context = concurrency_context(max(1, _available_cpu_count() // int(processes_per_job)))
+    return tuple(None if vol is None else vol.reopen(context=context) for vol in vols)
 
 
 def wave_uses_shared_job_cpuset(config):
-    """Whether ``rescale_idi_concurrency``'s ``processes_per_job`` divisor
+    """Whether ``rescale_concurrency``'s ``processes_per_job`` divisor
     is meaningful for waves planned from ``config``.
 
     True only for lsf/slurm/sge: dask-jobqueue submits one job per group of
     ``processes`` worker processes, and that job's cpuset is what's shared
-    (see ``rescale_idi_concurrency``). "local" runs every worker directly
+    (see ``rescale_concurrency``). "local" runs every worker directly
     via ``LocalCluster(n_workers=...)`` with no such per-job grouping (see
     ``start_dask``), so a wave's ``processes`` count isn't the right
     sibling divisor there -- and neither is any other value we could derive
@@ -145,31 +145,31 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def _grid_and_block_shape(grid_or_idi, block_shape):
-    """An ImageDataInterface's own grid, or the grid given, and the block shape:
-    the grid's chunks unless one is given."""
-    grid = grid_or_idi.grid if isinstance(grid_or_idi, ImageDataInterface) else grid_or_idi
+def _grid_and_block_shape(grid_or_vol, block_shape):
+    """A dataset's own grid, or the grid given, and the block shape: the grid's
+    chunks unless one is given."""
+    grid = grid_or_vol if isinstance(grid_or_vol, wa.Grid) else grid_of(grid_or_vol)
     if block_shape is None:
         block_shape = grid.chunks
     return grid, tuple(int(b) for b in block_shape)
 
 
 def create_block_from_index(
-    grid_or_idi,
+    grid_or_vol,
     index,
     padding=0,
     block_shape=None,
     read_beyond_roi=True,
     padding_direction="both",
 ) -> wa.Block:
-    """Block ``index`` (C order) of the blocks tiling a grid (an ImageDataInterface's
-    own when given one) by ``block_shape``, in the grid's voxel indices. Its read box
+    """Block ``index`` (C order) of the blocks tiling a grid (a dataset's own when
+    given a ``wa.WorldArray``) by ``block_shape``, in the grid's voxel indices. Its read box
     is its write box grown by ``padding`` voxels (one value, or one per axis): on both
     sides, only before ("neg") or after ("pos") it, or before it and also after it
     when the block is at the grid's far end on any axis ("neg_with_edge_pos", so a
     hole search can see past the edge). Read boxes are clipped to the grid unless
     ``read_beyond_roi``."""
-    grid, block_shape = _grid_and_block_shape(grid_or_idi, block_shape)
+    grid, block_shape = _grid_and_block_shape(grid_or_vol, block_shape)
     if padding_direction not in ("both", "neg", "pos", "neg_with_edge_pos"):
         raise ValueError(f"unknown padding_direction {padding_direction!r}")
     padding = np.broadcast_to(np.asarray(padding, dtype=int), (len(grid.shape),))
@@ -186,8 +186,8 @@ def create_block_from_index(
     ]
 
 
-def get_num_blocks(grid_or_idi, block_shape=None):
-    grid, block_shape = _grid_and_block_shape(grid_or_idi, block_shape)
+def get_num_blocks(grid_or_vol, block_shape=None):
+    grid, block_shape = _grid_and_block_shape(grid_or_vol, block_shape)
     return len(wa.blocks(grid.shape, block_shape))
 
 
@@ -640,8 +640,8 @@ def setup_execution_directory(config_path, logger):
     return execution_dir
 
 
-def delete_chunks(block_index, get_delete_path_fn, idi_or_location, depth):
-    delete_path(get_delete_path_fn(block_index, idi_or_location, depth))
+def delete_chunks(block_index, get_delete_path_fn, vol_or_location, depth):
+    delete_path(get_delete_path_fn(block_index, vol_or_location, depth))
 
 
 def delete_path(path):
@@ -686,7 +686,7 @@ def _estimated_distributed_seconds(num_blocks, num_workers):
     )
 
 
-def _delete_blocks_locally(get_delete_path_fn, idi_or_location, num_blocks, threads=None):
+def _delete_blocks_locally(get_delete_path_fn, vol_or_location, num_blocks, threads=None):
     with Pool(threads) as pool:
         for depth in range(3, 0, -1):
             # block_coords[:depth] collapses many block indices onto the
@@ -697,7 +697,7 @@ def _delete_blocks_locally(get_delete_path_fn, idi_or_location, num_blocks, thre
             # ENOENT/ESTALE errors when one thread's rmtree empties a
             # directory out from under another's listdir.
             paths = list(
-                {get_delete_path_fn(i, idi_or_location, depth) for i in range(num_blocks)}
+                {get_delete_path_fn(i, vol_or_location, depth) for i in range(num_blocks)}
             )
             list(
                 tqdm(
@@ -712,25 +712,23 @@ def _delete_blocks_locally(get_delete_path_fn, idi_or_location, num_blocks, thre
 
 
 def delete_tmp_dir_blockwise(
-    idi_or_location: ImageDataInterface | str,
+    vol_or_location: wa.WorldArray | str,
     num_workers,
     compute_args,
     is_zarr=True,
     num_blocks=None,
 ):
     if is_zarr:
-        if type(idi_or_location) is str:
-            idi = ImageDataInterface(idi_or_location)
-        else:
-            idi = idi_or_location
+        if type(vol_or_location) is str:
+            vol_or_location = open_dataset(vol_or_location)
         get_delete_path_fn = get_zarr_chunk_path_from_block_index
-        num_blocks = get_num_blocks(idi)
-        idi_or_location = idi
-        basepath, _ = split_dataset_path(idi.path)
-        top_level_dir = f"{basepath}/{get_name_from_path(idi.path)}"
+        num_blocks = get_num_blocks(vol_or_location)
+        path = vol_or_location.level_path
+        basepath, _ = split_dataset_path(path)
+        top_level_dir = f"{basepath}/{get_name_from_path(path)}"
     else:
         get_delete_path_fn = get_merge_file_path_from_block_index
-        top_level_dir = idi_or_location
+        top_level_dir = vol_or_location
 
     if num_blocks is None:
         with TimingMessager(f"Deleting tmp dir at {top_level_dir}", logger):
@@ -746,7 +744,7 @@ def delete_tmp_dir_blockwise(
             f"Deleting {num_blocks} tmp files locally at {top_level_dir}", logger
         ):
             _delete_blocks_locally(
-                get_delete_path_fn, idi_or_location, num_blocks, threads=local_cores
+                get_delete_path_fn, vol_or_location, num_blocks, threads=local_cores
             )
         shutil.rmtree(top_level_dir, ignore_errors=True)
         return
@@ -760,7 +758,7 @@ def delete_tmp_dir_blockwise(
             f"deleting temporary dataset at depth {depth}",
             delete_chunks,
             get_delete_path_fn,
-            idi_or_location,
+            vol_or_location,
             depth,
         )
 
@@ -778,12 +776,12 @@ def get_merge_file_path_from_block_index(block_index, output_dir, depth=3):
     return output_path
 
 
-def get_zarr_chunk_path_from_block_index(block_index, idi, depth):
-    block = create_block_from_index(idi, block_index)
+def get_zarr_chunk_path_from_block_index(block_index, vol, depth):
+    block = create_block_from_index(vol, block_index)
     # can have duplicates eg 0/0/0 and 0/0/1 go produce the same index[:2]
     block_coords = tuple(block.index[:depth])
     # the array's own key encoding, e.g. zarr v3's "c/" prefix
-    return f"{idi.path}/{idi.chunk_key(block_coords)}"
+    return f"{vol.level_path}/{vol.chunk_key(block_coords)}"
 
 
 def write_dask_result_to_pkl(block_index, output_dir, fn, *fn_args, **fn_kwargs):

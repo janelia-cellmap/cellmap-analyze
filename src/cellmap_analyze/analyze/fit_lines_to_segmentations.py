@@ -5,8 +5,8 @@ from cellmap_analyze.util.dask_util import (
     start_dask,
 )
 from cellmap_analyze.util import io_util
-from cellmap_analyze.util.grid_util import voxel_corner
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.grid_util import grid_of, voxel_corner
+from cellmap_analyze.util.zarr_util import open_dataset
 import logging
 import pandas as pd
 import dask.dataframe as dd
@@ -34,8 +34,8 @@ class FitLinesToSegmentations(ComputeConfigMixin):
     ):
         super().__init__(num_workers)
         self.df = pd.read_csv(input_csv)  # , nrows=1000)
-        self.segmentation_idi = ImageDataInterface(input_path)
-        self.voxel_size = self.segmentation_idi.voxel_size
+        self.segmentation_vol = open_dataset(input_path)
+        self.voxel_size = self.segmentation_vol.voxel_size
         self.num_workers = num_workers
         self.output_csv = output_csv
         if self.output_csv is None:
@@ -103,7 +103,7 @@ class FitLinesToSegmentations(ComputeConfigMixin):
 
     def fit_lines_to_objects(self, df):
         results_df = []
-        grid = self.segmentation_idi.grid
+        grid = grid_of(self.segmentation_vol)
         voxel_size = np.array(self.voxel_size)
         for _, row in df.iterrows():
             id = row["Object ID"]
@@ -113,7 +113,7 @@ class FitLinesToSegmentations(ComputeConfigMixin):
             box_max = np.array([row[f"MAX {d} (nm)"] for d in ["Z", "Y", "X"]])
             begin, end = grid.index_box((box_min - voxel_size / 2, box_max + voxel_size / 2))
             begin, end = np.subtract(begin, 1), np.add(end, 1)
-            data = self.segmentation_idi.to_ndarray_ts(begin, end)
+            data = self.segmentation_vol.read_onto(grid, begin, end)
             # Points are placed at voxel centres, in true nm
             offset_nm = np.array(voxel_corner(grid, begin)) + voxel_size / 2
             line_start, line_end = FitLinesToSegmentations.fit_line_to_object(

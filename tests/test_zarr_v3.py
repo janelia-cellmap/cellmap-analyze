@@ -6,12 +6,8 @@ import os
 import numpy as np
 import pytest
 
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
-from cellmap_analyze.util.zarr_util import (
-    create_multiscale_dataset,
-    create_multiscale_dataset_idi,
-)
-from cellmap_analyze.util.grid_util import make_grid
+from cellmap_analyze.util.zarr_util import create_multiscale_dataset, open_dataset
+from cellmap_analyze.util.grid_util import grid_of, make_grid
 
 
 class TestZarrV3Format:
@@ -33,8 +29,8 @@ class TestZarrV3Format:
             "Found .zarray (v2 format) — expected v3"
         )
 
-    def test_zarr_v3_roundtrip_via_idi(self, tmp_path):
-        """Write data in v3 format and read it back via ImageDataInterface."""
+    def test_zarr_v3_roundtrip(self, tmp_path):
+        """Write data in v3 format and read it back."""
         output_path = str(tmp_path / "rt.zarr" / "labels")
         shape = (10, 10, 10)
         ds = create_multiscale_dataset(
@@ -46,23 +42,23 @@ class TestZarrV3Format:
         ds.write_index((0, 0, 0), ds.shape, test_data)
 
         # Read back via IDI
-        idi = ImageDataInterface(output_path + "/s0")
-        assert tuple(idi.voxel_size) == (4, 4, 4)
-        block = idi.to_ndarray_ts((0, 0, 0), shape)
+        vol = open_dataset(output_path + "/s0")
+        assert tuple(vol.voxel_size) == (4, 4, 4)
+        block = vol.read_index((0, 0, 0), shape)
         assert np.array_equal(block, test_data)
 
-    def test_write_via_idi(self, tmp_path):
-        """idi.write(begin, end, data) should work with v3 format."""
+    def test_write_index(self, tmp_path):
+        """write_index should work with v3 format."""
         output_path = str(tmp_path / "write.zarr" / "out")
         shape = (5, 5, 5)
-        idi = create_multiscale_dataset_idi(
+        vol = create_multiscale_dataset(
             output_path, np.uint16, make_grid(shape, (8, 8, 8), chunks=shape)
         )
         write_data = np.arange(125, dtype=np.uint16).reshape(shape)
-        idi.write((0, 0, 0), shape, write_data)
+        vol.write_index((0, 0, 0), shape, write_data)
 
         # Read back
-        assert np.array_equal(write_data, idi.to_ndarray_ts())
+        assert np.array_equal(write_data, vol.read_onto(grid_of(vol)))
 
 
 class TestZarrV2BackwardCompat:
@@ -124,12 +120,12 @@ class TestZarrV2BackwardCompat:
         assert os.path.exists(os.path.join(ds_path, ".zarray"))
         assert not os.path.exists(os.path.join(ds_path, "zarr.json"))
 
-        # Read via ImageDataInterface
-        idi = ImageDataInterface(os.path.join(v2_path, "seg/s0"))
-        assert tuple(idi.voxel_size) == vs
-        assert idi.grid.shape == tuple(shape)
+        # Read it
+        vol = open_dataset(os.path.join(v2_path, "seg/s0"))
+        assert tuple(vol.voxel_size) == vs
+        assert grid_of(vol).shape == tuple(shape)
 
-        read_data = idi.to_ndarray_ts()
+        read_data = vol.read_onto(grid_of(vol))
         assert np.all(read_data == 42)
 
     def test_read_v2_with_ome_metadata(self, tmp_path):
@@ -164,8 +160,8 @@ class TestZarrV2BackwardCompat:
         with open(os.path.join(labels_path, ".zattrs"), "w") as f:
             json.dump(ome_attrs, f)
 
-        idi = ImageDataInterface(os.path.join(v2_path, "labels/s0"))
-        assert tuple(idi.voxel_size) == (8.0, 8.0, 8.0)
+        vol = open_dataset(os.path.join(v2_path, "labels/s0"))
+        assert tuple(vol.voxel_size) == (8.0, 8.0, 8.0)
 
     def test_read_hybrid_v2_groups_v3_array(self, tmp_path):
         """Should read a v3 array inside v2 group hierarchy with OME metadata."""
@@ -218,14 +214,14 @@ class TestZarrV2BackwardCompat:
         assert os.path.exists(os.path.join(seg_path, ".zgroup"))
 
         # Read via IDI — should get voxel_size from parent OME metadata
-        idi = ImageDataInterface(os.path.join(zarr_path, "seg/s0"))
-        assert tuple(idi.voxel_size) == (16.0, 16.0, 16.0)
-        assert idi.shape == (10, 10, 10)
+        vol = open_dataset(os.path.join(zarr_path, "seg/s0"))
+        assert tuple(vol.voxel_size) == (16.0, 16.0, 16.0)
+        assert vol.shape == (10, 10, 10)
 
         # Verify data round-trip. Read the dataset's own ROI: the OME
         # translation is the voxel CENTER, so the corner is translation - vs/2,
         # not the origin.
-        read_data = idi.to_ndarray_ts()
+        read_data = vol.read_onto(grid_of(vol))
         assert np.array_equal(read_data, test_data)
 
     def test_v3_output_has_ome_ngff_metadata(self, tmp_path):
@@ -339,20 +335,20 @@ class TestMultiscaleLevelSelection:
     def test_reads_per_level_scale_and_translation(self, tmp_path):
         seg = self._make_external_multiscale(str(tmp_path / "ext.zarr"))
 
-        idi0 = ImageDataInterface(f"{seg}/s0")
-        assert tuple(idi0.voxel_size) == (4, 4, 4)
+        vol0 = open_dataset(f"{seg}/s0")
+        assert tuple(vol0.voxel_size) == (4, 4, 4)
         # translation 0 (center) -> corner = 0 - 4/2 = -2
-        assert tuple(idi0.corner) == (-2, -2, -2)
+        assert tuple(vol0.corner) == (-2, -2, -2)
 
-        idi1 = ImageDataInterface(f"{seg}/s1")
+        vol1 = open_dataset(f"{seg}/s1")
         # must pick up s1's scale, not s0's
-        assert tuple(idi1.voxel_size) == (8, 8, 8)
+        assert tuple(vol1.voxel_size) == (8, 8, 8)
         # translation 2 (center) -> corner = 2 - 8/2 = -2
-        assert tuple(idi1.corner) == (-2, -2, -2)
+        assert tuple(vol1.corner) == (-2, -2, -2)
 
         # Both levels share the same corner (-V_base/2) -- the OME pyramid
         # invariant that keeps scales aligned.
-        assert tuple(idi0.corner) == tuple(idi1.corner)
+        assert tuple(vol0.corner) == tuple(vol1.corner)
 
 
 class TestMetadataPrecedence:
@@ -424,10 +420,10 @@ class TestMetadataPrecedence:
             ome=self._ome(vs=(8.0, 8.0, 8.0), trans=(4.0, 4.0, 4.0)),
             per_array=None,
         )
-        idi = ImageDataInterface(s0)
-        assert tuple(idi.voxel_size) == (8, 8, 8)
+        vol = open_dataset(s0)
+        assert tuple(vol.voxel_size) == (8, 8, 8)
         # corner = translation - vs/2 = 4 - 4 = 0
-        assert tuple(idi.corner) == (0, 0, 0)
+        assert tuple(vol.corner) == (0, 0, 0)
 
     def test_per_array_only_returns_per_array_values(self, tmp_path):
         """No OME multiscales -> falls back to per-array attrs, read as funlib writes
@@ -437,9 +433,9 @@ class TestMetadataPrecedence:
             ome=None,
             per_array={"voxel_size": [8.0, 8.0, 8.0], "offset": [4.0, 4.0, 4.0]},
         )
-        idi = ImageDataInterface(s0)
-        assert tuple(idi.voxel_size) == (8, 8, 8)
-        assert tuple(idi.corner) == (4, 4, 4)
+        vol = open_dataset(s0)
+        assert tuple(vol.voxel_size) == (8, 8, 8)
+        assert tuple(vol.corner) == (4, 4, 4)
 
     def test_both_consistent_succeeds(self, tmp_path):
         """OME and per-array attrs both present and EQUAL -> no error, value
@@ -449,9 +445,9 @@ class TestMetadataPrecedence:
             ome=self._ome(vs=(8.0, 8.0, 8.0), trans=(4.0, 4.0, 4.0)),
             per_array={"voxel_size": [8.0, 8.0, 8.0], "offset": [4.0, 4.0, 4.0]},
         )
-        idi = ImageDataInterface(s0)
-        assert tuple(idi.voxel_size) == (8, 8, 8)
-        assert tuple(idi.corner) == (0, 0, 0)
+        vol = open_dataset(s0)
+        assert tuple(vol.voxel_size) == (8, 8, 8)
+        assert tuple(vol.corner) == (0, 0, 0)
 
     def test_voxel_size_conflict_raises(self, tmp_path):
         """OME scale and per-array voxel_size disagree -> ValueError that
@@ -462,7 +458,7 @@ class TestMetadataPrecedence:
             per_array={"voxel_size": [8.0, 8.0, 8.0], "offset": [6.0, 6.0, 6.0]},
         )
         with pytest.raises(ValueError) as exc:
-            ImageDataInterface(s0)
+            open_dataset(s0)
         msg = str(exc.value)
         assert "voxel_size" in msg
         assert "16" in msg and "8" in msg
@@ -477,10 +473,10 @@ class TestMetadataPrecedence:
             per_array={"voxel_size": [16.0, 16.0, 16.0], "offset": [0.0, 0.0, 0.0]},
         )
         with caplog.at_level(logging.WARNING, logger="worldarray"):
-            idi = ImageDataInterface(s0)
+            vol = open_dataset(s0)
         assert "offset [0.0, 0.0, 0.0]" in caplog.text
         assert "OME translation [6.0, 6.0, 6.0]" in caplog.text
-        assert tuple(idi.corner) == (-2, -2, -2)  # 6 - 16 / 2
+        assert tuple(vol.corner) == (-2, -2, -2)  # 6 - 16 / 2
 
     def test_conflict_message_includes_path(self, tmp_path, caplog):
         """The warning names the dataset path for diagnosis."""
@@ -491,5 +487,5 @@ class TestMetadataPrecedence:
             per_array={"voxel_size": [16.0, 16.0, 16.0], "offset": [0.0, 0.0, 0.0]},
         )
         with caplog.at_level(logging.WARNING, logger="worldarray"):
-            ImageDataInterface(s0)
+            open_dataset(s0)
         assert "named.zarr" in caplog.text

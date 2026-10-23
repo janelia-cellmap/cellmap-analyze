@@ -1,7 +1,9 @@
 import pytest
 import numpy as np
 from cellmap_analyze.process.filter_ids import FilterIDs
-from cellmap_analyze.util.image_data_interface import ImageDataInterface
+from cellmap_analyze.util.grid_util import grid_of
+from cellmap_analyze.util.zarr_util import open_dataset
+from tests.test_utils import read_all
 import pandas as pd
 
 
@@ -35,9 +37,7 @@ def test_filter_ids(ids_to_keep, binarize, tmp_zarr, image_with_holes_filled, re
     if binarize:
         ground_truth = (ground_truth > 0).astype(np.uint8)
 
-    test_data = ImageDataInterface(
-        f"{tmp_zarr}/image_with_holes_filled_filteredIDs/s0"
-    ).to_ndarray_ts()
+    test_data = read_all(f"{tmp_zarr}/image_with_holes_filled_filteredIDs/s0")
 
     assert np.array_equal(
         test_data,
@@ -61,9 +61,7 @@ def test_filter_ids_preserve_ids(
     ground_truth = np.where(
         np.isin(image_with_holes_filled, [1, 4]), image_with_holes_filled, 0
     )
-    test_data = ImageDataInterface(
-        f"{tmp_zarr}/image_with_holes_filled_preservedIDs/s0"
-    ).to_ndarray_ts()
+    test_data = read_all(f"{tmp_zarr}/image_with_holes_filled_preservedIDs/s0")
 
     assert np.any(test_data == 4)
     assert np.array_equal(test_data, ground_truth)
@@ -93,11 +91,9 @@ def test_filter_ids_roi(tmp_zarr, image_with_holes_filled, voxel_size):
     fi.get_filtered_ids()
 
     ground_truth = np.isin(image_with_holes_filled, [1, 2]).astype(np.uint8)
-    test_idi = ImageDataInterface(
-        f"{tmp_zarr}/image_with_holes_filled_filteredIDs_roi/s0"
-    )
-    assert np.allclose(test_idi.corner, begin * voxel_size)
+    test_vol = open_dataset(f"{tmp_zarr}/image_with_holes_filled_filteredIDs_roi/s0")
+    assert np.allclose(test_vol.corner, begin * voxel_size)
     assert np.array_equal(
-        test_idi.to_ndarray_ts(),
+        test_vol.read_onto(grid_of(test_vol)),
         ground_truth[tuple(slice(b, e) for b, e in zip(begin, end))],
     )
