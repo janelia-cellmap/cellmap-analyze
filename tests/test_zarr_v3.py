@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from cellmap_analyze.util.zarr_util import (
+    MIN_CONCURRENCY,
     concurrency_context,
     create_multiscale_dataset,
     open_dataset,
@@ -71,6 +72,14 @@ class TestZarrV3Format:
         spec = concurrency_context(concurrency_limit).spec.to_json()
         assert spec["file_io_locking"] == {"mode": "none"}
         assert spec["file_io_sync"] is False
+
+    def test_capped_pools_have_room(self):
+        """A cap of 1 is where tensorstore strands queued work (google/tensorstore
+        ed51718); a requested limit below the floor is raised to it."""
+        spec = concurrency_context(1).spec.to_json()
+        assert spec["data_copy_concurrency"]["limit"] == MIN_CONCURRENCY
+        assert spec["file_io_concurrency"]["limit"] == MIN_CONCURRENCY
+        assert concurrency_context(8).spec.to_json()["file_io_concurrency"]["limit"] == 8
 
 
 class TestZarrV2BackwardCompat:
