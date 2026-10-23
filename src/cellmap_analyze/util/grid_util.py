@@ -24,7 +24,7 @@ def make_grid(shape, voxel_size, corner=None, chunks=None):
     return wa.Grid(
         tuple(int(s) for s in shape),
         voxel_size,
-        tuple(float(c) + v / 2 for c, v in zip(corner, voxel_size)),
+        wa.corner_to_centre(corner, voxel_size),
         chunks=None if chunks is None else tuple(int(c) for c in chunks),
     )
 
@@ -64,7 +64,8 @@ def crop_to_roi(grid, roi):
 def intersection(grids, voxel_size, chunks=None):
     """A grid of ``voxel_size`` voxels over the world box every grid in ``grids``
     covers, from its corner; the voxels that do not fit whole are dropped."""
-    corner = np.max([g.corner for g in grids], axis=0)
-    end = np.min([np.add(g.corner, np.multiply(g.shape, g.voxel_size)) for g in grids], axis=0)
-    shape = np.floor(_snap((end - corner) / np.asarray(voxel_size, dtype=float)))
-    return make_grid(np.maximum(shape, 0), voxel_size, corner, chunks)
+    box = grids[0].box
+    for g in grids[1:]:
+        box = box.intersect(g.box)
+    shape = np.floor(_snap(np.asarray(box.shape) / np.asarray(voxel_size, dtype=float)))
+    return make_grid(np.maximum(shape, 0), voxel_size, box.begin, chunks)
