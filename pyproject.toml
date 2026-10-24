@@ -1,6 +1,6 @@
 [project]
 name = "cellmap-analyze"
-version = "0.6.1"
+version = "0.6.2"
 description = "Code to perform analysis on segmentations like those produced by CellMap"
 readme = "README.md"
 license-files = ["LICENSE"]
@@ -27,7 +27,7 @@ dependencies = [
   "scipy",
   "scikit-image",
   "tensorstore",
-  "worldarray>=0.5,<1",
+  "worldarray>=0.9,<1",
   "tqdm",
   "zarr>=3.0.8",
   "mwatershed==0.5.2",

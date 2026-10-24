@@ -7,18 +7,19 @@ import worldarray as wa
 from cellmap_analyze.util.io_util import split_dataset_path
 
 
-def concurrency_context(concurrency_limit):
-    """The per-handle context cellmap-analyze uses: data copies and file IO capped (when
-    a limit is given), network request pools left at tensorstore's defaults, and chunk
-    writes as zarr-python made them, without a lock or an fsync. Every writer owns whole
-    chunks no other writer touches, and on NFS under load tensorstore's default lock (a
-    blocking fcntl per chunk write) is costly."""
-    spec = {}
+def concurrency_context(concurrency_limit=None):
+    """The per-handle context cellmap-analyze uses: data copies and file IO capped at
+    ``concurrency_limit``, network request pools left at tensorstore's defaults. Without
+    a limit both pools take ``wa.thread_budget()`` of the process the handle is used in,
+    so a handle opened on the driver is sized again in each worker: its share of the
+    job's CPUs (``dask_util.worker_thread_budget``), else every CPU this process may use.
+    worldarray's contexts write chunks as zarr-python made them, without a lock or an
+    fsync; every writer owns whole chunks no other writer touches."""
     if concurrency_limit:
-        spec = wa.capped_context_spec(concurrency=concurrency_limit, network=False)
-    spec["file_io_locking"] = {"mode": "none"}
-    spec["file_io_sync"] = False
-    return ts.Context(spec)
+        return ts.Context(
+            wa.capped_context_spec(concurrency=concurrency_limit, network=False)
+        )
+    return wa.shared_context(0, file_io_floor=1)
 
 
 def open_dataset(
@@ -26,7 +27,7 @@ def open_dataset(
     mode="r",
     padding=0,
     method="nearest",
-    concurrency_limit=1,
+    concurrency_limit=None,
     max_retries=10,
     timeout=5,
     voxel_size=None,

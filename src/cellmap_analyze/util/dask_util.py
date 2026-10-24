@@ -9,7 +9,7 @@ import shutil
 import pickle
 
 from cellmap_analyze.util.grid_util import grid_of
-from cellmap_analyze.util.zarr_util import concurrency_context, open_dataset
+from cellmap_analyze.util.zarr_util import open_dataset
 from cellmap_analyze.util.io_util import (
     TimingMessager,
     print_with_datetime,
@@ -41,63 +41,27 @@ def _available_cpu_count() -> int:
     return os.cpu_count() or 1
 
 
-def resolve_concurrency_limit(num_workers, concurrency_limit=None):
-    """Constructor-time ``concurrency_limit`` default for ``open_dataset``.
-
-    Returns ``concurrency_limit`` unchanged when the caller passed one
-    explicitly. Otherwise auto-resolves: ``num_workers <= 1`` means
-    ``dask_util.start_dask`` never spins up a cluster at all (see its
-    early return) -- this process is the only one running, so it's safe
-    to use every CPU actually available to it (``_available_cpu_count()``).
-    ``num_workers > 1`` means a real dask cluster is coming, where sibling
-    worker processes may share a node/job's CPU allocation -- keep the
-    conservative ``1`` (tensorstore's own historical default) rather than
-    risk oversubscription; per-job fair-share rescaling for that case is
-    ``rescale_concurrency``'s job, done inside each worker at runtime.
-    """
-    if concurrency_limit is not None:
-        return concurrency_limit
-    return _available_cpu_count() if num_workers <= 1 else 1
+def _setting(settings, key):
+    """``settings[key]``, spelled with hyphens or underscores (dask config takes both)."""
+    return settings.get(key, settings.get(key.replace("-", "_")))
 
 
-def rescale_concurrency(vols, processes_per_job):
-    """Worker-side fair-share rescale of one or more datasets' concurrency limit:
-    ``vols`` (``wa.WorldArray`` or None) reopened with it.
-
-    Call this from inside a per-item worker task (e.g. a ``split_id``-style
-    staticmethod), before the first read on any of ``vols``. A single
-    lsf/slurm/sge job's CPU affinity is shared by every dask worker
-    *process* running inside it (cgroup/cpuset affinity isn't divided per
-    sibling process), so each sibling must independently claim only its
-    fair share -- ``_available_cpu_count()`` (this worker's live, real
-    affinity/quota count) // ``processes_per_job`` (how many sibling worker
-    processes run inside this same job -- see ``wave_uses_shared_job_cpuset``
-    and ``WavePlan.processes``). ``processes_per_job`` falsy (None, 0) is a
-    no-op -- returns ``vols`` as they are.
-    """
-    if not processes_per_job:
-        return tuple(vols)
-    context = concurrency_context(max(1, _available_cpu_count() // int(processes_per_job)))
-    return tuple(None if vol is None else vol.reopen(context=context) for vol in vols)
+def worker_thread_budget(settings):
+    """tensorstore threads for each worker process of a jobqueue job: the job's CPUs
+    (``ncpus`` for lsf, ``job-cpu`` for slurm, else ``cores``) shared by its
+    ``processes``, at least 1. Exported to the job as ``WORLDARRAY_THREADS``, which every
+    worker's ``wa.thread_budget()`` reads, so a dataset opened without a
+    ``concurrency_limit`` sizes its pools per worker (see ``zarr_util.concurrency_context``)."""
+    cpus = (
+        _setting(settings, "ncpus")
+        or _setting(settings, "job-cpu")
+        or _setting(settings, "cores")
+        or 1
+    )
+    processes = _setting(settings, "processes") or 1
+    return max(1, int(cpus) // int(processes))
 
 
-def wave_uses_shared_job_cpuset(config):
-    """Whether ``rescale_concurrency``'s ``processes_per_job`` divisor
-    is meaningful for waves planned from ``config``.
-
-    True only for lsf/slurm/sge: dask-jobqueue submits one job per group of
-    ``processes`` worker processes, and that job's cpuset is what's shared
-    (see ``rescale_concurrency``). "local" runs every worker directly
-    via ``LocalCluster(n_workers=...)`` with no such per-job grouping (see
-    ``start_dask``), so a wave's ``processes`` count isn't the right
-    sibling divisor there -- and neither is any other value we could derive
-    without also knowing how many *other* local clusters share this same
-    machine, which we can't know. None/empty config also returns False
-    (the synchronous/no-cluster path, already handled by
-    ``resolve_concurrency_limit``).
-    """
-    cluster_type, _ = _jobqueue_settings(config)
-    return cluster_type in ("lsf", "slurm", "sge")
 from dataclasses import dataclass
 import numpy as np
 import worldarray as wa
@@ -255,6 +219,28 @@ def set_local_directory(cluster_type, candidate_dirs=None):
         )
 
 
+_SINGLE_THREADED = (
+    "NUMEXPR_MAX_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUM_MKL_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "OPENMP_NUM_THREADS",
+    "OMP_NUM_THREADS",
+)
+
+
+def job_script_prologue(settings):
+    """What a jobqueue job runs before its workers start: the config's own
+    ``job-script-prologue``, numeric libraries held to one thread, and each worker's
+    tensorstore threads (``worker_thread_budget``)."""
+    return [
+        *(_setting(settings, "job-script-prologue") or []),
+        *(f"export {name}=1" for name in _SINGLE_THREADED),
+        f"export WORLDARRAY_THREADS={worker_thread_budget(settings)}",
+    ]
+
+
 @contextmanager
 def start_dask(num_workers=1, msg="processing", logger=None, config=None):
     """Context manager used for starting/shutting down dask
@@ -268,16 +254,6 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
     Yields:
         client: Dask client
     """
-    job_script_prologue = [
-        "export NUMEXPR_MAX_THREADS=1",
-        "export NUMEXPR_NUM_THREADS=1",
-        "export MKL_NUM_THREADS=1",
-        "export NUM_MKL_THREADS=1",
-        "export OPENBLAS_NUM_THREADS=1",
-        "export OPENMP_NUM_THREADS=1",
-        "export OMP_NUM_THREADS=1",
-    ]
-
     if not config:
         if num_workers == 1:
             # then dont need to startup dask
@@ -303,11 +279,12 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
             threads_per_worker=1,
         )
     else:
+        prologue = job_script_prologue(config["jobqueue"][cluster_type])
         if cluster_type == "lsf":
             from dask_jobqueue import LSFCluster
 
             cluster = LSFCluster(
-                job_script_prologue=job_script_prologue,
+                job_script_prologue=prologue,
                 scheduler_options={
                     "service_kwargs": {
                         "dashboard": {
@@ -321,11 +298,11 @@ def start_dask(num_workers=1, msg="processing", logger=None, config=None):
         elif cluster_type == "slurm":
             from dask_jobqueue import SLURMCluster
 
-            cluster = SLURMCluster()
+            cluster = SLURMCluster(job_script_prologue=prologue)
         elif cluster_type == "sge":
             from dask_jobqueue import SGECluster
 
-            cluster = SGECluster()
+            cluster = SGECluster(job_script_prologue=prologue)
         cluster.scale(num_workers)
     try:
         with TimingMessager(
