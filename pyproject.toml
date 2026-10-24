@@ -27,7 +27,7 @@ dependencies = [
   "scipy",
   "scikit-image",
   "tensorstore",
-  "worldarray>=0.8,<1",
+  "worldarray>=0.9,<1",
   "tqdm",
   "zarr>=3.0.8",
   "mwatershed==0.5.2",

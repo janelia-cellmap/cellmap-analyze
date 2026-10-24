@@ -94,7 +94,6 @@ class Multiscale(ComputeConfigMixin):
             raise FileExistsError(
                 f"{self.group_path} already has {existing}; pass overwrite=True to rebuild them"
             )
-        self.concurrency_limit = dask_util.resolve_concurrency_limit(num_workers)
 
     def _plan_levels(self, num_levels):
         shape = self.base.shape
@@ -121,10 +120,10 @@ class Multiscale(ComputeConfigMixin):
 
     @staticmethod
     def downsample_block(
-        block_index, source_path, dest_path, driver, factors, blocks, method, concurrency_limit
+        block_index, source_path, dest_path, driver, factors, blocks, method
     ):
         block = blocks[block_index]
-        context = concurrency_context(concurrency_limit)
+        context = concurrency_context()
         source = wa.open(source_path, context=context)
         # The finer voxels under this block, clipped to the array: an edge
         # window past it is summarised from the voxels it has.
@@ -179,7 +178,6 @@ class Multiscale(ComputeConfigMixin):
                     level["factors"],
                     blocks,
                     self.downsample_method,
-                    self.concurrency_limit,
                 )
                 with TimingMessager(f"Downsampling {source_path} to {level['name']}", logger):
                     bag.compute(**self.compute_args)

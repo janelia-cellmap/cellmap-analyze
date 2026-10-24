@@ -10,6 +10,7 @@ import edt as edt_module
 import fastremap
 import numpy as np
 import pandas as pd
+import worldarray as wa
 from scipy.ndimage import binary_dilation
 from skimage.feature import peak_local_max
 from skimage.filters import threshold_otsu
@@ -464,49 +465,24 @@ class SplitNarrowBridges(ComputeConfigMixin):
             num_workers: Number of parallel dask workers.
             timeout: Base timeout (seconds) for segmentation/EDT reads,
                 scaled up per attempt by the read retries
-                (``timeout * attempt``, up to 10 attempts) and, when
-                ``concurrency_limit`` auto-resolves above 1 (see below),
+                (``timeout * attempt``, up to 10 attempts) and, when this
+                process reads with more than one thread (see below),
                 further scaled by the biggest object's estimated chunk
                 count so a single attempt has enough wall-clock to finish
                 reading a huge bbox.
             concurrency_limit: tensorstore ``data_copy_concurrency`` /
                 ``file_io_concurrency`` limit for the segmentation/EDT
-                reads. None (default) auto-resolves: this codebase pins
-                ``cores == processes`` and forces every numeric library to
-                1 thread (see ``dask_util.start_dask``'s
-                ``job_script_prologue``) specifically so process count is
-                the only lever on CPU use in the normal multi-worker wave
-                dispatch (``num_workers > 1``) -- there, auto-resolve keeps
-                the safe ``1`` (matches the prior hardcoded
-                default; unbounded concurrency per
-                worker process would let tensorstore oversubscribe cores
-                shared with sibling worker processes on the same node).
-                When ``num_workers <= 1`` (the synchronous, no-cluster path
-                -- see ``dask_util.start_dask``'s early return -- e.g. a
-                one-off script or a solo high-memory validation run),
-                there's no sibling process to oversubscribe against, so
-                auto-resolve instead uses every core available to this
-                process (``os.sched_getaffinity``, respecting cgroup/LSF/
-                Slurm pinning). This is exactly the fix a real id-4665
-                (``jrc_mus-cerebellum-2``) validation needed: the default
-                ``concurrency_limit=1`` read its ~23,000-chunk bbox one
-                chunk at a time over network storage and timed out
-                entirely before any memory pressure began; raising
-                concurrency (and timeout) let the read finish in under a
-                second. Pass an explicit int to override auto-resolution
-                either way.
-                For real lsf/slurm/sge wave dispatch (``num_workers > 1``),
-                the initial ``1`` above is only the value baked into this
-                instance's datasets at construction; ``split_objects`` also
-                rescales it per-wave inside each worker (see
-                ``split_id``'s ``processes_per_job``) to that worker's fair
-                share of its *job's* real CPU affinity -- a job's cpuset is
-                shared by every dask worker process running inside it
-                (affinity isn't divided per-process), so a solo-item
-                high-memory wave (``processes=1``) still gets its job's
-                full affinity count instead of being stuck at ``1``, while
-                a multi-process wave divides that same count across its
-                siblings rather than each one claiming the whole thing.
+                reads. None (default) sizes it in each process that reads
+                (``zarr_util.concurrency_context``): on a cluster, a worker's
+                share of its job's CPUs (``dask_util.worker_thread_budget``,
+                so a solo high-memory wave with one process per job gets the
+                whole job's CPUs); with no cluster (``num_workers <= 1``),
+                every CPU available. The latter is the fix a real id-4665
+                (``jrc_mus-cerebellum-2``) validation needed: a limit of 1
+                read its ~23,000-chunk bbox one chunk at a time over network
+                storage and timed out entirely before any memory pressure
+                began; raising concurrency (and timeout) let the read finish
+                in under a second. Pass an explicit int to fix it everywhere.
             delete_tmp: Delete the per-object scratch directory when done.
             retry_on_oom: Halve processes-per-slot and retry on worker OOM
                 (see ``dask_util.run_with_oom_retry``).
@@ -542,9 +518,7 @@ class SplitNarrowBridges(ComputeConfigMixin):
                 available (e.g. synchronous runs).
         """
         super().__init__(num_workers)
-        self.concurrency_limit = dask_util.resolve_concurrency_limit(
-            num_workers, concurrency_limit
-        )
+        self.concurrency_limit = concurrency_limit
         self.segmentation_path = segmentation_path
         self.segmentation_vol = open_dataset(
             segmentation_path,
@@ -693,10 +667,14 @@ class SplitNarrowBridges(ComputeConfigMixin):
             else None
         )
 
-        if self.concurrency_limit > 1 and self.ids:
-            # Only worth scaling in the same auto-resolved-concurrency
-            # case above: reads there are chunk-count-bound (network
-            # storage, one round trip per chunk group), so a single
+        # The limit this process reads with: a cluster's workers size their own.
+        read_concurrency = self.concurrency_limit or (
+            wa.thread_budget() if num_workers <= 1 else 1
+        )
+        if read_concurrency > 1 and self.ids:
+            # Only worth scaling when this process reads concurrently:
+            # reads there are chunk-count-bound (network storage, one
+            # round trip per chunk group), so a single
             # timeout attempt needs headroom proportional to the biggest
             # object's chunk span, not just a fixed default sized for
             # small objects. Calibrated against the real id-4665 case:
@@ -769,7 +747,6 @@ class SplitNarrowBridges(ComputeConfigMixin):
         scratch_dir: str,
         edt_vol=None,
         neck_radius_mode: str = "fixed",
-        processes_per_job: int = None,
     ):
         """Process a single object: extract its mask, find candidate
         subpieces, and (if split) persist the local labeling to a small
@@ -777,27 +754,7 @@ class SplitNarrowBridges(ComputeConfigMixin):
 
         Returns a dict describing the outcome; ``split_objects`` merges
         these on the driver before doing any blockwise writing.
-
-        processes_per_job: When set (only meaningful for lsf/slurm/sge
-            waves -- see ``split_objects``), reopens ``segmentation_vol``/
-            ``edt_vol`` with a concurrency limit of this worker's fair share
-            of its job's real CPU affinity: ``sched_getaffinity`` count //
-            ``processes_per_job``. A single job's cpuset is shared by every
-            dask worker *process* running inside it (cpuset affinity isn't
-            divided per-process), so each sibling must independently claim
-            only its share -- reading the raw affinity count directly (as
-            ``SplitNarrowBridges.__init__``'s standalone/synchronous
-            auto-resolution does) would let every worker in the job think
-            it owns the whole job's cores, reintroducing the same
-            oversubscription ``concurrency_limit`` exists to prevent, just
-            one level down (job-shared instead of host-shared). None
-            (default) leaves whatever ``concurrency_limit`` was set at
-            construction untouched.
         """
-        segmentation_vol, edt_vol = dask_util.rescale_concurrency(
-            (segmentation_vol, edt_vol), processes_per_job
-        )
-
         grid = grid_of(segmentation_vol)
         begin, end = SplitNarrowBridges._object_box(id_value, bbox_df, grid)
         data = segmentation_vol.read_onto(grid, begin, end)
@@ -1130,8 +1087,6 @@ class SplitNarrowBridges(ComputeConfigMixin):
         )
         self._log_wave_plan(waves)
 
-        processes_per_job_by_wave = dask_util.wave_uses_shared_job_cpuset(base_config)
-
         results = []
         with io_util.TimingMessager("Finding candidate splits", logger):
             for wave_index, wave in enumerate(waves, start=1):
@@ -1142,11 +1097,7 @@ class SplitNarrowBridges(ComputeConfigMixin):
                 wave_ids = wave.item_ids
                 wave_merge_dir = f"{tmp_merge_root}_wave{wave_index}"
 
-                processes_per_job = (
-                    wave.processes if processes_per_job_by_wave else None
-                )
-
-                def _wrapper(idx, _wave_ids=wave_ids, _procs=processes_per_job):
+                def _wrapper(idx, _wave_ids=wave_ids):
                     id_value = _wave_ids[idx]
                     return SplitNarrowBridges.split_id(
                         id_value,
@@ -1159,7 +1110,6 @@ class SplitNarrowBridges(ComputeConfigMixin):
                         scratch_dir,
                         self.edt_vol,
                         neck_radius_mode=self.neck_radius_mode,
-                        processes_per_job=_procs,
                     )
 
                 def _phase(workers, config, _wrapper=_wrapper, _ids=wave_ids,

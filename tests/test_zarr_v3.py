@@ -2,6 +2,9 @@
 import json
 import logging
 import os
+import pickle
+import subprocess
+import sys
 
 import numpy as np
 import pytest
@@ -71,6 +74,34 @@ class TestZarrV3Format:
         spec = concurrency_context(concurrency_limit).spec.to_json()
         assert spec["file_io_locking"] == {"mode": "none"}
         assert spec["file_io_sync"] is False
+
+    @pytest.mark.parametrize("concurrency_limit, expected", [(None, "3"), (2, "2")])
+    def test_pools_are_sized_where_the_handle_is_used(
+        self, tmp_path, concurrency_limit, expected
+    ):
+        """A handle opened on the driver without a limit is sized again in each worker,
+        from the WORLDARRAY_THREADS its job script exports; an explicit limit travels."""
+        path = str(tmp_path / "pools.zarr" / "seg")
+        create_multiscale_dataset(
+            path, np.uint8, make_grid((4, 4, 4), (8, 8, 8), chunks=(4, 4, 4))
+        )
+        handle = tmp_path / "handle.pkl"
+        handle.write_bytes(
+            pickle.dumps(open_dataset(path, concurrency_limit=concurrency_limit))
+        )
+        worker = (
+            "import pickle, sys\n"
+            "spec = pickle.loads(open(sys.argv[1], 'rb').read()).context.spec.to_json()\n"
+            "print(spec['data_copy_concurrency']['limit'], spec['file_io_concurrency']['limit'])"
+        )
+        out = subprocess.run(
+            [sys.executable, "-c", worker, str(handle)],
+            env={**os.environ, "WORLDARRAY_THREADS": "3"},
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        assert out.split() == [expected, expected]
 
 
 class TestZarrV2BackwardCompat:

@@ -149,6 +149,8 @@ distributed:
       limit: 3h
 ```
 
+Each worker reads and writes with its share of the job's CPUs, `ncpus` (or `cores`) divided by `processes`, at least 1: the example above gives each worker 1 thread. The job script exports it as `WORLDARRAY_THREADS`.
+
 ### Submission
 To run on 12 dask workers:
 

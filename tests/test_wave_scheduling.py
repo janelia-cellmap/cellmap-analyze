@@ -121,3 +121,32 @@ def test_plan_memory_waves_all_items_distributed():
     waves = dask_util.plan_memory_waves(items, requested_workers=10, config=config)
     all_ids = [iid for w in waves for iid in w.item_ids]
     assert sorted(str(x) for x in all_ids) == sorted(str(x) for x in [iid for iid, _ in items])
+
+
+def test_worker_thread_budget_splits_job_cpus_across_processes():
+    # The README's LSF example runs 12 workers on 8 cores: each gets 1.
+    assert dask_util.worker_thread_budget({"ncpus": 8, "processes": 12, "cores": 12}) == 1
+    assert dask_util.worker_thread_budget({"ncpus": 8, "processes": 2, "cores": 2}) == 4
+    # slurm's job-cpu in either spelling, else cores
+    assert dask_util.worker_thread_budget({"job-cpu": 8, "processes": 4}) == 2
+    assert dask_util.worker_thread_budget({"job_cpu": 8, "processes": 4}) == 2
+    assert dask_util.worker_thread_budget({"cores": 6, "processes": 3}) == 2
+    assert dask_util.worker_thread_budget({}) == 1
+
+
+def test_job_script_prologue_exports_each_waves_thread_budget():
+    settings = {
+        "ncpus": 8,
+        "processes": 8,
+        "cores": 8,
+        "job-script-prologue": ["module load cuda"],
+    }
+    prologue = dask_util.job_script_prologue(settings)
+    assert prologue[0] == "module load cuda"
+    assert "export OMP_NUM_THREADS=1" in prologue
+    assert prologue[-1] == "export WORLDARRAY_THREADS=1"
+
+    # A solo high-memory wave (one process per job) gets the whole job's CPUs.
+    config = {"jobqueue": {"lsf": settings}}
+    dask_util.set_jobqueue_processes(config, "lsf", 1)
+    assert dask_util.job_script_prologue(settings)[-1] == "export WORLDARRAY_THREADS=8"
