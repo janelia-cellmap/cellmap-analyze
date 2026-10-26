@@ -6,6 +6,10 @@ A suite of Dask-powered tools for processing and analyzing terabyte-scale 3D seg
 
 ---
 
+![Per-mitochondrion measurements from cellmap-analyze on a public HeLa crop](docs/images/hela-mito-measurements.jpg)
+
+*Measurements for 31 mitochondria in a 5.1 × 4.2 × 2.6 µm crop of the public HeLa cell jrc_hela-2 (OpenOrganelle), from connected-components, contact-sites, skeletonize and measure run with 8 local Dask workers.*
+
 ## Features
 
 ### Processing Tools
