@@ -53,7 +53,7 @@ All operations handle anisotropic voxel sizes (e.g. `(8, 8, 32)` nm in ZYX). Phy
 
 A `roi` in a run-config is in nm, `["z_start:z_end", "y_start:y_end", "x_start:x_end"]`, and selects the voxels whose centres lie inside it; the output covers just those voxels.
 
-Datasets are read through [worldarray](https://github.com/JaneliaSciComp/worldarray): zarr v2/v3, N5 and Neuroglancer precomputed, from local paths or `s3://`, `gs://` and `http(s)://`. Its README documents where each format places voxel 0.
+Datasets are read through [worldarray](https://github.com/JaneliaSciComp/worldarray): zarr v2/v3, N5 and Neuroglancer precomputed, from local paths or `s3://`, `gs://` and `http(s)://`. Its README documents where each format places voxel 0. Each array is read with its spatial axes in z, y, x order, so one stored x, y, z (as TensorSwitch writes OME-Zarr v3) is transposed on read. Outputs are written z, y, x, and `multiscale` adds levels in the dataset's own order.
 
 ---
 

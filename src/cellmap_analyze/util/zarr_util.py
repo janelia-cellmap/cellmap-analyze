@@ -35,13 +35,16 @@ def open_dataset(
     """The array at ``path`` as a ``wa.WorldArray``: for a multiscale group its first
     (finest) level, or with ``voxel_size`` the coarsest level no coarser than it (the
     first when every level is coarser), at that level's own voxel size. Reads outside
-    the data are filled with ``padding`` (a value, or "edge")."""
+    the data are filled with ``padding`` (a value, or "edge"). Its spatial axes are
+    z, y, x whatever order they are stored in, so an x, y, z store (TensorSwitch's
+    OME-Zarr) is read transposed."""
     kwargs = dict(
         mode=mode,
         padding=padding,
         method=method,
         context=concurrency_context(concurrency_limit),
         retries=wa.Retry(max_attempts=max_retries, timeout=timeout),
+        axes_order="zyx",
     )
     if voxel_size is not None:
         return wa.open(
