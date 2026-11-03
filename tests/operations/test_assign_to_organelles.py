@@ -6,7 +6,8 @@ from importlib import reload
 reload(cellmap_analyze.analyze.assign_to_organelles)
 
 from cellmap_analyze.analyze.assign_to_organelles import AssignToOrganelles
-from cellmap_analyze.util.zarr_util import open_dataset
+from cellmap_analyze.util.grid_util import make_grid
+from cellmap_analyze.util.zarr_util import create_multiscale_dataset, open_dataset
 from tests.test_utils import read_all
 import numpy as np
 from scipy.spatial.distance import cdist
@@ -111,3 +112,53 @@ def test_assign_to_organelles(
         assignment_type,
     )
     assert_frame_equal(gt_df, test_df, check_dtype=False)
+
+
+@pytest.mark.parametrize("assignment_type", [0, 1])
+def test_com_just_before_the_volume_is_outside_it(
+    tmp_path, voxel_size, chunk_size, assignment_type
+):
+    # A COM less than a voxel before the volume's corner must not read voxel 0:
+    # truncating its index toward zero (instead of flooring) put it in cell 1.
+    corner = np.array([100.0, 200.0, 300.0])
+    seg = np.zeros((6, 6, 6), dtype=np.uint8)
+    seg[:3, :3, :3] = 1
+    ds = create_multiscale_dataset(
+        f"{tmp_path}/cells.zarr/cells",
+        dtype=seg.dtype,
+        grid=make_grid(seg.shape, voxel_size, corner, chunks=chunk_size),
+    )
+    ds.write_index((0, 0, 0), ds.shape, seg)
+
+    # in voxels from the corner: one inside cell 1, one just before each low face
+    offsets = np.array(
+        [[0.5, 0.5, 0.5], [-0.3, 0.5, 0.5], [0.5, -0.3, 0.5], [0.5, 0.5, -0.3]]
+    )
+    coms = corner + offsets * voxel_size
+    csv = f"{tmp_path}/coms.csv"
+    pd.DataFrame(
+        {
+            "Object ID": [1, 2, 3, 4],
+            "COM X (nm)": coms[:, 2],
+            "COM Y (nm)": coms[:, 1],
+            "COM Z (nm)": coms[:, 0],
+        }
+    ).to_csv(csv, index=False)
+
+    atc = AssignToOrganelles(
+        organelle_csvs=csv,
+        target_organelle_ds_path=f"{tmp_path}/cells.zarr/cells/s0",
+        output_path=f"{tmp_path}/out",
+        assignment_type=assignment_type,
+    )
+    atc.get_organelle_assignments()
+    df = list(atc.organelle_info_dict.values())[0]
+
+    if assignment_type == 0:
+        assert df["Cells ID"].tolist() == [1, 0, 0, 0]
+    else:
+        # the nearest cell is still 1, but only the COM inside it is at distance 0
+        assert df["Cells ID"].tolist() == [1, 1, 1, 1]
+        distances = df["Cells Distance (nm)"].to_numpy()
+        assert distances[0] == 0
+        assert np.all(distances[1:] > 0)
