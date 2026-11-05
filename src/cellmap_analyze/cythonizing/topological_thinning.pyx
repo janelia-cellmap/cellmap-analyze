@@ -5,7 +5,8 @@ iterations at a time so it can be done blockwise.
 Adapted from scikit-image's ``skimage/morphology/_skeletonize_lee_cy.pyx.in``
 (v0.25.2), Ignacio Arganda-Carreras's BSD release of Skeletonize3D; its
 licence is reproduced below. The changes follow COSEM's blockwise thinning
-(cosem-segmentation-analysis's ``SparkTopologicalThinning``):
+(cosem-segmentation-analysis's ``SparkTopologicalThinning``), whose re-check
+comes from Philip Kollmannsberger's MATLAB Skeleton3D:
 
 - The sequential re-check of each border direction runs over the 8 parity
   subfields of the *global* voxel index, one after another. Two voxels of one
@@ -13,9 +14,10 @@ licence is reproduced below. The changes follow COSEM's blockwise thinning
   matter, and one iteration (6 directions of 8 subfields) only reaches 48
   voxels. A block read with a ``48 * iterations + 2`` voxel halo therefore
   thins its interior exactly as thinning the whole volume would.
-- The re-check tests Euler invariance as well as simplicity (scikit-image's
-  only tests simplicity), so a candidate whose neighbours were deleted earlier
-  in the same pass cannot change the topology.
+- The re-check tests Euler invariance as well as simplicity. scikit-image's
+  only tests simplicity, which passes an isolated voxel, so once its
+  neighbours were deleted earlier in the same pass a candidate can go too, and
+  with it the last voxel of an object.
 - A medial-surface mode keeps surface end points (Lee's Definition 1, with
   COSEM's planes: the 3 face and 3 diagonal planes of an octant through the
   voxel) instead of curve end points.

@@ -219,4 +219,6 @@ The center-finding implementation is taken from [funlib.evaluate](https://github
 
 The thinning kernel is adapted from scikit-image's 3D skeletonization (BSD-3-Clause),
 with the blockwise scheme, medial-surface mode and sheetness of
-[COSEM's segmentation analysis](https://github.com/janelia-cellmap/cosem-segmentation-analysis).
+[COSEM's segmentation analysis](https://github.com/janelia-cellmap/cosem-segmentation-analysis),
+whose re-check over 8 subfields with Euler invariance comes from Philip
+Kollmannsberger's [Skeleton3D](https://github.com/phi-max/skeleton3d-matlab).
