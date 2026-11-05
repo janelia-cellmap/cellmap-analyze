@@ -86,10 +86,14 @@ changes near them. Thinning peels about a voxel from each side per iteration, so
 object takes about its radius in voxels: thin ER (a few voxels) is quick, while
 nuclei or cells are better thinned at a coarser resolution.
 
-Sheetness at a medial-surface voxel is COSEM's Frangi-style measure of the Hessian of
-its object's blurred mask, the largest over 12 scales from half a voxel to 22.6
-voxels. Sheets about 3 or more voxels thick score about 0.7-0.85 and tubes about
-0.1-0.2; thinner sheets score lower, so compare datasets at the same resolution.
+Sheetness at a medial-surface voxel is COSEM's measure (Descoteaux et al. 2005) of the
+Hessian of its object's blurred mask, the largest over COSEM's scales, by default with
+Gaussian derivatives from one voxel up to 22.6 voxels (`scale_steps: 8` stops at 5.7,
+nine times faster and enough for ER at 8 nm). Sheets of any thickness score about
+0.7-0.87, tubes 4 or more voxels wide about 0.12-0.16 and thinner ones up to 0.3.
+`hessian: cosem` takes COSEM's own finite differences instead, which score sheets
+thinner than 3 voxels only 0.3-0.5. The scales are in voxels, so compare datasets at
+the same resolution.
 Each other voxel takes the mean sheetness of its nearest medial-surface voxels by
 geodesic distance within its object. Thickness is twice a medial-surface voxel's
 distance to the nearest voxel outside its object: within half a voxel for sheets at

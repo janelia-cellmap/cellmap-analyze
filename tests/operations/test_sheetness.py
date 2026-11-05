@@ -2,11 +2,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from scipy.ndimage import gaussian_filter
+
 from cellmap_analyze.analyze.sheetness import (
     Sheetness,
+    _gaussian_derivative_hessians,
     from_level,
     hessian_sheetness,
-    scale_series,
     to_level,
 )
 from cellmap_analyze.cythonizing.geodesic import nearest_source_values
@@ -54,17 +56,45 @@ def datasets(tmp_path_factory):
     return tmp, labels
 
 
-def test_sheets_score_high_and_tubes_low():
+@pytest.mark.parametrize("hessian", ["exact", "cosem"])
+def test_sheets_score_high_and_tubes_low(hessian):
     labels = _sheet_and_tubes()
     medial = _medial_surface(labels)
-    increments, normalisation = scale_series(VOXEL_SIZE, SCALE_STEPS)
     # away from rims and tube ends
     core = np.zeros(SHAPE, bool)
     core[:, 25:75, 25:75] = True
     for id_value, low, high in ((1, 0.7, 0.9), (2, 0.05, 0.25)):
         points = np.argwhere((medial == id_value) & core)
-        sheetness = hessian_sheetness(labels == id_value, points, increments, normalisation)
+        sheetness = hessian_sheetness(
+            labels == id_value, points, VOXEL_SIZE, SCALE_STEPS, hessian
+        )
         assert low < np.median(sheetness) < high
+
+
+def test_exact_hessian_separates_thin_sheets_from_thin_tubes():
+    n = 64
+    zi, yi, xi = np.indices((n, n, n)) - n // 2
+    core = (np.abs(zi) < 16) & (np.abs(yi) < 16) & (np.abs(xi) < 16)
+    for thickness in (1, 2):
+        sheet = (zi >= 0) & (zi < thickness)
+        points = np.argwhere(_medial_surface(sheet.astype(np.uint8)).astype(bool) & core)
+        assert np.median(hessian_sheetness(sheet, points, VOXEL_SIZE, SCALE_STEPS)) > 0.65
+    tube = yi**2 + xi**2 <= 1.5**2  # 3 voxels wide
+    points = np.argwhere(_medial_surface(tube.astype(np.uint8)).astype(bool) & core)
+    assert np.median(hessian_sheetness(tube, points, VOXEL_SIZE, SCALE_STEPS)) < 0.35
+
+
+def test_patch_hessians_are_gaussian_derivatives():
+    rng = np.random.default_rng(0)
+    field = rng.random((30, 30, 30))
+    points = rng.integers(6, 24, (50, 3))
+    sigma = np.array([0.6, 0.8, 1.0])
+    hessians = _gaussian_derivative_hessians(field, points, sigma)
+    for d in range(3):
+        for e in range(3):
+            order = [int(a == d) + int(a == e) for a in range(3)]
+            expected = gaussian_filter(field, sigma, order=order, mode="constant", truncate=4.0)
+            assert np.allclose(hessians[:, d, e], expected[tuple(points.T)], atol=1e-12)
 
 
 def test_nearest_source_values_stay_in_their_object():

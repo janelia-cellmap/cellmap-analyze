@@ -35,15 +35,19 @@ def from_level(level):
     return (np.asarray(level, dtype=float) - 1) / LEVELS
 
 
-def scale_series(voxel_size, scale_steps=12, steps_per_octave=2):
-    """COSEM's scales (``SparkCurvature.sigmaSeries``): sigmas from half the
-    finest voxel, doubling every ``steps_per_octave`` steps, in each axis's
-    voxels. Returns the blur to add at each step (taking the mask itself as
-    blurred by half a voxel) and the sigma each step's derivatives are
-    normalised by."""
+def _scale_sigmas(voxel_size, scale_steps, steps_per_octave=2):
+    """COSEM's scales: sigmas from half the finest voxel, doubling every
+    ``steps_per_octave`` steps, in each axis's voxels (one row per scale)."""
     voxel_size = np.asarray(voxel_size, dtype=float)
     target = 0.5 * 2.0 ** (np.arange(scale_steps) / steps_per_octave)
-    sigmas = target[:, None] * voxel_size.min() / voxel_size[None, :]
+    return target[:, None] * voxel_size.min() / voxel_size[None, :]
+
+
+def scale_series(voxel_size, scale_steps=12, steps_per_octave=2):
+    """COSEM's scale series (``SparkCurvature.sigmaSeries``): the blur to add
+    at each step, taking the mask itself as blurred by half a voxel, and the
+    sigma each step's derivatives are normalised by."""
+    sigmas = _scale_sigmas(voxel_size, scale_steps, steps_per_octave)
     clipped = np.maximum(0.5, sigmas)
     increments = np.zeros_like(clipped)
     increments[1:] = np.sqrt(np.maximum(0, clipped[1:] ** 2 - clipped[:-1] ** 2))
@@ -55,28 +59,62 @@ def scale_series(voxel_size, scale_steps=12, steps_per_octave=2):
 
 def sheetness_halo(voxel_size, scale_steps=12):
     """COSEM's halo for the scale series: the half-kernel of the sum of all its
-    sigmas, plus the Hessian's 2 voxels."""
-    voxel_size = np.asarray(voxel_size, dtype=float)
-    target = 0.5 * 2.0 ** (np.arange(scale_steps) / 2)
-    sigmas = target[:, None] * voxel_size.min() / voxel_size[None, :]
+    sigmas, plus the Hessian's 2 voxels. It also covers the exact Hessian's
+    blur and derivative kernels."""
+    sigmas = _scale_sigmas(voxel_size, scale_steps)
     max_sigma = np.sqrt((sigmas**2).sum(axis=0))
     return tuple(int(max(2, int(3 * s + 0.5) + 1)) + 2 for s in max_sigma)
 
 
-def hessian_sheetness(mask, points, increments, normalisation):
-    """COSEM's sheetness (``SparkCurvature``) of the binary ``mask`` at
-    ``points`` (voxel indices at least 2 voxels inside it): over scales, the
-    largest Frangi sheet measure of the blurred mask's Hessian whose largest
-    eigenvalue is negative,
-    ``exp(-Rsheet^2 / 2a^2) (1 - exp(-Rblob^2 / 2b^2)) (1 - exp(-S^2 / 2c^2))``
-    with a = b = c = 0.5, ``Rsheet = |l1 / l2|``,
-    ``Rblob = |2 |l2| - |l1| - |l0|| / |l2|`` and S the eigenvalues' norm
-    (``|l0| <= |l1| <= |l2|``). Sheets score about 0.7-0.85 once 3 or more
-    voxels thick, tubes about 0.1-0.2."""
-    points = np.asarray(points, dtype=np.intp)
-    best = np.zeros(len(points))
-    if len(points) == 0:
-        return best
+# The exact Hessian blurs the mask to all but this sigma (voxels), then takes
+# Gaussian derivatives of this sigma at each point; smaller scales are taken
+# on the mask itself.
+DERIVATIVE_SIGMA = 1.0
+# Its noise term follows Frangi's rule: half the largest scale-normalised
+# Hessian norm a binary structure reaches (about 0.48, at a sheet's middle when
+# sigma is half its thickness).
+EXACT_NOISE = 0.25
+
+
+def _derivative_kernels(sigma):
+    """Sampled Gaussian kernels of ``sigma`` and their first and second
+    derivatives, out to 4 sigma, for correlating with a patch."""
+    radius = int(4 * sigma + 0.5)
+    x = np.arange(-radius, radius + 1, dtype=float)
+    phi = np.exp(-0.5 * x**2 / sigma**2)
+    phi /= phi.sum()
+    # correlating with G'(-x) takes the first derivative
+    return radius, (phi, x / sigma**2 * phi, (x**2 - sigma**2) / sigma**4 * phi)
+
+
+def _gaussian_derivative_hessians(field, points, sigma, batch=8192):
+    """The Hessian of ``field`` blurred by ``sigma`` (per axis) at ``points``,
+    by Gaussian derivatives over a patch around each one."""
+    kernels = [_derivative_kernels(s) for s in sigma]
+    offsets = [np.arange(-r, r + 1) for r, _ in kernels]
+    orders = ((2, 0, 0), (0, 2, 0), (0, 0, 2), (1, 1, 0), (1, 0, 1), (0, 1, 1))
+    hessians = np.empty((len(points), 3, 3))
+    for b in range(0, len(points), batch):
+        p = points[b : b + batch]
+        patch = field[
+            p[:, 0, None, None, None] + offsets[0][None, :, None, None],
+            p[:, 1, None, None, None] + offsets[1][None, None, :, None],
+            p[:, 2, None, None, None] + offsets[2][None, None, None, :],
+        ]
+        along_x = [patch @ kernels[2][1][o] for o in range(3)]
+        for oz, oy, ox in orders:
+            value = (along_x[ox] @ kernels[1][1][oy]) @ kernels[0][1][oz]
+            d, e = [axis for axis, o in enumerate((oz, oy, ox)) for _ in range(o)]
+            hessians[b : b + batch, d, e] = value
+            hessians[b : b + batch, e, d] = value
+    return hessians
+
+
+def _cosem_hessians(mask, points, voxel_size, scale_steps):
+    """Each scale's Hessian as COSEM takes it: central differences of central
+    differences of the incrementally blurred mask, which underestimates it
+    below a blur of about 2 voxels."""
+    increments, normalisation = scale_series(voxel_size, scale_steps)
     smoothed = mask.astype(np.float64)
     unit = np.eye(3, dtype=np.intp)
 
@@ -90,7 +128,6 @@ def hessian_sheetness(mask, points, increments, normalisation):
         hessian = np.empty((len(points), 3, 3))
         for d in range(3):
             for e in range(d, 3):
-                # central differences of central differences, as COSEM takes them
                 h = (
                     sample(unit[d] + unit[e])
                     - sample(unit[d] - unit[e])
@@ -99,7 +136,57 @@ def hessian_sheetness(mask, points, increments, normalisation):
                 ) * (norm / 2) ** 2
                 hessian[:, d, e] = h
                 hessian[:, e, d] = h
-        eigenvalues = np.linalg.eigvalsh(hessian)
+        yield hessian
+
+
+def _exact_hessians(mask, points, voxel_size, scale_steps):
+    """Each scale's Hessian by Gaussian derivatives of that scale's sigma,
+    scale-normalised by sigma squared in physical units. Scales under a voxel
+    are skipped: there any digitised structure looks flat, so thin tubes
+    would score as sheets."""
+    sigmas = _scale_sigmas(voxel_size, scale_steps)
+    sigmas = sigmas[sigmas.max(axis=1) >= 1 - 1e-9]
+    smoothed = mask.astype(np.float64)
+    blurred = np.zeros(3)
+    for sigma in sigmas:
+        derivative = np.minimum(sigma, DERIVATIVE_SIGMA)
+        pre = np.sqrt(sigma**2 - derivative**2)
+        increment = np.sqrt(np.maximum(pre**2 - blurred**2, 0))
+        if np.any(increment > 0):
+            smoothed = gaussian_filter(smoothed, increment, mode="constant", truncate=4.0)
+            blurred = pre
+        yield _gaussian_derivative_hessians(smoothed, points, derivative) * np.outer(sigma, sigma)
+
+
+def hessian_sheetness(mask, points, voxel_size, scale_steps=12, hessian="exact"):
+    """Sheetness of the binary ``mask`` at ``points`` (voxel indices at least
+    the derivative kernels' reach inside it): over scales, the largest
+    Descoteaux et al. (2005) sheet measure of the blurred mask's Hessian whose
+    largest eigenvalue is negative,
+    ``exp(-Rsheet^2 / 2a^2) (1 - exp(-Rblob^2 / 2b^2)) (1 - exp(-S^2 / 2c^2))``
+    with a = b = 0.5, ``Rsheet = |l1 / l2|``,
+    ``Rblob = |2 |l2| - |l1| - |l0|| / |l2|`` and S the eigenvalues' norm
+    (``|l0| <= |l1| <= |l2|``).
+
+    ``hessian="exact"`` takes Gaussian derivatives (c = 0.25) over the scales
+    from a voxel up: sheets of any thickness score about 0.7-0.87, tubes 4 or
+    more voxels wide about 0.12-0.16 and thinner ones up to 0.3.
+    ``"cosem"`` is COSEM's ``SparkCurvature`` (c = 0.5), whose finite
+    differences underestimate curvature below a blur of about 2 voxels:
+    sheets 3 or more voxels thick score about 0.7-0.85 but thinner ones
+    0.3-0.5, tubes about 0.1-0.2."""
+    points = np.asarray(points, dtype=np.intp)
+    best = np.zeros(len(points))
+    if len(points) == 0:
+        return best
+    if hessian == "exact":
+        hessians, noise = _exact_hessians(mask, points, voxel_size, scale_steps), EXACT_NOISE
+    elif hessian == "cosem":
+        hessians, noise = _cosem_hessians(mask, points, voxel_size, scale_steps), 0.5
+    else:
+        raise ValueError(f"hessian must be 'exact' or 'cosem', not {hessian!r}")
+    for h in hessians:
+        eigenvalues = np.linalg.eigvalsh(h)
         eigenvalues = np.take_along_axis(
             eigenvalues, np.argsort(np.abs(eigenvalues), axis=1), axis=1
         )
@@ -110,7 +197,7 @@ def hessian_sheetness(mask, points, increments, normalisation):
             measure = (
                 np.exp(-(r_sheet**2) / 0.5)
                 * (1 - np.exp(-(r_blob**2) / 0.5))
-                * (1 - np.exp(-(a0**2 + a1**2 + a2**2) / 0.5))
+                * (1 - np.exp(-(a0**2 + a1**2 + a2**2) / (2 * noise**2)))
             )
         better = (eigenvalues[:, 2] <= 0) & (measure > best)
         best[better] = measure[better]
@@ -154,7 +241,9 @@ class Sheetness(ComputeConfigMixin):
     ``SparkCurvature`` and ``SparkCalculatePropertiesFromMedialSurface``.
 
     1. At each medial-surface voxel: its sheetness (``hessian_sheetness``, on
-       its own object's mask, over ``scale_steps`` scales) and thickness,
+       its own object's mask, over ``scale_steps`` scales, by Gaussian
+       derivatives or with ``hessian="cosem"`` COSEM's finite differences) and
+       thickness,
        twice its distance to another label: within half a voxel of the
        voxelised thickness for sheets at any angle, but a full voxel high for
        an axis-aligned sheet an odd number of voxels thick.
@@ -178,8 +267,8 @@ class Sheetness(ComputeConfigMixin):
       thickness bin (COSEM's ``sheetnessVsThicknessHistogram``).
 
     Surface area counts voxel faces against other labels, as ``Measure``
-    does. The scales are in voxels, and sheets thinner than 3 voxels score
-    lower (about 0.3-0.5), so compare datasets at the same resolution.
+    does. The scales are in voxels, so compare datasets at the same
+    resolution.
     """
 
     def __init__(
@@ -189,6 +278,7 @@ class Sheetness(ComputeConfigMixin):
         output_path,
         csv_path,
         scale_steps=12,
+        hessian="exact",
         thickness_bin_nm=8,
         block_shape_voxels=None,
         block_multiplier=4,
@@ -222,7 +312,9 @@ class Sheetness(ComputeConfigMixin):
 
         self.voxel_size = np.array(self.grid.voxel_size, dtype=float)
         self.scale_steps = int(scale_steps)
-        self.increments, self.normalisation = scale_series(self.voxel_size, self.scale_steps)
+        if hessian not in ("exact", "cosem"):
+            raise ValueError(f"hessian must be 'exact' or 'cosem', not {hessian!r}")
+        self.hessian = hessian
         self.halo = sheetness_halo(self.voxel_size, self.scale_steps)
         self.thickness_bin_nm = float(thickness_bin_nm)
 
@@ -246,8 +338,8 @@ class Sheetness(ComputeConfigMixin):
         medial_surface_vol,
         at_medial_surface_vol,
         thickness_vol,
-        increments,
-        normalisation,
+        scale_steps,
+        hessian,
         thickness_bin_nm,
     ):
         """Sheetness and thickness at a block's medial-surface voxels."""
@@ -269,7 +361,7 @@ class Sheetness(ComputeConfigMixin):
             hi = points[mine].max(axis=0) + halo + 1
             box = tuple(slice(a, b) for a, b in zip(lo, hi))
             sheetness[mine] = hessian_sheetness(
-                labels[box] == id_value, points[mine] - lo, increments, normalisation
+                labels[box] == id_value, points[mine] - lo, voxel_size, scale_steps, hessian
             )
 
         distance, exact = _distance_at(labels, points, voxel_size)
@@ -426,8 +518,8 @@ class Sheetness(ComputeConfigMixin):
                 self.medial_surface_vol,
                 self.at_medial_surface_vol,
                 self.thickness_vol,
-                self.increments,
-                self.normalisation,
+                self.scale_steps,
+                self.hessian,
                 self.thickness_bin_nm,
             )
             paddings = self._initial_paddings(
