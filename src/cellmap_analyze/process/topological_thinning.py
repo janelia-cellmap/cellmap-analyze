@@ -3,7 +3,6 @@ import logging
 import os
 import shutil
 
-import dask.bag as db
 import numpy as np
 
 from cellmap_analyze.cythonizing.topological_thinning import (
@@ -245,9 +244,9 @@ class TopologicalThinning(ComputeConfigMixin):
 
     def _run_pass(self, tasks, pass_index):
         source = self.segmentation_vol if pass_index == 0 else self.buffers[(pass_index - 1) % 2]
-        npartitions = dask_util.guesstimate_npartitions(len(tasks), self.num_workers)
-        bag = db.from_sequence(tasks, npartitions=max(1, min(npartitions, len(tasks))))
-        return bag.map_partitions(
+        partitions = dask_util.block_partitions(len(tasks), self.num_workers)
+        return dask_util.compute_partitions(
+            [[tasks[i] for i in part] for part in partitions],
             TopologicalThinning._process_partition,
             self.grid,
             self.block_shape,
@@ -259,7 +258,8 @@ class TopologicalThinning(ComputeConfigMixin):
             self.medial_surface,
             self.iterations_per_pass,
             self.parity_origin,
-        ).compute(**self.compute_args)
+            compute_args=self.compute_args,
+        )
 
     def thin(self):
         """Thin every block until no iteration deletes anything, then move the

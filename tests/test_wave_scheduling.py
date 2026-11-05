@@ -150,3 +150,53 @@ def test_job_script_prologue_exports_each_waves_thread_budget():
     config = {"jobqueue": {"lsf": settings}}
     dask_util.set_jobqueue_processes(config, "lsf", 1)
     assert dask_util.job_script_prologue(settings)[-1] == "export WORLDARRAY_THREADS=8"
+
+
+def test_block_partitions_shuffle_every_block_in_once():
+    partitions = dask_util.block_partitions(1000, 10)
+    blocks = [i for part in partitions for i in part]
+    assert sorted(blocks) == list(range(1000))
+    assert blocks != list(range(1000))
+    # the same order on every run
+    assert partitions == dask_util.block_partitions(1000, 10)
+
+
+def test_block_partitions_spread_dense_blocks():
+    # a dense run of blocks, as at the centre of a cell, that contiguous
+    # partitions would put in the same few partitions
+    costs = [1] * 1000
+    costs[400:440] = [1000] * 40
+    for partitions in (
+        dask_util.block_partitions(1000, 10),
+        dask_util.block_partitions(1000, 10, costs=costs),
+    ):
+        assert sorted(i for part in partitions for i in part) == list(range(1000))
+        dense = [sum(400 <= i < 440 for i in part) for part in partitions]
+        assert max(dense) <= 3
+    # balanced by cost, the heaviest partitions come first
+    partitions = dask_util.block_partitions(1000, 10, costs=costs)
+    loads = [sum(costs[i] for i in part) for part in partitions]
+    assert loads == sorted(loads, reverse=True)
+    assert max(loads) <= 1.1 * max(1000, sum(costs) / len(partitions))
+
+
+def _started(partition):
+    import time
+
+    return [(time.perf_counter_ns(), partition[0])]
+
+
+def test_compute_partitions_starts_them_in_order():
+    from dask.distributed import Client, LocalCluster
+
+    # a bag's map_partitions starts these about in reverse
+    partitions = [[i, i + 100] for i in range(40)]
+    with LocalCluster(
+        n_workers=1, threads_per_worker=1, processes=False, dashboard_address=None
+    ) as cluster, Client(cluster):
+        started = dask_util.compute_partitions(partitions, _started, compute_args={"retries": 5})
+    assert [first for _, first in sorted(started)] == list(range(40))
+    assert dask_util.compute_partitions(
+        [[1, 2], [3]], lambda part, k: [k * p for p in part], 10,
+        compute_args={"scheduler": "single-threaded"},
+    ) == [10, 20, 30]

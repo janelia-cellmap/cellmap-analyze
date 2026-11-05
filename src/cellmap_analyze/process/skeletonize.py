@@ -1088,6 +1088,7 @@ class Skeletonize(ComputeConfigMixin):
                 return dask_util.compute_blockwise_partitions(
                     len(_ids), workers, self.compute_args, logger, msg,
                     _wrapper,
+                    randomize=False,  # keep the wave's heaviest-first order
                     merge_info=(Skeletonize._merge_skeleton_metrics, _merge),
                     config=config,
                 )

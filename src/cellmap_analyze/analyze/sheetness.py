@@ -1,7 +1,6 @@
 import logging
 import os
 
-import dask.bag as db
 import edt as edt_module
 import numpy as np
 import pandas as pd
@@ -389,6 +388,7 @@ class Sheetness(ComputeConfigMixin):
         )
         return {
             "index": block_index,
+            "voxels": int(np.count_nonzero(labels[block.inner])),
             "max_radius_nm": float(distance.max()),
             "vs_thickness": pd.DataFrame(
                 {
@@ -482,12 +482,11 @@ class Sheetness(ComputeConfigMixin):
         results = [fn(i, *args) for i in block_indices]
         return [r for r in results if r is not None]
 
-    def _run(self, msg, fn, *args):
-        npartitions = dask_util.guesstimate_npartitions(self.num_blocks, self.num_workers)
-        bag = db.range(self.num_blocks, npartitions=max(1, min(npartitions, self.num_blocks)))
+    def _run(self, msg, fn, *args, costs=None):
+        partitions = dask_util.block_partitions(self.num_blocks, self.num_workers, costs)
         with TimingMessager(msg, logger):
-            return bag.map_partitions(Sheetness._partition, fn, *args).compute(
-                **self.compute_args
+            return dask_util.compute_partitions(
+                partitions, Sheetness._partition, fn, *args, compute_args=self.compute_args
             )
 
     def _initial_paddings(self, max_radius_nm):
@@ -525,6 +524,11 @@ class Sheetness(ComputeConfigMixin):
             paddings = self._initial_paddings(
                 {r["index"]: r["max_radius_nm"] for r in medial_results}
             )
+            # a block's geodesic assignment takes time in proportion to its
+            # object voxels, so start the densest blocks first
+            voxels = np.zeros(self.num_blocks)
+            for r in medial_results:
+                voxels[r["index"]] = r["voxels"]
             volume_results = self._run(
                 "Assigning sheetness from the nearest medial-surface voxels",
                 Sheetness.volume_block,
@@ -535,6 +539,7 @@ class Sheetness(ComputeConfigMixin):
                 self.medial_surface_vol,
                 self.at_medial_surface_vol,
                 self.sheetness_vol,
+                costs=voxels,
             )
         self._write_csvs(medial_results, volume_results)
 
