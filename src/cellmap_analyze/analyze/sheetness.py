@@ -161,8 +161,8 @@ class Sheetness(ComputeConfigMixin):
     2. Every other voxel of an object takes the mean sheetness of its nearest
        medial-surface voxels, by geodesic distance through the object (COSEM's
        2023 method; its 2021 one spread sheetness over medial balls, which
-       left the object's surface layer uncovered or, unmasked as COSEM had
-       it, covered a ring of background instead).
+       approximates the object, missing some surface voxels and taking in a
+       few background ones).
 
     Writes ``output_path``, the sheetness of every object voxel, stored as
     ``1 + round(254 * sheetness)`` with 0 outside objects (or where no
