@@ -155,9 +155,9 @@ class Sheetness(ComputeConfigMixin):
 
     1. At each medial-surface voxel: its sheetness (``hessian_sheetness``, on
        its own object's mask, over ``scale_steps`` scales) and thickness,
-       twice its distance to another label. That distance is to the nearest
-       outside voxel's centre, so thickness reads half a voxel high on
-       average.
+       twice its distance to another label: within half a voxel of the
+       voxelised thickness for sheets at any angle, but a full voxel high for
+       an axis-aligned sheet an odd number of voxels thick.
     2. Every other voxel of an object takes the mean sheetness of its nearest
        medial-surface voxels, by geodesic distance through the object (COSEM's
        2023 method; its 2021 one spread sheetness over medial balls, which

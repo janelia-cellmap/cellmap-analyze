@@ -92,8 +92,9 @@ voxels. Sheets about 3 or more voxels thick score about 0.7-0.85 and tubes about
 0.1-0.2; thinner sheets score lower, so compare datasets at the same resolution.
 Each other voxel takes the mean sheetness of its nearest medial-surface voxels by
 geodesic distance within its object. Thickness is twice a medial-surface voxel's
-distance to the nearest voxel outside its object, so it reads about half a voxel high
-on average.
+distance to the nearest voxel outside its object: within half a voxel for sheets at
+any angle, but a full voxel high for an axis-aligned sheet an odd number of voxels
+thick.
 
 ---
 
