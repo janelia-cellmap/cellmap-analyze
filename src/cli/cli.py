@@ -217,6 +217,34 @@ def compute_edt():
             rp.add_multiscale(cedt.output_path, cedt.num_workers)
 
 
+def topological_thinning():
+    from cellmap_analyze.process.topological_thinning import TopologicalThinning
+
+    rp = RunProperties(multiscale=False)
+    with io_util.tee_streams(rp.logpath):
+        os.chdir(rp.execution_directory)
+        with io_util.TimingMessager(
+            "TopologicalThinning", logger, final_message="Complete success"
+        ):
+            thinning = TopologicalThinning(**rp.run_config)
+            thinning.thin()
+            rp.add_multiscale(thinning.output_path, thinning.num_workers)
+
+
+def sheetness():
+    from cellmap_analyze.analyze.sheetness import Sheetness
+
+    rp = RunProperties(multiscale=False)
+    with io_util.tee_streams(rp.logpath):
+        os.chdir(rp.execution_directory)
+        with io_util.TimingMessager(
+            "Sheetness", logger, final_message="Complete success"
+        ):
+            sheet = Sheetness(**rp.run_config)
+            sheet.calculate()
+            rp.add_multiscale(sheet.output_path, sheet.num_workers)
+
+
 def split_narrow_bridges():
     from cellmap_analyze.process.split_narrow_bridges import SplitNarrowBridges
 

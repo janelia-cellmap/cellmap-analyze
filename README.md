@@ -21,6 +21,7 @@ A suite of Dask-powered tools for processing and analyzing terabyte-scale 3D seg
 | **Label With Mask**      | `label-with-mask`            | Label one dataset with IDs from another.                    |
 | **Morphological Operations** | `morphological-operations` | Erosion and dilation of segmented datasets. Processing order across blocks is not guaranteed. |
 | **Skeletonize**          | `skeletonize`                | Generate skeletons from segmented objects with optional pruning and simplification. Automatically resamples to isotropic resolution before skeletonization. |
+| **Topological Thinning** | `topological-thinning`       | Thin a segmentation blockwise to curve skeletons or, with `medial_surface: true`, medial surfaces (Lee et al. 1994, as COSEM did). The result is voxel for voxel what thinning the whole volume at once gives; objects that touch are thinned as if alone and keep their IDs. |
 | **Compute EDT**          | `compute-edt`                | Compute a Euclidean distance transform over a segmentation, for reuse across repeated `split-narrow-bridges` runs. |
 | **Split Narrow Bridges** | `split-narrow-bridges`       | Split accidentally-merged blob-like objects (nuclei, cells) at thin necks via EDT-watershed, preserving all original foreground voxels. |
 | **Multiscale**           | `multiscale`                 | Add downsampled levels (`s1`, `s2`, …) to an existing zarr dataset for viewing, until a level fits in one chunk. Integer data (labels) is downsampled by mode and floats by mean, on anisotropic data the finer axes are halved first, and each level's OME translation is placed at its voxel centres. |
@@ -34,8 +35,8 @@ then finalize with `clean-connected-components` and/or `filter-ids`.
 
 Each processing command that writes a volume then adds a multiscale pyramid to
 it, as `multiscale` does, so every output is ready to view. Set
-`multiscale: false` in its `run-config.yaml` to skip this; `compute-edt` adds
-one only with `multiscale: true`.
+`multiscale: false` in its `run-config.yaml` to skip this; `compute-edt` and
+`topological-thinning` add one only with `multiscale: true`.
 
 ### Analysis Tools
 
@@ -44,6 +45,7 @@ one only with `multiscale: true`.
 | **Measurement**     | `measure`                    | Compute metrics (volume, surface area, radius of gyration, bounding box, principal axes) for objects and contact sites. Principal axes give three axis lengths (equivalent-ellipsoid diameters, as in scikit-image's `regionprops`), elongation (longest / second), flatness (second / third), and the longest axis's direction. Supports raw intensity statistics when a raw dataset is provided. |
 | **Fit Lines**       | `fit_lines_to_segmentations` | Fit geometric lines to elongated/cylindrical structures.              |
 | **Assign to Organelles** | `assign_to_organelles`  | Map segmented objects to organelles based on centers of mass.         |
+| **Sheetness**       | `sheetness`                  | Sheetness (sheet- versus tube-like) and thickness of objects such as ER from their medial surfaces, as COSEM measured them: per-voxel sheetness, and per object its volume and surface area by sheetness and its medial surface by sheetness and thickness. |
 
 ---
 
@@ -54,6 +56,44 @@ All operations handle anisotropic voxel sizes (e.g. `(8, 8, 32)` nm in ZYX). Phy
 A `roi` in a run-config is in nm, `["z_start:z_end", "y_start:y_end", "x_start:x_end"]`, and selects the voxels whose centres lie inside it; the output covers just those voxels.
 
 Datasets are read through [worldarray](https://github.com/JaneliaSciComp/worldarray): zarr v2/v3, N5 and Neuroglancer precomputed, from local paths or `s3://`, `gs://` and `http(s)://`. Its README documents where each format places voxel 0. Each array is read with its spatial axes in z, y, x order, so one stored x, y, z (as TensorSwitch writes OME-Zarr v3) is transposed on read. Outputs are written z, y, x, and `multiscale` adds levels in the dataset's own order.
+
+---
+
+## Medial surfaces and sheetness
+
+`topological-thinning` with `medial_surface: true` gives the medial surface
+`sheetness` needs; both run on the segmentation's own voxels. For example, for ER:
+
+```yaml
+# topological-thinning
+segmentation_path: /path/to/segmentations.zarr/er/s0
+output_path: /path/to/segmentations.zarr/er_medial_surface
+medial_surface: true
+```
+
+```yaml
+# sheetness
+segmentation_path: /path/to/segmentations.zarr/er/s0
+medial_surface_path: /path/to/segmentations.zarr/er_medial_surface/s0
+output_path: /path/to/analysis.zarr/er_sheetness
+csv_path: /path/to/analysis/er_sheetness
+```
+
+Thinning runs in passes over blocks read with a halo of `48 * iterations_per_pass + 2`
+voxels, so blocks must be at least that big; more iterations per pass read less per
+iteration but need bigger blocks. A pass only rethins blocks that changed or have
+changes near them. Thinning peels about a voxel from each side per iteration, so an
+object takes about its radius in voxels: thin ER (a few voxels) is quick, while
+nuclei or cells are better thinned at a coarser resolution.
+
+Sheetness at a medial-surface voxel is COSEM's Frangi-style measure of the Hessian of
+its object's blurred mask, the largest over 12 scales from half a voxel to 22.6
+voxels. Sheets about 3 or more voxels thick score about 0.7-0.85 and tubes about
+0.1-0.2; thinner sheets score lower, so compare datasets at the same resolution.
+Each other voxel takes the mean sheetness of its nearest medial-surface voxels by
+geodesic distance within its object. Thickness is twice a medial-surface voxel's
+distance to the nearest voxel outside its object, so it reads about half a voxel high
+on average.
 
 ---
 
@@ -171,3 +211,7 @@ bsub -n 4 -P chargegroup connected-components -n 12 config_path
 ## Acknowledgements
 
 The center-finding implementation is taken from [funlib.evaluate](https://github.com/funkelab/funlib.evaluate).
+
+The thinning kernel is adapted from scikit-image's 3D skeletonization (BSD-3-Clause),
+with the blockwise scheme, medial-surface mode and sheetness of
+[COSEM's segmentation analysis](https://github.com/janelia-cellmap/cosem-segmentation-analysis).
