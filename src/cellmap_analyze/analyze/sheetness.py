@@ -299,9 +299,7 @@ class Sheetness(ComputeConfigMixin):
        an axis-aligned sheet an odd number of voxels thick.
     2. Every other voxel of an object takes the mean sheetness of its nearest
        medial-surface voxels, by geodesic distance through the object (COSEM's
-       2023 method; its 2021 one spread sheetness over medial balls, which
-       approximates the object, missing some surface voxels and taking in a
-       few background ones).
+       2023 method).
 
     Both steps widen a block's read until its distances are exact, as far as
     the read fits in half its worker's memory (and ``max_padding_voxels`` on
