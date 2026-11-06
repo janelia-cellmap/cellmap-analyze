@@ -136,7 +136,6 @@ def test_sheetness_per_object(datasets, tmp_path, block_shape):
     assert list(summary.index) == [1, 2]
     for id_value in (1, 2):
         assert summary.loc[id_value, "Volume (nm^3)"] == (labels == id_value).sum() * voxel_volume
-    assert np.all(summary["Unreached Volume (nm^3)"] == 0)
     assert summary.loc[1, "Mean Sheetness"] > 0.6
     assert summary.loc[2, "Mean Sheetness"] < 0.25
     # 2 x the distance to the nearest outside voxel centre: 6 voxels for a
@@ -155,3 +154,38 @@ def test_sheetness_per_object(datasets, tmp_path, block_shape):
     medial = open_dataset(f"{tmp}/in.zarr/er_medial_surface/s0").read_index((0, 0, 0), SHAPE)
     counts = vs_thickness.groupby("Object ID")["Medial Surface Voxels"].sum()
     assert counts[1] == (medial == 1).sum() and counts[2] == (medial == 2).sum()
+
+
+def _write(path, data):
+    grid = make_grid(data.shape, VOXEL_SIZE, chunks=(20, 20, 20))
+    create_multiscale_dataset(path, dtype=data.dtype, grid=grid).write_index(
+        (0, 0, 0), data.shape, data
+    )
+
+
+@pytest.mark.parametrize(
+    "medial_surface, problem",
+    [
+        # a cube 30 voxels wide: its centre is 15 voxels from its edge
+        (_medial_surface, "farther from its object's edge"),
+        # no medial surface to take sheetness from
+        (np.zeros_like, "or its object has none"),
+    ],
+)
+def test_reads_that_cannot_be_made_exact_fail(tmp_path, medial_surface, problem):
+    labels = np.zeros((40, 40, 40), np.uint64)
+    labels[5:35, 5:35, 5:35] = 1
+    _write(f"{tmp_path}/in.zarr/seg", labels)
+    _write(f"{tmp_path}/in.zarr/medial", medial_surface(labels))
+    sheetness = Sheetness(
+        f"{tmp_path}/in.zarr/seg",
+        f"{tmp_path}/in.zarr/medial",
+        f"{tmp_path}/out.zarr/sheetness",
+        f"{tmp_path}/csv",
+        scale_steps=1,
+        max_padding_voxels=8,
+        block_shape_voxels=(20, 20, 20),
+        num_workers=1,
+    )
+    with pytest.raises(RuntimeError, match=problem):
+        sheetness.calculate()

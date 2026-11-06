@@ -216,6 +216,18 @@ def _distance_at(labels, points, voxel_size):
     return d, bool(np.all(d <= outside))
 
 
+def _widen(padding, max_padding, problem):
+    """``padding`` (voxels per axis) doubled, up to ``max_padding``. Raises
+    once it can grow no further, since the result would not be exact."""
+    wider = np.maximum(padding, np.minimum(2 * np.asarray(padding), max_padding))
+    if np.array_equal(wider, padding):
+        raise RuntimeError(
+            f"{problem} The read can't grow past max_padding_voxels={max_padding}: run at a "
+            f"coarser resolution or raise max_padding_voxels (bigger reads need more memory)."
+        )
+    return wider
+
+
 def _unsigned_labels(labels):
     if labels.dtype == bool:
         return labels.view(np.uint8)
@@ -252,14 +264,17 @@ class Sheetness(ComputeConfigMixin):
        approximates the object, missing some surface voxels and taking in a
        few background ones).
 
+    Both steps widen a block's read, up to ``max_padding_voxels`` on each side,
+    until its distances are exact; an object too thick for that, or one with
+    no medial surface, stops the run with an error.
+
     Writes ``output_path``, the sheetness of every object voxel, stored as
-    ``1 + round(254 * sheetness)`` with 0 outside objects (or where no
-    medial-surface voxel of the object is reachable),
+    ``1 + round(254 * sheetness)`` with 0 outside objects,
     ``{output_path}_at_medial_surface`` and ``{output_path}_thickness``
     (float32, nm) on the medial surface, and to ``csv_path`` per object:
 
     - ``{name}.csv``: volume, surface area, volume- and surface-weighted mean
-      sheetness, unreached volume, medial-surface voxels and thickness;
+      sheetness, medial-surface voxels and thickness;
     - ``{name}_histograms.csv``: volume and surface area by sheetness
       (COSEM's ``sheetnessVolumeAndAreaHistograms``);
     - ``{name}_vs_thickness.csv``: medial-surface voxels by sheetness and
@@ -279,6 +294,7 @@ class Sheetness(ComputeConfigMixin):
         scale_steps=12,
         hessian="exact",
         thickness_bin_nm=8,
+        max_padding_voxels=128,
         block_shape_voxels=None,
         block_multiplier=4,
         roi=None,
@@ -316,6 +332,7 @@ class Sheetness(ComputeConfigMixin):
         self.hessian = hessian
         self.halo = sheetness_halo(self.voxel_size, self.scale_steps)
         self.thickness_bin_nm = float(thickness_bin_nm)
+        self.max_padding_voxels = int(max_padding_voxels)
 
         self.sheetness_vol = create_multiscale_dataset(
             self.output_path, dtype=np.uint8, grid=self.grid
@@ -340,6 +357,7 @@ class Sheetness(ComputeConfigMixin):
         scale_steps,
         hessian,
         thickness_bin_nm,
+        max_padding,
     ):
         """Sheetness and thickness at a block's medial-surface voxels."""
         block = create_block_from_index(grid, block_index, padding=halo, block_shape=block_shape)
@@ -368,7 +386,10 @@ class Sheetness(ComputeConfigMixin):
         while not exact:
             # an object thicker than the halo: widen the read until the
             # distances are exact
-            padding = padding * 2
+            padding = _widen(
+                padding, max_padding, f"Block {block_index}: a medial-surface voxel is"
+                " farther from its object's edge than the read reaches.",
+            )
             wide = create_block_from_index(grid, block_index, padding=padding, block_shape=block_shape)
             wide_labels = segmentation_vol.read_onto(grid, wide.read_begin, wide.read_end)
             wide_points = local + (np.array(wide.begin) - np.array(wide.read_begin))
@@ -412,6 +433,7 @@ class Sheetness(ComputeConfigMixin):
         medial_surface_vol,
         at_medial_surface_vol,
         sheetness_vol,
+        max_padding,
     ):
         """Sheetness of a block's voxels from their nearest medial-surface
         voxels, and its volume and surface area by sheetness."""
@@ -425,10 +447,9 @@ class Sheetness(ComputeConfigMixin):
         voxel_size = np.array(grid.voxel_size, dtype=float)
 
         # Widen the read until every voxel's nearest medial-surface voxel is
-        # nearer than anything outside it; a voxel still unreached after that
-        # has no medial surface in its object nearby.
-        padding = np.array(paddings[block_index])
-        for attempt in range(3):
+        # nearer than anything outside it.
+        padding = np.minimum(paddings[block_index], max_padding)
+        while True:
             padded = create_block_from_index(grid, block_index, padding=padding, block_shape=block_shape)
             padded_labels = np.ascontiguousarray(
                 _unsigned_labels(segmentation_vol.read_onto(grid, padded.read_begin, padded.read_end))
@@ -442,10 +463,14 @@ class Sheetness(ComputeConfigMixin):
             distance, sheetness = distance[padded.inner], sheetness[padded.inner]
             if np.all(distance[inside] <= np.min(padding * voxel_size)):
                 break
-            padding = padding * 2
+            padding = _widen(
+                padding, max_padding, f"Block {block_index}: an object voxel's nearest"
+                " medial-surface voxel, by paths through its object, is farther than the"
+                " read reaches, or its object has none (was the medial surface thinned"
+                " from this segmentation?).",
+            )
 
-        reached = inside & np.isfinite(distance)
-        level = np.where(reached, to_level(np.nan_to_num(sheetness)), 0).astype(np.uint8)
+        level = np.where(inside, to_level(np.nan_to_num(sheetness)), 0).astype(np.uint8)
         sheetness_vol.write_index(block.begin, block.end, level)
 
         face_areas = (
@@ -459,7 +484,7 @@ class Sheetness(ComputeConfigMixin):
         ids = labels[inside].astype(np.int64)
         levels = level[inside].astype(np.int64)
         area = areas[inside]
-        value = np.nan_to_num(sheetness[inside])
+        value = sheetness[inside]
         unique, counts, (area_sum, value_sum, value_area_sum) = _group_sums(
             np.stack([ids, levels], axis=1), area, value, value * area
         )
@@ -520,6 +545,7 @@ class Sheetness(ComputeConfigMixin):
                 self.scale_steps,
                 self.hessian,
                 self.thickness_bin_nm,
+                self.max_padding_voxels,
             )
             paddings = self._initial_paddings(
                 {r["index"]: r["max_radius_nm"] for r in medial_results}
@@ -539,6 +565,7 @@ class Sheetness(ComputeConfigMixin):
                 self.medial_surface_vol,
                 self.at_medial_surface_vol,
                 self.sheetness_vol,
+                self.max_padding_voxels,
                 costs=voxels,
             )
         self._write_csvs(medial_results, volume_results)
@@ -562,14 +589,11 @@ class Sheetness(ComputeConfigMixin):
         )
 
         per_object = histograms.groupby("id").agg(
-            voxels=("voxels", "sum"), area=("area", "sum")
-        )
-        covered = histograms[histograms["level"] > 0].groupby("id").agg(
             voxels=("voxels", "sum"),
             area=("area", "sum"),
             sheetness_sum=("sheetness_sum", "sum"),
             sheetness_area_sum=("sheetness_area_sum", "sum"),
-        ).reindex(per_object.index, fill_value=0)
+        )
         medial = vs_thickness.groupby("id").agg(
             count=("count", "sum"),
             thickness_sum=("thickness_sum", "sum"),
@@ -581,9 +605,8 @@ class Sheetness(ComputeConfigMixin):
                 {
                     "Volume (nm^3)": per_object["voxels"] * voxel_volume,
                     "Surface Area (nm^2)": per_object["area"],
-                    "Mean Sheetness": covered["sheetness_sum"] / covered["voxels"],
-                    "Mean Surface Sheetness": covered["sheetness_area_sum"] / covered["area"],
-                    "Unreached Volume (nm^3)": (per_object["voxels"] - covered["voxels"]) * voxel_volume,
+                    "Mean Sheetness": per_object["sheetness_sum"] / per_object["voxels"],
+                    "Mean Surface Sheetness": per_object["sheetness_area_sum"] / per_object["area"],
                     "Medial Surface Voxels": medial["count"].astype(np.int64),
                     "Mean Thickness (nm)": mean_thickness,
                     "Thickness Std (nm)": np.sqrt(
@@ -594,7 +617,6 @@ class Sheetness(ComputeConfigMixin):
         summary.index.name = "Object ID"
         summary.to_csv(f"{self.csv_path}/{self.name}.csv")
 
-        histograms = histograms[histograms["level"] > 0]
         pd.DataFrame(
             {
                 "Object ID": histograms["id"].to_numpy(),

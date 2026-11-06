@@ -98,7 +98,10 @@ Each other voxel takes the mean sheetness of its nearest medial-surface voxels b
 geodesic distance within its object. Thickness is twice a medial-surface voxel's
 distance to the nearest voxel outside its object: within half a voxel for sheets at
 any angle, but a full voxel high for an axis-aligned sheet an odd number of voxels
-thick.
+thick. Thickness and the nearest medial-surface voxels are always exact: a block's
+read widens until they are, up to `max_padding_voxels` (default 128) on each side,
+and an object too thick for that, or one with no medial surface, stops the run with
+an error.
 
 ---
 

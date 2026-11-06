@@ -5,6 +5,8 @@ from skimage.measure import euler_number, label
 
 from cellmap_analyze.cythonizing import topological_thinning as tt
 from cellmap_analyze.process.topological_thinning import (
+    COPY,
+    RUN,
     TopologicalThinning,
     blocks_near_deletions,
     deletion_bands,
@@ -133,6 +135,69 @@ def test_blockwise_matches_whole_volume(
     thinning.thin()
     result = thinning.output_vol.read_index((0, 0, 0), SHAPE)
     assert np.array_equal(result, _whole_volume(labels, medial_surface))
+
+
+def _skips_and_retirements(shape):
+    """Along x, in blocks of 52: a ball across blocks 0 and 1 that takes
+    several passes; a small ball inside block 2, whose faces are final at
+    once; rods meeting on the face of blocks 3 and 4, which thin in the first
+    pass to a junction no iteration deletes, so those blocks never retire;
+    and, past the empty block 5, lines already one voxel thin meeting on the
+    face of blocks 6 and 7, which no pass changes."""
+    zz, yy, xx = np.indices(shape)
+    labels = np.zeros(shape, np.uint64)
+    labels[(zz - 26) ** 2 + (yy - 26) ** 2 + (xx - 52) ** 2 <= 14**2] = 1
+    labels[(zz - 26) ** 2 + (yy - 26) ** 2 + (xx - 130) ** 2 <= 3**2] = 2
+    labels[(np.abs(zz - 26) + np.abs(yy - 26) <= 1) & (xx >= 180) & (xx < 236)] = 3
+    labels[(np.abs(zz - 26) + np.abs(xx - 207) <= 1) & (yy >= 10) & (yy < 42)] = 3
+    labels[(zz == 26) & (yy == 26) & (xx >= 330) & (xx < 400)] = 4
+    labels[(zz == 26) & (xx == 363) & (yy >= 10) & (yy < 42)] = 4
+    return labels
+
+
+def test_skipped_and_retired_blocks_thin_as_the_whole_volume(tmp_path):
+    shape = (52, 52, 416)
+    labels = _skips_and_retirements(shape)
+    path = f"{tmp_path}/in.zarr/seg"
+    create_multiscale_dataset(
+        path, dtype=np.uint64, grid=make_grid(shape, VOXEL_SIZE, chunks=(13, 13, 13))
+    ).write_index((0, 0, 0), shape, labels)
+    thinning = TopologicalThinning(
+        path, f"{tmp_path}/out.zarr/thinned", block_shape_voxels=(52, 52, 52), num_workers=1
+    )
+    passes = []
+    run_pass = thinning._run_pass
+
+    def recorded(tasks, pass_index):
+        results = run_pass(tasks, pass_index)
+        passes.append(
+            {
+                "run": {i for i, action in tasks if action == RUN},
+                "copy": {i for i, action in tasks if action == COPY},
+                "done": {r["index"] for r in results if r["done"] and not r["empty"]},
+            }
+        )
+        return results
+
+    thinning._run_pass = recorded
+    thinning.thin()
+
+    later = passes[1:]
+    assert passes[0]["run"] == set(range(8))
+    # the ball runs every pass, and retires in the last
+    assert all({0, 1} <= p["run"] for p in passes) and passes[-1]["done"] == {0, 1}
+    # retired at once: copied into the other buffer, then never thinned again
+    assert 2 in passes[0]["done"] and 2 in passes[1]["copy"]
+    assert not any(2 in p["run"] for p in later)
+    # unchanged by the first pass: copied, then skipped
+    assert {6, 7} <= passes[1]["copy"] and not any(p["run"] & {6, 7} for p in later)
+    # changed by the first pass only: skipped once nothing changes near them
+    assert {3, 4} <= passes[1]["run"]
+    assert any(not p["run"] & {3, 4} for p in later)
+    assert not any(p["done"] & {3, 4, 6, 7} for p in passes)
+
+    result = thinning.output_vol.read_index((0, 0, 0), shape)
+    assert np.array_equal(result, _whole_volume(labels, False))
 
 
 def test_roi_thins_like_a_crop_of_the_dataset(tmp_path, segmentation):
