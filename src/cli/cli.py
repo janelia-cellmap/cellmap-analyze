@@ -26,7 +26,7 @@ class RunProperties:
         if multiscale is not None:
             self.multiscale = self.run_config.pop("multiscale", multiscale)
 
-    def add_multiscale(self, output_path, num_workers, filled=False):
+    def add_multiscale(self, output_path, num_workers, filled=False, downsample_method=None):
         """Pyramid the command's output, and its hole-filled copy when it made one."""
         if not self.multiscale:
             return
@@ -43,7 +43,9 @@ class RunProperties:
             if not os.path.exists(path):
                 continue
             # The output was just rewritten, so any levels beside it are stale.
-            Multiscale(path, overwrite=True, num_workers=num_workers).create_multiscale()
+            Multiscale(
+                path, downsample_method=downsample_method, overwrite=True, num_workers=num_workers
+            ).create_multiscale()
 
 
 def connected_components():
@@ -215,6 +217,41 @@ def compute_edt():
             cedt = ComputeEDT(**rp.run_config)
             cedt.calculate_edt()
             rp.add_multiscale(cedt.output_path, cedt.num_workers)
+
+
+def topological_thinning():
+    from cellmap_analyze.process.topological_thinning import TopologicalThinning
+
+    rp = RunProperties(multiscale=False)
+    with io_util.tee_streams(rp.logpath):
+        os.chdir(rp.execution_directory)
+        with io_util.TimingMessager(
+            "TopologicalThinning", logger, final_message="Complete success"
+        ):
+            thinning = TopologicalThinning(**rp.run_config)
+            thinning.thin()
+            # thinned objects are a voxel thin, which mode would lose to the background
+            rp.add_multiscale(thinning.output_path, thinning.num_workers, downsample_method="mode_suppress_zero")
+
+
+def sheetness():
+    from cellmap_analyze.analyze.sheetness import Sheetness
+
+    rp = RunProperties(multiscale=False)
+    with io_util.tee_streams(rp.logpath):
+        os.chdir(rp.execution_directory)
+        with io_util.TimingMessager(
+            "Sheetness", logger, final_message="Complete success"
+        ):
+            sheet = Sheetness(**rp.run_config)
+            sheet.calculate()
+            # values on thin ER and on the medial surface, which zeros would dilute
+            for path in (
+                sheet.output_path,
+                f"{sheet.output_path}_at_medial_surface",
+                f"{sheet.output_path}_thickness",
+            ):
+                rp.add_multiscale(path, sheet.num_workers, downsample_method="mean_suppress_zero")
 
 
 def split_narrow_bridges():

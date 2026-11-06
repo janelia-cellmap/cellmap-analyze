@@ -1117,6 +1117,7 @@ class SplitNarrowBridges(ComputeConfigMixin):
                     return dask_util.compute_blockwise_partitions(
                         len(_ids), workers, self.compute_args, logger, _label,
                         _wrapper,
+                        randomize=False,  # keep the wave's heaviest-first order
                         merge_info=(SplitNarrowBridges._merge_split_results, _merge),
                         config=config,
                     )

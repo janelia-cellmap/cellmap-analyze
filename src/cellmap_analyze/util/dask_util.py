@@ -1,6 +1,5 @@
 from contextlib import contextmanager
 import os
-import random
 import dask
 from dask.distributed import Client
 import getpass
@@ -71,7 +70,6 @@ import dask.bag as db
 from cellmap_analyze.util.io_util import TimingMessager
 from tqdm import tqdm
 
-import random
 import dask.bag as db
 
 from functools import wraps
@@ -510,6 +508,44 @@ def balanced_batches(items, max_batches):
     return [bin_items for _, bin_items in batches]
 
 
+def block_partitions(num_blocks, num_workers, costs=None, seed=0):
+    """Block indices as one list per dask partition, spread so the partitions
+    take about as long as each other.
+
+    In the contiguous runs ``db.range`` makes, the blocks of a dataset's dense
+    regions land in the same few partitions, which run long after the rest
+    are done. Without ``costs`` the blocks are shuffled instead, the same way
+    on every run. With ``costs``, an estimate per block such as its foreground
+    voxels, they are packed into more, smaller partitions, heaviest first, so
+    that run with ``compute_partitions`` the slowest blocks start first rather
+    than last.
+    """
+    if num_blocks == 0:
+        return []
+    if costs is None:
+        npart = guesstimate_npartitions(num_blocks, num_workers)
+        order = np.random.default_rng(seed).permutation(num_blocks)
+        return [part.tolist() for part in np.array_split(order, npart)]
+    npart = guesstimate_npartitions(num_blocks, num_workers, scaling=16)
+    return balanced_batches(enumerate(costs), npart)
+
+
+def compute_partitions(partitions, partition_fn, *args, compute_args=None):
+    """``partition_fn(partition, *args)`` for each of ``partitions``, their
+    lists of results concatenated.
+
+    A distributed cluster starts them in order, which a bag's
+    ``map_partitions`` does not promise: one task per partition, each with
+    a priority.
+    """
+    tasks = []
+    for rank, partition in enumerate(partitions):
+        with dask.annotate(priority=len(partitions) - rank):
+            tasks.append(dask.delayed(partition_fn)(partition, *args))
+    results = dask.compute(*tasks, **(compute_args or {}))
+    return [result for partition in results for result in partition]
+
+
 def plan_memory_waves(
     items,
     requested_workers,
@@ -840,26 +876,25 @@ def compute_blockwise_partitions(
     msg: str,
     fn,
     *fn_args,
-    randomize: bool = False,
+    randomize: bool = True,
     merge_info=None,
     config: dict | None = None,
     **fn_kwargs,
 ):
     """
-    Partition 0..num_blocks-1 across num_workers, optionally randomize,
-    collect all raw partitions onto the driver, shut the cluster down,
-    then merge locally with a tqdm progress bar.
+    Partition 0..num_blocks-1 across num_workers, shuffled unless
+    ``randomize`` is False (see ``block_partitions``), collect all raw
+    partitions onto the driver, shut the cluster down, then merge locally
+    with a tqdm progress bar.
     """
 
-    # STEP 1) Build & (optionally) shuffle the bag
-    npart = guesstimate_npartitions(num_blocks, num_workers)
-    bag = db.range(num_blocks, npartitions=npart)
+    # STEP 1) Build the bag, spreading the costly blocks across partitions
     if randomize:
-        bag = (
-            bag.map(lambda i: (random.random(), i))
-            .repartition(npartitions=npart)
-            .map(lambda pair: pair[1])
-        )
+        partitions = block_partitions(num_blocks, num_workers)
+        bag = db.from_sequence(partitions, partition_size=1).flatten()
+    else:
+        npart = guesstimate_npartitions(num_blocks, num_workers)
+        bag = db.range(num_blocks, npartitions=npart)
 
     # STEP 2) Map your work fn over each partition
     if merge_info is None:

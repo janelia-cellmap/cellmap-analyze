@@ -1,6 +1,6 @@
 [project]
 name = "cellmap-analyze"
-version = "0.6.3"
+version = "0.7.0"
 description = "Code to perform analysis on segmentations like those produced by CellMap"
 readme = "README.md"
 license-files = ["LICENSE"]
@@ -53,6 +53,8 @@ fit-lines-to-segmentations = "cli.cli:fit_lines_to_segmentations"
 assign-to-organelles = "cli.cli:assign_to_organelles"
 split-narrow-bridges = "cli.cli:split_narrow_bridges"
 compute-edt = "cli.cli:compute_edt"
+topological-thinning = "cli.cli:topological_thinning"
+sheetness = "cli.cli:sheetness"
 multiscale = "cli.cli:multiscale"
 
 [tool.setuptools]

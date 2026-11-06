@@ -23,6 +23,20 @@ extensions = [
         include_dirs=[np.get_include()],
         extra_compile_args=["-std=c++11"],
     ),
+    Extension(
+        "cellmap_analyze.cythonizing.topological_thinning",
+        ["src/cellmap_analyze/cythonizing/topological_thinning.pyx"],
+        language="c++",
+        include_dirs=[np.get_include()],
+        extra_compile_args=["-std=c++11", "-O3"],
+    ),
+    Extension(
+        "cellmap_analyze.cythonizing.geodesic",
+        ["src/cellmap_analyze/cythonizing/geodesic.pyx"],
+        language="c++",
+        include_dirs=[np.get_include()],
+        extra_compile_args=["-std=c++11", "-O3"],
+    ),
 ]
 
 setup(
