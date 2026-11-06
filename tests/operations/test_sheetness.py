@@ -10,7 +10,6 @@ from cellmap_analyze.analyze.sheetness import (
     _widen,
     from_level,
     hessian_sheetness,
-    medial_balls,
     to_level,
 )
 from cellmap_analyze.cythonizing.geodesic import nearest_source_values
@@ -241,45 +240,3 @@ def test_reads_widen_as_far_as_memory_allows():
         _widen(np.array([8, 8, 8]), block, bytes_per_voxel, None, "", memory=memory)
     with pytest.raises(RuntimeError, match="max_padding_voxels=8"):
         _widen(np.array([8, 8, 8]), block, bytes_per_voxel, 8, "", memory=10**12)
-
-
-def test_medial_balls_are_strictly_within_their_radius():
-    covered = medial_balls((5, 5, 5), [[2, 2, 2]], np.array([1.5 * 8]), VOXEL_SIZE)
-    # the centre, its 6 face and 12 edge neighbours; the corners are sqrt(3) away
-    assert covered.sum() == 19
-    # radius 8: only the centre, since its face neighbours are exactly 8 away
-    assert medial_balls((5, 5, 5), [[2, 2, 2]], np.array([8.0]), VOXEL_SIZE).sum() == 1
-
-
-def test_reconstruction_is_the_union_of_medial_balls(datasets, tmp_path):
-    tmp, labels = datasets
-    sheetness = Sheetness(
-        f"{tmp}/in.zarr/er",
-        f"{tmp}/in.zarr/er_medial_surface",
-        f"{tmp_path}/out.zarr/er_sheetness",
-        f"{tmp_path}/csv",
-        scale_steps=SCALE_STEPS,
-        reconstruction=True,
-        block_shape_voxels=(32, 40, 40),
-        num_workers=1,
-    )
-    sheetness.calculate()
-    reconstruction = open_dataset(f"{tmp_path}/out.zarr/er_sheetness_reconstruction/s0").read_index(
-        (0, 0, 0), SHAPE
-    )
-    medial = open_dataset(f"{tmp}/in.zarr/er_medial_surface/s0").read_index((0, 0, 0), SHAPE)
-    thickness = open_dataset(f"{tmp_path}/out.zarr/er_sheetness_thickness/s0").read_index(
-        (0, 0, 0), SHAPE
-    )
-    centres = np.argwhere(medial > 0)
-    expected = medial_balls(SHAPE, centres, thickness[tuple(centres.T)] / 2, VOXEL_SIZE)
-    # blockwise, the balls that reach across blocks are all drawn
-    assert np.array_equal(reconstruction > 0, expected)
-    # and each ball stays in its own object
-    assert np.array_equal(reconstruction[expected], labels[expected])
-
-    summary = pd.read_csv(f"{tmp_path}/csv/er_sheetness.csv", index_col=0)
-    for id_value in (1, 2):
-        reconstructed = (reconstruction == id_value).sum() * np.prod(VOXEL_SIZE)
-        assert summary.loc[id_value, "Reconstructed Volume (nm^3)"] == reconstructed
-        assert reconstructed < summary.loc[id_value, "Volume (nm^3)"]
