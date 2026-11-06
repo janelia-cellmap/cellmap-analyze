@@ -22,16 +22,15 @@ logger = logging.getLogger(__name__)
 
 # Methods that reduce a whole window, so a level-k voxel is centred on the
 # window of finer voxels it summarises (wa.level_placement): tensorstore's
-# downsample methods, and nonzero_mode.
-_BLOCK_METHODS = ("mode", "mean", "median", "min", "max", "nonzero_mode")
+# downsample methods, and those below that suppress zero.
+_BLOCK_METHODS = ("mode", "mean", "median", "min", "max", "mode_suppress_zero", "mean_suppress_zero")
 _DRIVERS = {"zarr2": "zarr", "zarr3": "zarr3"}
 
 
-def nonzero_mode(data, factors):
-    """``data`` downsampled by ``factors``, each window taking its most common
-    non-zero label (the smallest on a tie) and 0 only if it has none, so thin
-    objects such as skeletons and medial surfaces survive. A window past the
-    edge of ``data`` is summarised from the voxels it has."""
+def _windows(data, factors):
+    """The windows of ``data`` that each level voxel summarises, one per row,
+    and the level's shape. A window past the edge of ``data`` is padded with
+    zeros, which the methods below ignore."""
     factors = np.array(factors)
     shape = -(-np.array(data.shape) // factors)
     padded = np.zeros(tuple(shape * factors), data.dtype)
@@ -39,12 +38,36 @@ def nonzero_mode(data, factors):
     windows = padded.reshape(
         shape[0], factors[0], shape[1], factors[1], shape[2], factors[2]
     ).transpose(0, 2, 4, 1, 3, 5).reshape(-1, int(factors.prod()))
+    return windows, tuple(shape)
+
+
+def mode_suppress_zero(data, factors):
+    """``data`` downsampled by ``factors``, each window taking its most common
+    non-zero label (the smallest on a tie) and 0 only if it has none, as
+    neuclease's ``flat_mode_except_zero`` does, so thin objects such as
+    skeletons and medial surfaces survive."""
+    windows, shape = _windows(data, factors)
     windows = np.sort(windows, axis=1)
     counts = np.stack(
         [(windows == windows[:, [j]]).sum(axis=1) for j in range(windows.shape[1])], axis=1
     )
     counts[windows == 0] = 0
-    return windows[np.arange(len(windows)), counts.argmax(axis=1)].reshape(tuple(shape))
+    return windows[np.arange(len(windows)), counts.argmax(axis=1)].reshape(shape)
+
+
+def mean_suppress_zero(data, factors):
+    """``data`` downsampled by ``factors``, each window taking the mean of its
+    non-zero voxels (rounded for integers) and 0 only if it has none, so
+    values held only on thin objects are neither lost nor diluted."""
+    windows, shape = _windows(data, factors)
+    counts = np.count_nonzero(windows, axis=1)
+    mean = windows.sum(axis=1, dtype=np.float64) / np.maximum(counts, 1)
+    if np.issubdtype(data.dtype, np.integer):
+        mean = np.rint(mean)
+    return mean.astype(data.dtype).reshape(shape)
+
+
+_SUPPRESS_ZERO = {"mode_suppress_zero": mode_suppress_zero, "mean_suppress_zero": mean_suppress_zero}
 
 
 def _level_index(path):
@@ -57,9 +80,9 @@ class Multiscale(ComputeConfigMixin):
 
     Each level is computed blockwise from the previous one with tensorstore's
     ``downsample`` driver: by default ``mode`` for integer data, which keeps
-    label ids intact, and ``mean`` for floats. ``nonzero_mode`` instead takes
-    each window's most common non-zero label, so thin objects that ``mode``
-    would lose to the background survive. Levels are written until one
+    label ids intact, and ``mean`` for floats. ``mode_suppress_zero`` and
+    ``mean_suppress_zero`` leave zeros out of each window, so thin objects
+    that ``mode`` would lose to the background, and the values on them, survive. Levels are written until one
     fits in a single chunk, or ``num_levels`` of them. An axis is only halved
     once its voxel size is within 1.5x of the finest (``wa.level_factors``),
     so anisotropic data moves toward isotropic first.
@@ -153,8 +176,8 @@ class Multiscale(ComputeConfigMixin):
         begin = [b * f for b, f in zip(block.begin, factors)]
         end = [min(e * f, n) for e, f, n in zip(block.end, factors, source.shape)]
         data = source.read_index(begin, end, retries=wa.Retry())
-        if method == "nonzero_mode":
-            data = nonzero_mode(data, factors)
+        if method in _SUPPRESS_ZERO:
+            data = _SUPPRESS_ZERO[method](data, factors)
         else:
             data = ts.downsample(ts.array(data), list(factors), method).read().result()
         # Plain tensorstore: the level is not listed in the group until it is complete.

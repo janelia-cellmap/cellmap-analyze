@@ -5,7 +5,7 @@ import pytest
 import worldarray as wa
 import zarr
 
-from cellmap_analyze.process.multiscale import Multiscale, nonzero_mode
+from cellmap_analyze.process.multiscale import Multiscale, mean_suppress_zero, mode_suppress_zero
 from cellmap_analyze.util.grid_util import grid_of, make_grid
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset, open_dataset
 from tests.test_utils import read_all
@@ -130,25 +130,25 @@ def test_existing_levels_need_overwrite(pyramid):
     assert np.array_equal(read_all(f"{path}/s2"), expected[2])
 
 
-def test_nonzero_mode_takes_the_most_common_label_in_each_window():
+def test_mode_suppress_zero_takes_the_most_common_label_in_each_window():
     data = np.zeros((4, 4, 3), np.uint64)
     data[0, 0, 0] = 5  # alone among zeros
     data[0, 0, 2] = 9  # in a window cut short by the edge
     data[2, 2:, :2] = [[3, 7], [7, 3]]  # a tie: the smaller label
     data[3, 2, 0] = 7  # breaks it
-    s1 = nonzero_mode(data, (2, 2, 2))
+    s1 = mode_suppress_zero(data, (2, 2, 2))
     assert s1.shape == (2, 2, 2)
     assert s1[0, 0, 0] == 5 and s1[0, 0, 1] == 9 and s1[1, 1, 0] == 7
     assert np.count_nonzero(s1) == 3
     data[3, 2, 0] = 0
-    assert nonzero_mode(data, (2, 2, 2))[1, 1, 0] == 3
+    assert mode_suppress_zero(data, (2, 2, 2))[1, 1, 0] == 3
 
 
-def test_nonzero_mode_keeps_one_voxel_thin_objects(tmp_path, voxel_size):
+def test_mode_suppress_zero_keeps_one_voxel_thin_objects(tmp_path, voxel_size):
     data = np.zeros((16, 16, 16), np.uint8)
     data[5, 2:14, 2:14] = 1  # a sheet
     data[10:14, 9, 3] = 2  # a line
-    for method in ("mode", "nonzero_mode"):
+    for method in ("mode", "mode_suppress_zero"):
         path = f"{tmp_path}/{method}.zarr/thin"
         _write(path, data, voxel_size, chunks=(4, 4, 4))
         Multiscale(path, downsample_method=method, num_workers=1).create_multiscale()
@@ -157,3 +157,15 @@ def test_nonzero_mode_keeps_one_voxel_thin_objects(tmp_path, voxel_size):
             assert not any(np.any(level) for level in levels)
         else:
             assert all(set(np.unique(level)) == {0, 1, 2} for level in levels)
+
+
+def test_mean_suppress_zero_averages_only_the_values_present():
+    floats = np.zeros((2, 2, 3), np.float32)
+    floats[0, 0, 0], floats[1, 1, 1] = 0.25, 0.75  # with six zeros
+    floats[0, 0, 2] = 0.5  # in a window cut short by the edge
+    s1 = mean_suppress_zero(floats, (2, 2, 2))
+    assert s1.shape == (1, 1, 2) and np.allclose(s1, [[[0.5, 0.5]]])
+    levels = np.zeros((2, 2, 2), np.uint8)
+    levels[0, 0, :] = [10, 13]  # integers round
+    assert mean_suppress_zero(levels, (2, 2, 2))[0, 0, 0] == 12
+    assert mean_suppress_zero(np.zeros((2, 2, 2), np.uint8), (2, 2, 2))[0, 0, 0] == 0

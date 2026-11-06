@@ -231,7 +231,7 @@ def topological_thinning():
             thinning = TopologicalThinning(**rp.run_config)
             thinning.thin()
             # thinned objects are a voxel thin, which mode would lose to the background
-            rp.add_multiscale(thinning.output_path, thinning.num_workers, downsample_method="nonzero_mode")
+            rp.add_multiscale(thinning.output_path, thinning.num_workers, downsample_method="mode_suppress_zero")
 
 
 def sheetness():
@@ -245,7 +245,13 @@ def sheetness():
         ):
             sheet = Sheetness(**rp.run_config)
             sheet.calculate()
-            rp.add_multiscale(sheet.output_path, sheet.num_workers)
+            # values on thin ER and on the medial surface, which zeros would dilute
+            for path in (
+                sheet.output_path,
+                f"{sheet.output_path}_at_medial_surface",
+                f"{sheet.output_path}_thickness",
+            ):
+                rp.add_multiscale(path, sheet.num_workers, downsample_method="mean_suppress_zero")
 
 
 def split_narrow_bridges():
