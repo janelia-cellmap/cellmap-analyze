@@ -4,32 +4,39 @@ on:
   push:
     tags:
       - 'v*'
+  # build (but never publish) the distributions when packaging changes
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - 'setup.py'
+      - 'pyproject.toml'
 
 jobs:
   build-linux:
     runs-on: ubuntu-latest
+    # The manylinux toolchain links C++ extensions against only the old
+    # libstdc++ symbols a manylinux wheel may use; the runner's own compiler
+    # does not.
+    container: quay.io/pypa/manylinux_2_28_x86_64
+    env:
+      PYTHON: /opt/python/cp312-cp312/bin/python
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.12'
+        uses: actions/checkout@v4
 
       - name: Upgrade pip & install build tools
         run: |
-          python -m pip install --upgrade pip
-          pip install numpy Cython setuptools wheel build auditwheel
+          $PYTHON -m pip install --upgrade pip
+          $PYTHON -m pip install build
 
       - name: Build sdist & wheel
-        run: python -m build
+        run: $PYTHON -m build
 
-      - name: Repair Linux wheels for manylinux2014
+      - name: Repair Linux wheels for manylinux_2_28
         run: |
           for whl in dist/*.whl; do
             auditwheel repair "$whl" \
-              --plat manylinux2014_x86_64 \
+              --plat manylinux_2_28_x86_64 \
               -w dist/
           done
 
@@ -71,6 +78,7 @@ jobs:
     needs:
       - build-linux
       - build-macos
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - name: Download Linux distributions
