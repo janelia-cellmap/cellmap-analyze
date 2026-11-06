@@ -189,3 +189,39 @@ def test_reads_that_cannot_be_made_exact_fail(tmp_path, medial_surface, problem)
     )
     with pytest.raises(RuntimeError, match=problem):
         sheetness.calculate()
+
+
+def test_blocks_without_medial_surface_still_count_their_voxels(tmp_path):
+    # a slab 11 voxels thick whose medial surface (z = 17) lies in the first
+    # block only, though the slab reaches into the second
+    labels = np.zeros((40, 40, 40), np.uint64)
+    labels[12:23, 5:35, 5:35] = 1
+    _write(f"{tmp_path}/in.zarr/seg", labels)
+    _write(f"{tmp_path}/in.zarr/medial", _medial_surface(labels))
+    sheetness = Sheetness(
+        f"{tmp_path}/in.zarr/seg",
+        f"{tmp_path}/in.zarr/medial",
+        f"{tmp_path}/out.zarr/sheetness",
+        f"{tmp_path}/csv",
+        scale_steps=1,
+        block_shape_voxels=(20, 40, 40),
+        num_workers=1,
+    )
+    result = Sheetness.medial_surface_block(
+        1,
+        sheetness.grid,
+        sheetness.block_shape,
+        sheetness.halo,
+        sheetness.segmentation_vol,
+        sheetness.medial_surface_vol,
+        sheetness.at_medial_surface_vol,
+        sheetness.thickness_vol,
+        sheetness.scale_steps,
+        sheetness.hessian,
+        sheetness.thickness_bin_nm,
+        sheetness.max_padding_voxels,
+    )
+    assert result["voxels"] == (labels[20:] > 0).sum() and result["vs_thickness"] is None
+    sheetness.calculate()
+    summary = pd.read_csv(f"{tmp_path}/csv/sheetness.csv", index_col=0)
+    assert summary.loc[1, "Volume (nm^3)"] == (labels > 0).sum() * np.prod(VOXEL_SIZE)

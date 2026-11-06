@@ -51,7 +51,7 @@ it, as `multiscale` does, so every output is ready to view. Set
 
 ## Anisotropic data
 
-All operations handle anisotropic voxel sizes (e.g. `(8, 8, 32)` nm in ZYX). Physical-unit parameters like `minimum_volume_nm_3`, `contact_distance_nm`, and `gaussian_smoothing_sigma_nm` are automatically converted to the appropriate per-axis voxel units. When two datasets have different voxel sizes, they are resampled onto the same voxel grid, using nearest-neighbor interpolation for labels; raw intensities in `measure` are block-averaged when read at a coarser voxel size.
+All operations handle anisotropic voxel sizes (e.g. `(8, 8, 32)` nm in ZYX). Physical-unit parameters like `minimum_volume_nm_3`, `contact_distance_nm`, and `gaussian_smoothing_sigma_nm` are automatically converted to the appropriate per-axis voxel units. When two datasets have different voxel sizes, they are resampled onto the same voxel grid, using nearest-neighbor interpolation for labels; raw intensities in `measure` are block-averaged when read at a coarser voxel size. `topological-thinning` is the exception: it thins on the voxel grid itself, so on anisotropic data its skeletons and medial surfaces follow the voxels rather than physical distance.
 
 A `roi` in a run-config is in nm, `["z_start:z_end", "y_start:y_end", "x_start:x_end"]`, and selects the voxels whose centres lie inside it; the output covers just those voxels.
 

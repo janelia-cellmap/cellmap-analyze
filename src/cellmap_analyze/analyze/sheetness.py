@@ -364,7 +364,11 @@ class Sheetness(ComputeConfigMixin):
         medial = medial_surface_vol.read_onto(grid, block.begin, block.end)
         local = np.argwhere(medial > 0)
         if len(local) == 0:
-            return None
+            # its object voxels, if any, still cost the next step
+            voxels = int(np.count_nonzero(segmentation_vol.read_onto(grid, block.begin, block.end)))
+            if voxels == 0:
+                return None
+            return {"index": block_index, "voxels": voxels, "max_radius_nm": 0.0, "vs_thickness": None}
         ids = medial[tuple(local.T)].astype(np.uint64)
         voxel_size = np.array(grid.voxel_size, dtype=float)
         labels = segmentation_vol.read_onto(grid, block.read_begin, block.read_end)
@@ -575,7 +579,7 @@ class Sheetness(ComputeConfigMixin):
         voxel_volume = float(np.prod(self.voxel_size))
         empty = pd.DataFrame(columns=["id", "level"])
 
-        frames = [r["vs_thickness"] for r in medial_results]
+        frames = [r["vs_thickness"] for r in medial_results if r["vs_thickness"] is not None]
         vs_thickness = (
             pd.concat(frames).groupby(["id", "level", "thickness_bin"], as_index=False).sum()
             if frames
