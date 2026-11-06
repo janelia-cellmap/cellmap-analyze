@@ -7,6 +7,7 @@ from scipy.ndimage import gaussian_filter
 from cellmap_analyze.analyze.sheetness import (
     Sheetness,
     _gaussian_derivative_hessians,
+    _widen,
     from_level,
     hessian_sheetness,
     to_level,
@@ -225,3 +226,17 @@ def test_blocks_without_medial_surface_still_count_their_voxels(tmp_path):
     sheetness.calculate()
     summary = pd.read_csv(f"{tmp_path}/csv/sheetness.csv", index_col=0)
     assert summary.loc[1, "Volume (nm^3)"] == (labels > 0).sum() * np.prod(VOXEL_SIZE)
+
+
+def test_reads_widen_as_far_as_memory_allows():
+    block, bytes_per_voxel = (20, 20, 20), 10
+    # half of 1 MB holds a read 36 voxels wide, so 8 voxels on each side
+    memory = 2 * 36**3 * bytes_per_voxel
+    wider = _widen(np.array([2, 2, 2]), block, bytes_per_voxel, None, "", memory=memory)
+    assert np.array_equal(wider, [4, 4, 4])
+    wider = _widen(np.array([6, 6, 6]), block, bytes_per_voxel, None, "", memory=memory)
+    assert np.array_equal(wider, [8, 8, 8])
+    with pytest.raises(RuntimeError, match="half of the worker's"):
+        _widen(np.array([8, 8, 8]), block, bytes_per_voxel, None, "", memory=memory)
+    with pytest.raises(RuntimeError, match="max_padding_voxels=8"):
+        _widen(np.array([8, 8, 8]), block, bytes_per_voxel, 8, "", memory=10**12)

@@ -216,14 +216,53 @@ def _distance_at(labels, points, voxel_size):
     return d, bool(np.all(d <= outside))
 
 
-def _widen(padding, max_padding, problem):
-    """``padding`` (voxels per axis) doubled, up to ``max_padding``. Raises
-    once it can grow no further, since the result would not be exact."""
-    wider = np.maximum(padding, np.minimum(2 * np.asarray(padding), max_padding))
+def _worker_memory_bytes():
+    """The memory this task's dask worker may use, or outside a worker the
+    memory the machine has available."""
+    try:
+        from distributed import get_worker
+
+        limit = get_worker().memory_manager.memory_limit
+        if limit:
+            return int(limit)
+    except (ImportError, ValueError):
+        pass
+    import psutil
+
+    return int(psutil.virtual_memory().available)
+
+
+def _widen(padding, block_shape, bytes_per_voxel, max_padding, problem, memory=None):
+    """``padding`` (voxels per axis) doubled, as far as a read of the block
+    with it fits in half the worker's ``memory`` (and within ``max_padding``
+    voxels, if given). Raises once it can grow no further, since the result
+    would not be exact."""
+    padding = np.asarray(padding)
+    wider = 2 * padding
+    if max_padding is not None:
+        wider = np.maximum(padding, np.minimum(wider, max_padding))
+    memory = _worker_memory_bytes() if memory is None else memory
+
+    def fits(step):
+        p = np.minimum(padding + step, wider)
+        return float(np.prod(np.array(block_shape) + 2 * p)) * bytes_per_voxel <= memory / 2
+
+    # the largest step towards ``wider`` that fits
+    low, high = 0, int(np.max(wider - padding))
+    while low < high:
+        mid = (low + high + 1) // 2
+        low, high = (mid, high) if fits(mid) else (low, mid - 1)
+    wider = np.minimum(padding + low, wider)
     if np.array_equal(wider, padding):
+        limit = (
+            f"max_padding_voxels={max_padding}"
+            if max_padding is not None and np.all(2 * padding > max_padding)
+            else f"half of the worker's {memory / 1e9:.1f} GB"
+        )
         raise RuntimeError(
-            f"{problem} The read can't grow past max_padding_voxels={max_padding}: run at a "
-            f"coarser resolution or raise max_padding_voxels (bigger reads need more memory)."
+            f"{problem} The read, now {tuple(int(p) for p in padding)} voxels on each side, "
+            f"can't grow within {limit}: run at a coarser resolution, give workers more "
+            f"memory or use smaller blocks."
         )
     return wider
 
@@ -264,9 +303,10 @@ class Sheetness(ComputeConfigMixin):
        approximates the object, missing some surface voxels and taking in a
        few background ones).
 
-    Both steps widen a block's read, up to ``max_padding_voxels`` on each side,
-    until its distances are exact; an object too thick for that, or one with
-    no medial surface, stops the run with an error.
+    Both steps widen a block's read until its distances are exact, as far as
+    the read fits in half its worker's memory (and ``max_padding_voxels`` on
+    each side, if given); an object too thick for that, or one with no medial
+    surface, stops the run with an error.
 
     Writes ``output_path``, the sheetness of every object voxel, stored as
     ``1 + round(254 * sheetness)`` with 0 outside objects,
@@ -294,7 +334,7 @@ class Sheetness(ComputeConfigMixin):
         scale_steps=12,
         hessian="exact",
         thickness_bin_nm=8,
-        max_padding_voxels=128,
+        max_padding_voxels=None,
         block_shape_voxels=None,
         block_multiplier=4,
         roi=None,
@@ -332,7 +372,7 @@ class Sheetness(ComputeConfigMixin):
         self.hessian = hessian
         self.halo = sheetness_halo(self.voxel_size, self.scale_steps)
         self.thickness_bin_nm = float(thickness_bin_nm)
-        self.max_padding_voxels = int(max_padding_voxels)
+        self.max_padding_voxels = None if max_padding_voxels is None else int(max_padding_voxels)
 
         self.sheetness_vol = create_multiscale_dataset(
             self.output_path, dtype=np.uint8, grid=self.grid
@@ -390,9 +430,11 @@ class Sheetness(ComputeConfigMixin):
         while not exact:
             # an object thicker than the halo: widen the read until the
             # distances are exact
+            # the labels and their distance transform
             padding = _widen(
-                padding, max_padding, f"Block {block_index}: a medial-surface voxel is"
-                " farther from its object's edge than the read reaches.",
+                padding, block_shape, labels.dtype.itemsize + 8, max_padding,
+                f"Block {block_index}: a medial-surface voxel is farther from its object's"
+                " edge than the read reaches.",
             )
             wide = create_block_from_index(grid, block_index, padding=padding, block_shape=block_shape)
             wide_labels = segmentation_vol.read_onto(grid, wide.read_begin, wide.read_end)
@@ -452,7 +494,9 @@ class Sheetness(ComputeConfigMixin):
 
         # Widen the read until every voxel's nearest medial-surface voxel is
         # nearer than anything outside it.
-        padding = np.minimum(paddings[block_index], max_padding)
+        padding = np.array(paddings[block_index])
+        if max_padding is not None:
+            padding = np.minimum(padding, max_padding)
         while True:
             padded = create_block_from_index(grid, block_index, padding=padding, block_shape=block_shape)
             padded_labels = np.ascontiguousarray(
@@ -467,11 +511,13 @@ class Sheetness(ComputeConfigMixin):
             distance, sheetness = distance[padded.inner], sheetness[padded.inner]
             if np.all(distance[inside] <= np.min(padding * voxel_size)):
                 break
+            # the labels and medial surface, the values read on it, and the
+            # geodesic search's distances, sums, counts and output
             padding = _widen(
-                padding, max_padding, f"Block {block_index}: an object voxel's nearest"
-                " medial-surface voxel, by paths through its object, is farther than the"
-                " read reaches, or its object has none (was the medial surface thinned"
-                " from this segmentation?).",
+                padding, block_shape, 2 * padded_labels.dtype.itemsize + 40, max_padding,
+                f"Block {block_index}: an object voxel's nearest medial-surface voxel, by"
+                " paths through its object, is farther than the read reaches, or its object"
+                " has none (was the medial surface thinned from this segmentation?).",
             )
 
         level = np.where(inside, to_level(np.nan_to_num(sheetness)), 0).astype(np.uint8)
