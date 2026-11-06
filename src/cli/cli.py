@@ -252,6 +252,12 @@ def sheetness():
                 f"{sheet.output_path}_thickness",
             ):
                 rp.add_multiscale(path, sheet.num_workers, downsample_method="mean_suppress_zero")
+            # written only with reconstruction: true
+            rp.add_multiscale(
+                f"{sheet.output_path}_reconstruction",
+                sheet.num_workers,
+                downsample_method="mode_suppress_zero",
+            )
 
 
 def split_narrow_bridges():

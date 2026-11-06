@@ -216,6 +216,30 @@ def _distance_at(labels, points, voxel_size):
     return d, bool(np.all(d <= outside))
 
 
+def medial_balls(shape, centres, radii, voxel_size):
+    """Which voxels of an array of ``shape`` lie strictly within a ball around
+    one of ``centres`` (voxel indices in it) of radius ``radii`` (nm). A
+    medial-surface voxel's ball, of radius its distance to the nearest voxel
+    outside its object, holds only voxels of its object."""
+    covered = np.zeros(shape, bool)
+    voxel_size = np.asarray(voxel_size, dtype=float)
+    centres = np.asarray(centres).reshape(-1, 3)
+    for r in np.unique(radii):
+        reach = np.floor(r / voxel_size).astype(int)
+        offsets = np.indices(tuple(2 * reach + 1)).reshape(3, -1).T - reach
+        # strictly within, allowing for the float32 the radii were stored in
+        offsets = offsets[((offsets * voxel_size) ** 2).sum(axis=1) < r**2 * (1 - 1e-6)]
+        if len(offsets) == 0:
+            continue
+        mine = centres[radii == r]
+        step = max(1, 2_000_000 // len(offsets))
+        for i in range(0, len(mine), step):
+            points = (mine[i : i + step, None, :] + offsets[None]).reshape(-1, 3)
+            points = points[np.all((points >= 0) & (points < shape), axis=1)]
+            covered[tuple(points.T)] = True
+    return covered
+
+
 def _worker_memory_bytes():
     """The memory this task's dask worker may use, or outside a worker the
     memory the machine has available."""
@@ -320,6 +344,12 @@ class Sheetness(ComputeConfigMixin):
     - ``{name}_vs_thickness.csv``: medial-surface voxels by sheetness and
       thickness bin (COSEM's ``sheetnessVsThicknessHistogram``).
 
+    With ``reconstruction``, it also rebuilds each object from its medial
+    surface as a check: ``{output_path}_reconstruction`` holds the voxels
+    within a medial-surface voxel's ball, its thickness wide, labelled by
+    object, and ``{name}.csv`` their volume. A ball holds only voxels of its
+    object, so what it misses is detail the medial surface lost.
+
     Surface area counts voxel faces against other labels, as ``Measure``
     does. The scales are in voxels, so compare datasets at the same
     resolution.
@@ -335,6 +365,7 @@ class Sheetness(ComputeConfigMixin):
         hessian="exact",
         thickness_bin_nm=8,
         max_padding_voxels=None,
+        reconstruction=False,
         block_shape_voxels=None,
         block_multiplier=4,
         roi=None,
@@ -383,6 +414,13 @@ class Sheetness(ComputeConfigMixin):
         self.thickness_vol = create_multiscale_dataset(
             f"{self.output_path}_thickness", dtype=np.float32, grid=self.grid
         )
+        self.reconstruction_vol = None
+        if reconstruction:
+            self.reconstruction_vol = create_multiscale_dataset(
+                f"{self.output_path}_reconstruction",
+                dtype=self.segmentation_vol.dtype,
+                grid=self.grid,
+            )
 
     @staticmethod
     def medial_surface_block(
@@ -480,9 +518,13 @@ class Sheetness(ComputeConfigMixin):
         at_medial_surface_vol,
         sheetness_vol,
         max_padding,
+        thickness_vol=None,
+        reconstruction_vol=None,
     ):
         """Sheetness of a block's voxels from their nearest medial-surface
-        voxels, and its volume and surface area by sheetness."""
+        voxels, and its volume and surface area by sheetness; with
+        ``reconstruction_vol``, also its voxels within a medial-surface voxel's
+        ball."""
         block = create_block_from_index(grid, block_index, block_shape=block_shape)
         begin, end = np.array(block.begin), np.array(block.end)
         shelled = segmentation_vol.read_onto(grid, begin - 1, end + 1)
@@ -538,8 +580,29 @@ class Sheetness(ComputeConfigMixin):
         unique, counts, (area_sum, value_sum, value_area_sum) = _group_sums(
             np.stack([ids, levels], axis=1), area, value, value * area
         )
+        result = {"index": block_index}
+
+        if reconstruction_vol is not None:
+            if np.any(padding < np.array(paddings[block_index])):
+                raise RuntimeError(
+                    f"Block {block_index}: max_padding_voxels={max_padding} cuts the read short "
+                    f"of the medial-surface balls that reach the block; raise it."
+                )
+            # The read reaches every medial-surface voxel whose ball, its
+            # distance to the edge of its object, reaches the block.
+            radii = thickness_vol.read_onto(grid, padded.read_begin, padded.read_end)[
+                tuple(sources.T)
+            ] / 2
+            offset = np.array(block.begin) - np.array(padded.read_begin)
+            covered = medial_balls(labels.shape, sources - offset, radii, voxel_size)
+            reconstruction_vol.write_index(
+                block.begin, block.end, np.where(covered, labels, 0).astype(labels.dtype)
+            )
+            covered_ids, covered_counts = np.unique(labels[covered].astype(np.int64), return_counts=True)
+            result["reconstructed"] = pd.DataFrame({"id": covered_ids, "voxels": covered_counts})
+
         return {
-            "index": block_index,
+            **result,
             "histograms": pd.DataFrame(
                 {
                     "id": unique[:, 0],
@@ -616,6 +679,8 @@ class Sheetness(ComputeConfigMixin):
                 self.at_medial_surface_vol,
                 self.sheetness_vol,
                 self.max_padding_voxels,
+                self.thickness_vol if self.reconstruction_vol is not None else None,
+                self.reconstruction_vol,
                 costs=voxels,
             )
         self._write_csvs(medial_results, volume_results)
@@ -663,6 +728,14 @@ class Sheetness(ComputeConfigMixin):
                         np.maximum(medial["thickness_sq"] / medial["count"] - mean_thickness**2, 0)
                     ),
                 }
+            )
+        if self.reconstruction_vol is not None:
+            frames = [r["reconstructed"] for r in volume_results]
+            reconstructed = (
+                pd.concat(frames).groupby("id")["voxels"].sum() if frames else pd.Series(dtype=np.int64)
+            )
+            summary["Reconstructed Volume (nm^3)"] = (
+                reconstructed.reindex(per_object.index, fill_value=0) * voxel_volume
             )
         summary.index.name = "Object ID"
         summary.to_csv(f"{self.csv_path}/{self.name}.csv")

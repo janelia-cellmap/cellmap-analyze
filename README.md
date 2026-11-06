@@ -106,6 +106,12 @@ thick. Thickness and the nearest medial-surface voxels are always exact: a block
 read widens until they are, as far as it fits in half its worker's memory (or
 `max_padding_voxels` on each side, if set), and an object too thick for that, or one
 with no medial surface, stops the run with an error.
+With `reconstruction: true`, sheetness also rebuilds each object from its medial
+surface as a check, as COSEM's 2021 method did: `<output_path>_reconstruction` labels
+every voxel within a medial-surface voxel's ball, its thickness wide, and the summary
+CSV gets each object's reconstructed volume. A ball holds only its own object's voxels,
+so what the rebuild misses (often the outer layer of thin objects) is detail the medial
+surface lost.
 
 ---
 
