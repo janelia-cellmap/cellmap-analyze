@@ -20,10 +20,31 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# tensorstore downsample methods that reduce a whole window, so a level-k voxel
-# is centred on the window of finer voxels it summarises (wa.level_placement).
-_BLOCK_METHODS = ("mode", "mean", "median", "min", "max")
+# Methods that reduce a whole window, so a level-k voxel is centred on the
+# window of finer voxels it summarises (wa.level_placement): tensorstore's
+# downsample methods, and nonzero_mode.
+_BLOCK_METHODS = ("mode", "mean", "median", "min", "max", "nonzero_mode")
 _DRIVERS = {"zarr2": "zarr", "zarr3": "zarr3"}
+
+
+def nonzero_mode(data, factors):
+    """``data`` downsampled by ``factors``, each window taking its most common
+    non-zero label (the smallest on a tie) and 0 only if it has none, so thin
+    objects such as skeletons and medial surfaces survive. A window past the
+    edge of ``data`` is summarised from the voxels it has."""
+    factors = np.array(factors)
+    shape = -(-np.array(data.shape) // factors)
+    padded = np.zeros(tuple(shape * factors), data.dtype)
+    padded[tuple(slice(0, s) for s in data.shape)] = data
+    windows = padded.reshape(
+        shape[0], factors[0], shape[1], factors[1], shape[2], factors[2]
+    ).transpose(0, 2, 4, 1, 3, 5).reshape(-1, int(factors.prod()))
+    windows = np.sort(windows, axis=1)
+    counts = np.stack(
+        [(windows == windows[:, [j]]).sum(axis=1) for j in range(windows.shape[1])], axis=1
+    )
+    counts[windows == 0] = 0
+    return windows[np.arange(len(windows)), counts.argmax(axis=1)].reshape(tuple(shape))
 
 
 def _level_index(path):
@@ -36,7 +57,9 @@ class Multiscale(ComputeConfigMixin):
 
     Each level is computed blockwise from the previous one with tensorstore's
     ``downsample`` driver: by default ``mode`` for integer data, which keeps
-    label ids intact, and ``mean`` for floats. Levels are written until one
+    label ids intact, and ``mean`` for floats. ``nonzero_mode`` instead takes
+    each window's most common non-zero label, so thin objects that ``mode``
+    would lose to the background survive. Levels are written until one
     fits in a single chunk, or ``num_levels`` of them. An axis is only halved
     once its voxel size is within 1.5x of the finest (``wa.level_factors``),
     so anisotropic data moves toward isotropic first.
@@ -130,7 +153,10 @@ class Multiscale(ComputeConfigMixin):
         begin = [b * f for b, f in zip(block.begin, factors)]
         end = [min(e * f, n) for e, f, n in zip(block.end, factors, source.shape)]
         data = source.read_index(begin, end, retries=wa.Retry())
-        data = ts.downsample(ts.array(data), list(factors), method).read().result()
+        if method == "nonzero_mode":
+            data = nonzero_mode(data, factors)
+        else:
+            data = ts.downsample(ts.array(data), list(factors), method).read().result()
         # Plain tensorstore: the level is not listed in the group until it is complete.
         dest = ts.open(
             {"driver": driver, "kvstore": {"driver": "file", "path": dest_path}},

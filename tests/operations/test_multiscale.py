@@ -5,7 +5,7 @@ import pytest
 import worldarray as wa
 import zarr
 
-from cellmap_analyze.process.multiscale import Multiscale
+from cellmap_analyze.process.multiscale import Multiscale, nonzero_mode
 from cellmap_analyze.util.grid_util import grid_of, make_grid
 from cellmap_analyze.util.zarr_util import create_multiscale_dataset, open_dataset
 from tests.test_utils import read_all
@@ -128,3 +128,32 @@ def test_existing_levels_need_overwrite(pyramid):
         Multiscale(path, num_workers=1)
     Multiscale(path, num_workers=1, overwrite=True).create_multiscale()
     assert np.array_equal(read_all(f"{path}/s2"), expected[2])
+
+
+def test_nonzero_mode_takes_the_most_common_label_in_each_window():
+    data = np.zeros((4, 4, 3), np.uint64)
+    data[0, 0, 0] = 5  # alone among zeros
+    data[0, 0, 2] = 9  # in a window cut short by the edge
+    data[2, 2:, :2] = [[3, 7], [7, 3]]  # a tie: the smaller label
+    data[3, 2, 0] = 7  # breaks it
+    s1 = nonzero_mode(data, (2, 2, 2))
+    assert s1.shape == (2, 2, 2)
+    assert s1[0, 0, 0] == 5 and s1[0, 0, 1] == 9 and s1[1, 1, 0] == 7
+    assert np.count_nonzero(s1) == 3
+    data[3, 2, 0] = 0
+    assert nonzero_mode(data, (2, 2, 2))[1, 1, 0] == 3
+
+
+def test_nonzero_mode_keeps_one_voxel_thin_objects(tmp_path, voxel_size):
+    data = np.zeros((16, 16, 16), np.uint8)
+    data[5, 2:14, 2:14] = 1  # a sheet
+    data[10:14, 9, 3] = 2  # a line
+    for method in ("mode", "nonzero_mode"):
+        path = f"{tmp_path}/{method}.zarr/thin"
+        _write(path, data, voxel_size, chunks=(4, 4, 4))
+        Multiscale(path, downsample_method=method, num_workers=1).create_multiscale()
+        levels = [read_all(f"{path}/s{level}") for level in (1, 2)]
+        if method == "mode":
+            assert not any(np.any(level) for level in levels)
+        else:
+            assert all(set(np.unique(level)) == {0, 1, 2} for level in levels)

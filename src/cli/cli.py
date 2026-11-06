@@ -26,7 +26,7 @@ class RunProperties:
         if multiscale is not None:
             self.multiscale = self.run_config.pop("multiscale", multiscale)
 
-    def add_multiscale(self, output_path, num_workers, filled=False):
+    def add_multiscale(self, output_path, num_workers, filled=False, downsample_method=None):
         """Pyramid the command's output, and its hole-filled copy when it made one."""
         if not self.multiscale:
             return
@@ -43,7 +43,9 @@ class RunProperties:
             if not os.path.exists(path):
                 continue
             # The output was just rewritten, so any levels beside it are stale.
-            Multiscale(path, overwrite=True, num_workers=num_workers).create_multiscale()
+            Multiscale(
+                path, downsample_method=downsample_method, overwrite=True, num_workers=num_workers
+            ).create_multiscale()
 
 
 def connected_components():
@@ -228,7 +230,8 @@ def topological_thinning():
         ):
             thinning = TopologicalThinning(**rp.run_config)
             thinning.thin()
-            rp.add_multiscale(thinning.output_path, thinning.num_workers)
+            # thinned objects are a voxel thin, which mode would lose to the background
+            rp.add_multiscale(thinning.output_path, thinning.num_workers, downsample_method="nonzero_mode")
 
 
 def sheetness():

@@ -24,7 +24,7 @@ A suite of Dask-powered tools for processing and analyzing terabyte-scale 3D seg
 | **Topological Thinning** | `topological-thinning`       | Thin a segmentation blockwise to curve skeletons or, with `medial_surface: true`, medial surfaces (Lee et al. 1994, as COSEM did). The result is voxel for voxel what thinning the whole volume at once gives; objects that touch are thinned as if alone and keep their IDs. |
 | **Compute EDT**          | `compute-edt`                | Compute a Euclidean distance transform over a segmentation, for reuse across repeated `split-narrow-bridges` runs. |
 | **Split Narrow Bridges** | `split-narrow-bridges`       | Split accidentally-merged blob-like objects (nuclei, cells) at thin necks via EDT-watershed, preserving all original foreground voxels. |
-| **Multiscale**           | `multiscale`                 | Add downsampled levels (`s1`, `s2`, …) to an existing zarr dataset for viewing, until a level fits in one chunk. Integer data (labels) is downsampled by mode and floats by mean, on anisotropic data the finer axes are halved first, and each level's OME translation is placed at its voxel centres. |
+| **Multiscale**           | `multiscale`                 | Add downsampled levels (`s1`, `s2`, …) to an existing zarr dataset for viewing, until a level fits in one chunk. Integer data (labels) is downsampled by mode and floats by mean (`downsample_method: nonzero_mode` takes each window's most common non-zero label instead, so thin objects survive), on anisotropic data the finer axes are halved first, and each level's OME translation is placed at its voxel centres. |
 
 These tools chain together into a full predictions-to-segmentations pipeline:
 start from raw model output (`connected-components` thresholds prediction
@@ -36,7 +36,9 @@ then finalize with `clean-connected-components` and/or `filter-ids`.
 Each processing command that writes a volume then adds a multiscale pyramid to
 it, as `multiscale` does, so every output is ready to view. Set
 `multiscale: false` in its `run-config.yaml` to skip this; `compute-edt` and
-`topological-thinning` add one only with `multiscale: true`.
+`topological-thinning` add one only with `multiscale: true`. `topological-thinning`'s
+is by `nonzero_mode`: its skeletons and medial surfaces are a voxel thin, so plain mode
+would lose them to the background from the first level.
 
 ### Analysis Tools
 
