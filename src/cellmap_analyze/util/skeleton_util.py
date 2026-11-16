@@ -4,6 +4,7 @@ import numpy as np
 import os
 import logging
 import time
+import itertools
 from neuroglancer.skeleton import (
     Skeleton as NeuroglancerSkeleton,
     VertexAttributeInfo,
@@ -20,133 +21,204 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# Offsets to the 26 neighbours of a voxel, one of each +/- pair, so every
+# adjacency is visited once.
+_HALF_OFFSETS = [
+    np.array(o, dtype=np.int64)
+    for o in itertools.product((-1, 0, 1), repeat=3)
+    if o > (0, 0, 0)
+]
+
+
 def skimage_to_custom_skeleton_fast(binary_skeleton, spacing=(1, 1, 1), simplify_triangles=True):
-    """
-    Faster version using vectorized operations
-    
+    """Turn a thinned binary skeleton into a CustomSkeleton (vertices = skeleton
+    voxels at ``index * spacing``, edges between 26-adjacent voxels).
+
+    The edges are built so that a cycle in the graph means a tunnel in the
+    skeleton, and nothing else:
+
+    1. two voxels are not joined when a third skeleton voxel lies in the box
+       they span (it already joins them with shorter steps);
+    2. a triangle that remains loses its longest edge;
+    3. a cycle inside a 3x3x3 block around a junction is reduced to a
+       spanning forest (such a cycle encloses at most one voxel).
+
+    Without this, a hub voxel and its face neighbours form a ring of diagonal
+    adjacencies that is a cycle of the graph but no tunnel of the skeleton;
+    each such ring adds two junctions and up to three branches to the count,
+    and pruning cannot remove it.
+
     Args:
-        binary_skeleton: Binary 3D array
-        spacing: Voxel spacing in each dimension
-        simplify_triangles: If True, reduce triangular cliques to spanning trees
+        binary_skeleton: Binary 3D array (output of skimage.morphology.skeletonize).
+        spacing: Voxel spacing in each dimension.
+        simplify_triangles: Apply steps 1-3. ``False`` keeps every 26-adjacency.
     """
     start_time = time.time()
-    logger.info(f"Starting skimage_to_custom_skeleton_fast conversion (simplify_triangles={simplify_triangles})")
-    
-    coords_start = time.time()
     coords = np.argwhere(binary_skeleton)
-    logger.info(f"Found {len(coords)} coordinates in {time.time() - coords_start:.4f}s")
-    
+    logger.info(f"skimage_to_custom_skeleton_fast: {len(coords)} skeleton voxels")
+
     if len(coords) == 0:
         logger.info("No coordinates found, returning empty skeleton")
         return CustomSkeleton()
-    
-    vertices_start = time.time()
-    vertices = coords * np.array(spacing)
-    vertices = [tuple(v) for v in vertices]
-    logger.info(f"Created {len(vertices)} vertices in {time.time() - vertices_start:.4f}s")
-    
-    # Create a lookup dictionary for fast coordinate checking
-    lookup_start = time.time()
-    coord_to_idx = {tuple(c): i for i, c in enumerate(coords)}
-    logger.info(f"Built coordinate lookup in {time.time() - lookup_start:.4f}s")
-    
-    # 26-connectivity offsets
-    offsets_start = time.time()
-    offsets = []
-    for dz in [-1, 0, 1]:
-        for dy in [-1, 0, 1]:
-            for dx in [-1, 0, 1]:
-                if dz == 0 and dy == 0 and dx == 0:
-                    continue
-                offsets.append((dz, dy, dx))
-    offsets = np.array(offsets)
-    logger.info(f"Created connectivity offsets in {time.time() - offsets_start:.4f}s")
-    
-    # For each coordinate, check which neighbors exist
-    edges_start = time.time()
-    edges = []
-    for i, coord in enumerate(coords):
-        neighbors = coord + offsets
-        for neighbor in neighbors:
-            neighbor_tuple = tuple(neighbor)
-            if neighbor_tuple in coord_to_idx:
-                j = coord_to_idx[neighbor_tuple]
-                if j > i:  # Avoid duplicates
-                    edges.append((i, j))
-    
-    logger.info(f"Found {len(edges)} edges in {time.time() - edges_start:.4f}s")
-    
+
+    positions = coords * np.asarray(spacing, dtype=float)
+    vertices = [tuple(v) for v in positions]
+
     if simplify_triangles:
-        simplify_start = time.time()
-        edges = simplify_triangle_cliques(edges, len(coords))
-        logger.info(f"Simplified triangles: {len(edges)} edges remaining in {time.time() - simplify_start:.4f}s")
-    
-    skeleton_start = time.time()
+        edges = skeleton_voxel_edges(coords)
+        edges = simplify_triangle_cliques(edges, len(coords), vertices=positions)
+        edges = break_block_cycles(edges, coords, positions)
+    else:
+        edges = all_26_adjacencies(coords)
+    edges = [(int(a), int(b)) for a, b in edges]
+    logger.info(
+        f"Built {len(edges)} edges in {time.time() - start_time:.4f}s "
+        f"(simplify_triangles={simplify_triangles})"
+    )
+
     skeleton = CustomSkeleton(vertices=vertices, edges=edges)
-    logger.info(f"Created CustomSkeleton object in {time.time() - skeleton_start:.4f}s")
-    
-    # Diagnostic: check degree distribution of initial skeleton
-    g = skeleton.skeleton_to_graph()
-    degrees = [g.degree[n] for n in g.nodes]
-    logger.info(f"Initial skeleton degree distribution: min={min(degrees)}, max={max(degrees)}, mean={np.mean(degrees):.2f}")
-    degree_counts = np.bincount(degrees)
-    logger.info(f"Degree counts: {dict(enumerate(degree_counts))}")
-    logger.info(f"Vertices with degree>2: {sum(1 for d in degrees if d > 2)}/{len(degrees)}")
-    
     logger.info(f"Total skimage_to_custom_skeleton_fast time: {time.time() - start_time:.4f}s")
-    
     return skeleton
 
 
-def simplify_triangle_cliques(edges, num_vertices):
+def _voxel_index(coords):
+    """-> (lookup, shifted): ``lookup(points)`` gives the index into ``coords`` of
+    each point of the shifted grid, or -1 where there is no skeleton voxel.
+    ``shifted`` is ``coords`` moved so that every 26-neighbour is inside the grid."""
+    coords = np.asarray(coords, dtype=np.int64)
+    n = len(coords)
+    shifted = coords - coords.min(axis=0) + 1
+    shape = tuple(int(s) for s in shifted.max(axis=0) + 2)
+    linear = np.ravel_multi_index(shifted.T, shape)
+    order = np.argsort(linear)
+    linear_sorted = linear[order]
+
+    def lookup(points):
+        l = np.ravel_multi_index(np.asarray(points).T, shape)
+        pos = np.minimum(np.searchsorted(linear_sorted, l), n - 1)
+        return np.where(linear_sorted[pos] == l, order[pos], -1)
+
+    return lookup, shifted
+
+
+def all_26_adjacencies(coords):
+    """Every pair of 26-adjacent skeleton voxels, as (i, j) index pairs with i < j."""
+    coords = np.asarray(coords, dtype=np.int64)
+    if len(coords) == 0:
+        return np.zeros((0, 2), dtype=np.int64)
+    lookup, shifted = _voxel_index(coords)
+    own = np.arange(len(coords))
+    edges = []
+    for offset in _HALF_OFFSETS:
+        neighbour = lookup(shifted + offset)
+        joined = neighbour >= 0
+        edges.append(np.column_stack([own[joined], neighbour[joined]]))
+    return np.concatenate(edges)
+
+
+def skeleton_voxel_edges(coords):
+    """Edges of the voxel graph of a thinned skeleton, as (i, j) index pairs into
+    ``coords``.
+
+    Two skeleton voxels are joined when they are 26-adjacent and no third
+    skeleton voxel lies in the box the pair spans. A voxel in that box is
+    face- or edge-adjacent to both, so it already joins them with shorter
+    steps, and the direct diagonal would only add a cycle that encloses
+    nothing. Face-adjacent pairs span no box and are always joined.
     """
-    Remove redundant edges from triangular cliques (3 mutually connected nodes).
-    For each triangle, keep only 2 edges to maintain connectivity.
+    coords = np.asarray(coords, dtype=np.int64)
+    if len(coords) == 0:
+        return np.zeros((0, 2), dtype=np.int64)
+    lookup, shifted = _voxel_index(coords)
+    own = np.arange(len(coords))
+    edges = []
+    for offset in _HALF_OFFSETS:
+        neighbour = lookup(shifted + offset)
+        joined = neighbour >= 0
+        axes = np.flatnonzero(offset)
+        if len(axes) > 1:
+            bridged = np.zeros(len(coords), dtype=bool)
+            # the corners of the box spanned by the pair, other than the pair itself
+            for bits in itertools.product((0, 1), repeat=len(axes)):
+                if not any(bits) or all(bits):
+                    continue
+                corner = np.zeros(3, dtype=np.int64)
+                for axis, bit in zip(axes, bits):
+                    if bit:
+                        corner[axis] = offset[axis]
+                bridged |= lookup(shifted + corner) >= 0
+            joined &= ~bridged
+        edges.append(np.column_stack([own[joined], neighbour[joined]]))
+    return np.concatenate(edges)
+
+
+def _edge_length(vertices, a, b):
+    if vertices is None:
+        return 0.0
+    return float(np.linalg.norm(np.asarray(vertices[a], float) - np.asarray(vertices[b], float)))
+
+
+def simplify_triangle_cliques(edges, num_vertices, vertices=None):
+    """Break every triangle (three mutually joined vertices) by dropping its
+    longest edge; a triangle of skeleton voxels encloses nothing, so it is
+    never a tunnel. Ties, and the case without ``vertices``, are decided by
+    vertex index so the result is deterministic. Returns the edges as a list
+    of sorted (i, j) tuples.
     """
-    import networkx as nx
-    
-    # Build adjacency list
     g = nx.Graph()
     g.add_nodes_from(range(num_vertices))
-    g.add_edges_from(edges)
-    
-    # Find all triangles (3-cliques)
+    g.add_edges_from((int(a), int(b)) for a, b in edges)
+
     triangles = [clique for clique in nx.enumerate_all_cliques(g) if len(clique) == 3]
-    
-    if not triangles:
-        return edges
-    
-    logger.info(f"Found {len(triangles)} triangular cliques to simplify")
-    
-    # For each triangle, remove the longest edge
-    edges_to_remove = set()
-    for triangle in triangles:
-        a, b, c = triangle
-        
-        # Calculate edge lengths (using node IDs as proxy, or could use actual positions)
-        # For now, just remove one edge arbitrarily to break the cycle
-        # Remove the edge with the largest sum of node indices (arbitrary but deterministic)
-        edge_weights = [
-            ((a, b), a + b),
-            ((b, c), b + c),
-            ((a, c), a + c)
-        ]
-        # Sort by weight and remove the heaviest
-        edge_weights.sort(key=lambda x: x[1], reverse=True)
-        edge_to_remove = tuple(sorted(edge_weights[0][0]))
-        
-        # Only remove if all three edges still exist (triangle hasn't been broken yet)
-        if (g.has_edge(a, b) and g.has_edge(b, c) and g.has_edge(a, c)):
-            edges_to_remove.add(edge_to_remove)
-            g.remove_edge(*edge_to_remove)
-    
-    logger.info(f"Removing {len(edges_to_remove)} redundant edges from triangles")
-    
-    # Filter out removed edges
-    edges_set = set(tuple(sorted(e)) for e in edges)
-    edges_set -= edges_to_remove
-    
-    return list(edges_set)
+    if triangles:
+        logger.info(f"Breaking {len(triangles)} triangles")
+    for a, b, c in triangles:
+        candidates = [(a, b), (b, c), (a, c)]
+        if all(g.has_edge(*e) for e in candidates):
+            g.remove_edge(
+                *max(candidates, key=lambda e: (_edge_length(vertices, *e), tuple(sorted(e))))
+            )
+    return [tuple(sorted(e)) for e in g.edges]
+
+
+def break_block_cycles(edges, coords, vertices, block=3):
+    """Inside a ``block``^3 group of voxels a cycle encloses at most one voxel,
+    so it is either no tunnel at all or a one-voxel pinhole; neither is a
+    feature of the shape. For every such block around a junction (a vertex
+    with three or more edges), keep only a shortest spanning forest of the
+    edges between the block's voxels. A cycle that touches no junction is a
+    component of its own and is left alone. Returns a list of sorted (i, j)
+    tuples.
+    """
+    coords = np.asarray(coords, dtype=np.int64)
+    g = nx.Graph()
+    g.add_nodes_from(range(len(coords)))
+    for a, b in edges:
+        g.add_edge(int(a), int(b), weight=_edge_length(vertices, a, b))
+    coord_to_idx = {tuple(c): i for i, c in enumerate(coords)}
+    cells = [np.array(o, dtype=np.int64) for o in itertools.product(range(block), repeat=3)]
+    removed = 0
+    for junction in [v for v in g if g.degree[v] >= 3]:
+        for offset in cells:
+            corner = coords[junction] - offset
+            nodes = [
+                coord_to_idx[q]
+                for q in (tuple(corner + cell) for cell in cells)
+                if q in coord_to_idx
+            ]
+            if len(nodes) < 3:
+                continue
+            sub = g.subgraph(nodes)
+            if sub.number_of_edges() <= len(nodes) - nx.number_connected_components(sub):
+                continue  # already a forest
+            keep = {frozenset(e) for e in nx.minimum_spanning_tree(sub, weight="weight").edges}
+            drop = [e for e in sub.edges if frozenset(e) not in keep]
+            g.remove_edges_from(drop)
+            removed += len(drop)
+    if removed:
+        logger.info(f"Removed {removed} edges closing cycles inside {block}x{block}x{block} blocks")
+    return [tuple(sorted(e)) for e in g.edges]
+
 
 @dataclass
 class Source:

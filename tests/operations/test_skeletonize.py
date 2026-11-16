@@ -869,6 +869,98 @@ def test_skeletonize_preserves_loops(tmp_zarr, tmp_skeletonize_csv, voxel_size, 
 
 
 # =============================================================================
+# Unit tests for the skeleton graph builder
+# =============================================================================
+
+
+class TestSkeletonGraphBuilder:
+    """skimage_to_custom_skeleton_fast: a cycle in the graph is a tunnel of the
+    skeleton, never an artifact of 26-connectivity."""
+
+    @staticmethod
+    def build(voxels, **kwargs):
+        import networkx as nx
+
+        sk = np.zeros((8, 8, 8), dtype=bool)
+        for v in voxels:
+            sk[v] = True
+        skeleton = skimage_to_custom_skeleton_fast(sk, spacing=(1.0, 1.0, 1.0), **kwargs)
+        g = nx.Graph()
+        g.add_nodes_from(range(len(skeleton.vertices)))
+        g.add_edges_from(skeleton.edges)
+        index = {tuple(int(x) for x in v): i for i, v in enumerate(skeleton.vertices)}
+        return skeleton, g, index
+
+    def test_hub_with_face_neighbours_is_a_star(self):
+        import networkx as nx
+
+        hub = (3, 3, 3)
+        spokes = [(3, 2, 3), (3, 4, 3), (3, 3, 2), (3, 3, 4)]
+        line = [(1, 3, 3), (2, 3, 3), (4, 3, 3), (5, 3, 3)]
+        skeleton, g, index = self.build([hub] + spokes + line)
+        # the diagonal adjacencies between the spokes are bridged by the hub
+        assert nx.cycle_basis(g) == []
+        assert nx.is_connected(g)
+        for v in spokes + [(2, 3, 3), (4, 3, 3)]:
+            assert g.has_edge(index[hub], index[v])
+        assert g.degree[index[hub]] == 6
+        # 4 spokes + the two halves of the line
+        assert len(skeleton.polylines) == 6
+
+    def test_hub_keeps_its_ring_without_simplification(self):
+        import networkx as nx
+
+        hub = (3, 3, 3)
+        spokes = [(3, 2, 3), (3, 4, 3), (3, 3, 2), (3, 3, 4)]
+        _, g, _ = self.build([hub] + spokes, simplify_triangles=False)
+        assert len(nx.cycle_basis(g)) > 0
+
+    def test_square_patch_with_tail_is_a_tree(self):
+        import networkx as nx
+
+        square = [(3, 3, 3), (3, 3, 4), (3, 4, 3), (3, 4, 4)]
+        tail = [(3, 2, 3), (3, 1, 3)]
+        _, g, _ = self.build(square + tail)
+        assert nx.cycle_basis(g) == []
+        assert nx.is_connected(g)
+
+    def test_triangle_of_diagonals_loses_one_edge(self):
+        import networkx as nx
+
+        # mutually edge-adjacent around the absent voxel (3, 3, 4)
+        _, g, _ = self.build([(3, 3, 3), (3, 4, 4), (4, 3, 4)])
+        assert g.number_of_edges() == 2
+        assert nx.is_connected(g)
+
+    def test_staircase_path_is_a_path(self):
+        import networkx as nx
+
+        _, g, _ = self.build([(i, i, 3) for i in range(7)])
+        assert g.number_of_edges() == 6
+        assert nx.cycle_basis(g) == []
+        assert sorted(d for _, d in g.degree) == [1, 1, 2, 2, 2, 2, 2]
+
+    def test_one_voxel_pinhole_at_a_junction_is_dropped(self):
+        import networkx as nx
+
+        ring = [(3, 2, 2), (3, 2, 3), (3, 2, 4), (3, 3, 4), (3, 4, 4), (3, 4, 3), (3, 4, 2), (3, 3, 2)]
+        tail = [(3, 3, 1), (3, 3, 0)]
+        _, g, _ = self.build(ring + tail)
+        assert nx.cycle_basis(g) == []
+        assert nx.is_connected(g)
+
+    def test_tunnel_wider_than_one_voxel_is_kept(self):
+        import networkx as nx
+
+        # 4x4 ring around a 2x2 background patch, with a tail making a junction
+        ring = [(3, y, z) for y in range(1, 5) for z in range(1, 5) if y in (1, 4) or z in (1, 4)]
+        tail = [(3, 2, 0)]
+        _, g, _ = self.build(ring + tail)
+        assert len(nx.cycle_basis(g)) == 1
+        assert nx.is_connected(g)
+
+
+# =============================================================================
 # Unit tests for remove_unbridged_adjacencies
 # =============================================================================
 
