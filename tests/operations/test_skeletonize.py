@@ -1213,13 +1213,14 @@ def test_skeletonize_seed_voxel_fallback(shared_tmpdir):
     assert 4.0 <= y <= 8.0, f"seed y={y} outside cube"
     assert 4.0 <= z <= 8.0, f"seed z={z} outside cube"
 
-    # CSV: 0 length, 0 branches, but Radius Mean should be positive (~half-thickness).
+    # CSV: 0 length, 1 branch (a round blob is one unbranched object; 0 is
+    # reserved for no skeleton at all), Radius Mean positive (~half-thickness).
     csv_basename = os.path.splitext(os.path.basename(csv_path))[0]
     metrics_csv = os.path.join(
         os.path.dirname(csv_path), f"{csv_basename}_with_skeletons.csv"
     )
     df = pd.read_csv(metrics_csv, index_col=0)
-    assert df.loc[1, "Number of Branches"] == 0
+    assert df.loc[1, "Number of Branches"] == 1
     assert df.loc[1, "Longest Shortest Path (nm)"] == 0.0
     assert df.loc[1, "Radius Mean (nm)"] > 0, (
         f"seed-voxel fallback should populate radius, got "
@@ -1537,3 +1538,301 @@ def test_skeletonize_missing_csv_path_raises(tmp_zarr):
             num_workers=1,
             sharded=False,
         )
+
+
+# =============================================================================
+# Tunnel sealing, scale-based pruning and the branch-count convention (0.8)
+# =============================================================================
+
+
+class TestSealTunnels:
+    """seal_tunnels fills only what removes a tunnel."""
+
+    @staticmethod
+    def _euler(mask):
+        from skimage.measure import euler_number
+
+        return euler_number(mask, connectivity=3)
+
+    def test_pinhole_through_slab_is_sealed(self):
+        from cellmap_analyze.process.skeletonize import seal_tunnels
+
+        slab = np.zeros((20, 20, 20), dtype=bool)
+        slab[:, 6:14, :] = True
+        slab[9:11, 6:14, 9:11] = False  # 2x2 tunnel through the slab
+        assert self._euler(slab) == 0
+        out, sealed, rejected = seal_tunnels(slab, 3)
+        assert (sealed, rejected) == (1, 0)
+        assert self._euler(out) == 1  # no tunnel left (the mouths may keep a dimple)
+        assert out[9:11, 8:12, 9:11].all()
+
+    def test_wide_hole_is_kept(self):
+        from cellmap_analyze.process.skeletonize import seal_tunnels
+
+        slab = np.zeros((30, 30, 30), dtype=bool)
+        slab[:, 10:20, :] = True
+        slab[10:20, 10:20, 10:20] = False  # 10x10 hole: a ball of radius 3 passes
+        out, sealed, _ = seal_tunnels(slab, 3)
+        assert sealed == 0
+        assert np.array_equal(out, slab)
+
+    def test_bowl_is_not_capped(self):
+        from cellmap_analyze.process.skeletonize import seal_tunnels
+
+        cup = np.zeros((20, 20, 20), dtype=bool)
+        cup[2:18, 2:18, 2:18] = True
+        cup[8:14, 8:14, 8:14] = False  # interior
+        cup[10:12, 10:12, 14:18] = False  # 2x2 channel to the outside
+        assert self._euler(cup) == 1
+        out, sealed, rejected = seal_tunnels(cup, 3)
+        assert sealed == 0  # closing the channel would create a cavity
+        assert rejected >= 1
+        assert np.array_equal(out, cup)
+
+    def test_surface_dent_is_left_alone(self):
+        from cellmap_analyze.process.skeletonize import seal_tunnels
+
+        block = np.zeros((20, 20, 20), dtype=bool)
+        block[2:18, 2:18, 2:18] = True
+        block[9:11, 9:11, 16:18] = False  # 2x2x2 dent in one face
+        out, sealed, rejected = seal_tunnels(block, 3)
+        assert sealed == 0 and rejected >= 1
+        assert np.array_equal(out, block)
+
+    def test_one_component_may_seal_two_tunnels(self):
+        from cellmap_analyze.process.skeletonize import seal_tunnels
+
+        # Two tunnels joined by a chamber inside the slab: an H-shaped void with
+        # four mouths, so three tunnels, all closed by one closing component.
+        slab = np.zeros((20, 20, 26), dtype=bool)
+        slab[:, 6:14, :] = True
+        slab[9:11, 6:14, 9:11] = False  # tunnel A
+        slab[9:11, 6:14, 15:17] = False  # tunnel B
+        slab[9:11, 9:11, 9:17] = False  # chamber joining A and B
+        assert self._euler(slab) == -2
+        out, sealed, _ = seal_tunnels(slab, 3)
+        assert sealed == 1
+        assert self._euler(out) == 1
+        assert out[9:11, 9:11, 9:17].all()
+
+    def test_zero_radius_is_identity(self):
+        from cellmap_analyze.process.skeletonize import seal_tunnels
+
+        slab = np.zeros((20, 20, 20), dtype=bool)
+        slab[:, 6:14, :] = True
+        slab[9:11, 6:14, 9:11] = False
+        out, sealed, rejected = seal_tunnels(slab, 0)
+        assert (sealed, rejected) == (0, 0)
+        assert out is slab
+
+
+def _skeleton_from_graph(nodes, edges, radii):
+    """nodes: list of (x, y, z) nm; edges: index pairs; radii: nm per node."""
+    skel = CustomSkeleton(
+        vertices=[tuple(float(c) for c in n) for n in nodes],
+        edges=[tuple(e) for e in edges],
+        radii=list(radii),
+    )
+    skel.polylines = skel.get_polylines_positions_from_graph(skel.skeleton_to_graph())
+    return skel
+
+
+def _line_with_side_branch(n_axis, n_side, spacing_nm, junction_index, radius_nm):
+    """A line along x with a branch along +y from ``junction_index``."""
+    nodes = [(i * spacing_nm, 0.0, 0.0) for i in range(n_axis)]
+    edges = [(i, i + 1) for i in range(n_axis - 1)]
+    jx = junction_index * spacing_nm
+    prev = junction_index
+    for k in range(1, n_side + 1):
+        nodes.append((jx, k * spacing_nm, 0.0))
+        edges.append((prev, len(nodes) - 1))
+        prev = len(nodes) - 1
+    return _skeleton_from_graph(nodes, edges, [radius_nm] * len(nodes))
+
+
+class TestPruneTerminalBranches:
+    def test_radius_rule_removes_a_bump_the_floor_keeps(self):
+        # 150 nm side branch at a junction of radius 50 nm: 150 <= 1.5 * 50 + 100
+        skel = _line_with_side_branch(41, 15, 10.0, 20, 50.0)
+        assert len(skel.polylines) == 3
+        pruned = skel.prune_terminal_branches(100.0, radius_scale=1.5, width_scale=0)
+        assert len(pruned.polylines) == 1
+        assert len(pruned.vertices) == 41
+        # the absolute floor alone (pre-0.8 rule) keeps it: 150 > 100
+        kept = skel.prune_terminal_branches(100.0, radius_scale=0, width_scale=0)
+        assert len(kept.polylines) == 3
+
+    def test_arm_longer_than_the_body_is_wide_survives(self):
+        skel = _line_with_side_branch(41, 30, 10.0, 20, 50.0)  # 300 nm arm
+        pruned = skel.prune_terminal_branches(100.0, radius_scale=1.5, width_scale=0)
+        assert len(pruned.polylines) == 3
+
+    def test_path_and_single_vertex_are_unchanged(self):
+        line = _line_with_side_branch(21, 0, 10.0, 10, 50.0)
+        assert line.prune_terminal_branches(100.0, 1.5, 0) is line
+        point = CustomSkeleton(vertices=[(0.0, 0.0, 0.0)], edges=[], radii=[5.0])
+        assert point.prune_terminal_branches(100.0, 1.5, 0) is point
+
+    def test_radius_rule_needs_radii(self):
+        skel = _line_with_side_branch(41, 15, 10.0, 20, 50.0)
+        skel.radii = None
+        with pytest.raises(ValueError):
+            skel.prune_terminal_branches(100.0, radius_scale=1.5, width_scale=0)
+
+    def test_width_rule_removes_a_tooth_on_a_sheet(self):
+        # Plate 3 voxels thick (z), 51 x 51 voxels wide at 10 nm. Skeleton: axis
+        # along x through the middle plus a 200 nm tooth along +y. The tooth is
+        # longer than 1.5 r + 100 nm (r = 15 nm) but shorter than the plate is
+        # wide around it, so only the width rule removes it.
+        vs = 10.0
+        mask = np.zeros((7, 61, 61), dtype=bool)
+        mask[2:5, 5:56, 5:56] = True
+        nodes = [(x * vs, 30 * vs, 3 * vs) for x in range(5, 56)]
+        edges = [(i, i + 1) for i in range(len(nodes) - 1)]
+        j = 25  # x = 30
+        prev = j
+        for y in range(31, 51):
+            nodes.append((30 * vs, y * vs, 3 * vs))
+            edges.append((prev, len(nodes) - 1))
+            prev = len(nodes) - 1
+        skel = _skeleton_from_graph(nodes, edges, [15.0] * len(nodes))
+        assert len(skel.polylines) == 3
+        kwargs = dict(mask=mask, mask_origin_nm=(0.0, 0.0, 0.0), voxel_size_nm=vs)
+        by_radius = skel.prune_terminal_branches(100.0, 1.5, width_scale=0, **kwargs)
+        assert len(by_radius.polylines) == 3
+        pruned = skel.prune_terminal_branches(100.0, 1.5, 1.5, 2.0, **kwargs)
+        assert len(pruned.polylines) == 1
+        assert len(pruned.vertices) == 51  # the axis is kept whole
+        # a gate no sheet can pass turns the width rule off
+        gated = skel.prune_terminal_branches(100.0, 1.5, 1.5, 100.0, **kwargs)
+        assert len(gated.polylines) == 3
+
+    def test_width_rule_needs_a_mask(self):
+        skel = _line_with_side_branch(41, 15, 10.0, 20, 50.0)
+        with pytest.raises(ValueError):
+            skel.prune_terminal_branches(100.0, 1.5, 1.5)
+
+    def test_ray_extent_sees_sheet_versus_tube(self):
+        from cellmap_analyze.util.skeleton_util import ray_extent
+
+        plate = np.zeros((7, 61, 61), dtype=bool)
+        plate[2:5, 5:56, 5:56] = True
+        longest, shortest = ray_extent(plate, [[3.0, 30.0, 30.0]], [0.0, 1.0, 0.0])
+        assert longest[0] > 20 and shortest[0] <= 2
+        tube = np.zeros((31, 31, 61), dtype=bool)
+        zz, yy = np.ogrid[0:31, 0:31]
+        tube[(zz - 15) ** 2 + (yy - 15) ** 2 <= 100] = True
+        longest, shortest = ray_extent(tube, [[15.0, 15.0, 30.0]], [0.0, 0.0, 1.0])
+        assert 9 <= shortest[0] <= longest[0] <= 11
+
+
+def test_count_branches_convention():
+    assert Skeletonize.count_branches(CustomSkeleton(vertices=[], edges=[])) == 0
+    point = CustomSkeleton(vertices=[(0.0, 0.0, 0.0)], edges=[])
+    assert Skeletonize.count_branches(point) == 1
+    line = _line_with_side_branch(5, 0, 10.0, 2, 1.0)
+    assert Skeletonize.count_branches(line) == 1
+    y_shape = _line_with_side_branch(5, 3, 10.0, 2, 1.0)
+    assert Skeletonize.count_branches(y_shape) == 3
+
+
+def _run_skeletonize_on_mask(tmpdir, name, mask, voxel_size_nm, **kwargs):
+    """Write ``mask`` as object 1 of a zarr, skeletonize it with the given
+    Skeletonize options and return its row of the metrics CSV."""
+    from cellmap_analyze.util.grid_util import make_grid
+    from cellmap_analyze.util.zarr_util import create_multiscale_dataset
+
+    vs = (voxel_size_nm,) * 3
+    seg = mask.astype(np.uint8)
+    data_path = f"{tmpdir}/{name}.zarr/seg"
+    os.makedirs(os.path.dirname(data_path), exist_ok=True)
+    ds = create_multiscale_dataset(
+        data_path, dtype=seg.dtype, grid=make_grid(seg.shape, vs, chunks=seg.shape)
+    )
+    ds.write_index((0, 0, 0), ds.shape, seg)
+    zyx = np.argwhere(mask)
+    lo = zyx.min(axis=0) * voxel_size_nm + voxel_size_nm / 2
+    hi = zyx.max(axis=0) * voxel_size_nm + voxel_size_nm / 2
+    csv_path = f"{tmpdir}/{name}_bboxes.csv"
+    pd.DataFrame(
+        [{
+            "Object ID": 1,
+            "MIN X (nm)": lo[2], "MIN Y (nm)": lo[1], "MIN Z (nm)": lo[0],
+            "MAX X (nm)": hi[2], "MAX Y (nm)": hi[1], "MAX Z (nm)": hi[0],
+        }]
+    ).set_index("Object ID").to_csv(csv_path)
+    output_path = f"{tmpdir}/{name}_out"
+    Skeletonize(
+        segmentation_path=f"{data_path}/s0",
+        output_path=output_path,
+        csv_path=csv_path,
+        num_workers=1,
+        sharded=False,
+        **kwargs,
+    ).skeletonize()
+    metrics = pd.read_csv(f"{tmpdir}/{name}_bboxes_with_skeletons.csv", index_col=0)
+    return metrics.loc[1]
+
+
+def _ellipsoid_mask(semi_axes_nm, voxel_size_nm, tilt_deg=(0.0, 0.0), margin_voxels=6):
+    """Ellipsoid with the given semi-axes (nm), rotated about y then z."""
+    a, b = np.radians(tilt_deg)
+    ry = np.array([[np.cos(a), 0, np.sin(a)], [0, 1, 0], [-np.sin(a), 0, np.cos(a)]])
+    rz = np.array([[np.cos(b), -np.sin(b), 0], [np.sin(b), np.cos(b), 0], [0, 0, 1]])
+    size = int(2 * max(semi_axes_nm) / voxel_size_nm) + 2 * margin_voxels
+    grid = (np.indices((size,) * 3).reshape(3, -1).T - size / 2 + 0.5) * voxel_size_nm
+    q = grid @ (rz @ ry)
+    inside = ((q / np.asarray(semi_axes_nm, dtype=float)) ** 2).sum(axis=1) <= 1
+    return inside.reshape((size,) * 3)
+
+
+def _tube_with_side_arm(radius_voxels, length_voxels, arm_radius_voxels, arm_protrusion_voxels):
+    """A cylinder along x with a thinner cylinder sticking out along +y."""
+    r, L, ra, pa = radius_voxels, length_voxels, arm_radius_voxels, arm_protrusion_voxels
+    shape = (2 * r + 9, 2 * r + pa + 9, L + 8)
+    cz, cy = r + 4, r + 4
+    zz, yy, xx = np.indices(shape)
+    tube = ((zz - cz) ** 2 + (yy - cy) ** 2 <= r * r) & (xx >= 4) & (xx < 4 + L)
+    cx = 4 + L // 2
+    arm = ((zz - cz) ** 2 + (xx - cx) ** 2 <= ra * ra) & (yy >= cy) & (yy < cy + r + pa)
+    return tube | arm
+
+
+def test_skeletonize_radius_rule_on_a_tube(shared_tmpdir):
+    """A nub shorter than 1.5 r + 100 nm is a bump of the tube and is pruned;
+    an arm longer than that is a branch. The pre-0.8 floor alone keeps the nub."""
+    vs = 8.0
+    nub = _tube_with_side_arm(10, 100, 4, 14)  # protrudes ~112 nm from a 80 nm radius tube
+    row = _run_skeletonize_on_mask(shared_tmpdir, "tube_nub", nub, vs)
+    assert row["Number of Branches"] == 1
+    legacy = _run_skeletonize_on_mask(
+        shared_tmpdir, "tube_nub_legacy", nub, vs, prune_radius_scale=0, prune_width_scale=0
+    )
+    assert legacy["Number of Branches"] == 3
+    arm = _tube_with_side_arm(10, 100, 4, 40)  # protrudes ~320 nm
+    row = _run_skeletonize_on_mask(shared_tmpdir, "tube_arm", arm, vs)
+    assert row["Number of Branches"] == 3
+
+
+def test_skeletonize_tilted_plate_is_one_branch(shared_tmpdir):
+    """Thinning a tilted plate leaves a comb of staircase teeth; the width rule
+    removes them and the plate is one branch, as a mesh skeleton gives."""
+    vs = 8.0
+    plate = _ellipsoid_mask((600.0, 250.0, 50.0), vs, tilt_deg=(30.0, 20.0))
+    comb = _run_skeletonize_on_mask(
+        shared_tmpdir, "plate_comb", plate, vs, prune_width_scale=0
+    )
+    assert comb["Number of Branches"] >= 3
+    row = _run_skeletonize_on_mask(shared_tmpdir, "plate", plate, vs)
+    assert row["Number of Branches"] == 1
+    assert row["Longest Shortest Path (nm)"] > 600
+
+
+def test_skeletonize_round_blob_counts_one_branch(shared_tmpdir):
+    """A sphere thins to a point (or to nothing, then the seed vertex): one
+    unbranched object, not zero branches."""
+    vs = 8.0
+    sphere = _ellipsoid_mask((40.0, 40.0, 40.0), vs)
+    row = _run_skeletonize_on_mask(shared_tmpdir, "sphere", sphere, vs)
+    assert row["Number of Branches"] == 1
+    assert row["Longest Shortest Path (nm)"] == 0.0

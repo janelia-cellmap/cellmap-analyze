@@ -20,7 +20,7 @@ A suite of Dask-powered tools for processing and analyzing terabyte-scale 3D seg
 | **Mutex Watershed**      | `mws`                        | Mutex watershed agglomeration from affinities.              |
 | **Label With Mask**      | `label-with-mask`            | Label one dataset with IDs from another.                    |
 | **Morphological Operations** | `morphological-operations` | Erosion and dilation of segmented datasets. Processing order across blocks is not guaranteed. |
-| **Skeletonize**          | `skeletonize`                | Generate skeletons from segmented objects with optional pruning and simplification. Automatically resamples to isotropic resolution before skeletonization. |
+| **Skeletonize**          | `skeletonize`                | Generate skeletons from segmented objects with pruning and simplification. Automatically resamples to isotropic resolution before skeletonization. See [Skeleton pruning](#skeleton-pruning) for how branches are judged and counted. |
 | **Topological Thinning** | `topological-thinning`       | Thin a segmentation blockwise to curve skeletons or, with `medial_surface: true`, medial surfaces (Lee et al. 1994, as COSEM did). The result is voxel for voxel what thinning the whole volume at once gives; objects that touch are thinned as if alone and keep their IDs. |
 | **Compute EDT**          | `compute-edt`                | Compute a Euclidean distance transform over a segmentation, for reuse across repeated `split-narrow-bridges` runs. |
 | **Split Narrow Bridges** | `split-narrow-bridges`       | Split accidentally-merged blob-like objects (nuclei, cells) at thin necks via EDT-watershed, preserving all original foreground voxels. |
@@ -62,6 +62,51 @@ A `roi` in a run-config is in nm, `["z_start:z_end", "y_start:y_end", "x_start:x
 Datasets are read through [worldarray](https://github.com/JaneliaSciComp/worldarray): zarr v2/v3, N5 and Neuroglancer precomputed, from local paths or `s3://`, `gs://` and `http(s)://`. Its README documents where each format places voxel 0. Each array is read with its spatial axes in z, y, x order, so one stored x, y, z (as TensorSwitch writes OME-Zarr v3) is transposed on read. Outputs are written z, y, x, and `multiscale` adds levels in the dataset's own order.
 
 ---
+
+## Skeleton pruning
+
+`skeletonize` thins each object (Lee et al. 1994) and then decides which
+terminal branches of the thinned skeleton are real. Three steps, all on by
+default and each switchable:
+
+- **Tunnel sealing** (`seal_tunnels_voxels: 3`). Before thinning, tunnels
+  through the mask that a ball of this radius closes are filled, but only
+  where filling removes a tunnel without creating a cavity. Thinning keeps
+  every tunnel as a loop, and a loop adds junctions and branches; tunnels a
+  few voxels wide are segmentation noise, not anatomy. `0` disables.
+- **Radius rule** (`prune_radius_scale: 1.5`, `min_branch_length_nm: 100`).
+  A terminal branch is removed when its length is at most
+  `prune_radius_scale` times the object's radius at the junction it grows
+  from, plus `min_branch_length_nm`. A branch that short does not stick out
+  of the body it grows from: it is a bump, not an arm. This is the scale axis
+  criterion applied to the skeleton's inscribed balls; `min_branch_length_nm`
+  is the absolute floor that mesh-n-bone also uses. `prune_radius_scale: 0`
+  leaves only the floor (the pre-0.8 behaviour); `min_branch_length_nm: 0`
+  disables pruning altogether.
+- **Width rule, for sheets** (`prune_width_scale: 1.5`,
+  `prune_width_anisotropy: 2.0`). On a flat object the junction radius is
+  half the sheet thickness, so the radius rule cannot see the comb of
+  staircase teeth that thinning leaves on a plate. Where the cross-section
+  around a branch is sheet-like (its longest perpendicular distance to the
+  surface is at least `prune_width_anisotropy` times its shortest), the
+  branch is also removed when its length is at most `prune_width_scale`
+  times that in-plane width. Round lobes and tubes have a ratio near 1 and
+  are judged by the radius rule alone. The two ends of each object's longest
+  path are exempt, so a plate keeps its axis. `prune_width_scale: 0`
+  disables.
+
+Branches are removed one at a time, smallest ratio first, and re-measured
+after each removal. On jrc_mus-liver-zon-1 mitochondria these rules bring
+the voxel skeletons' branch counts to within the mesh-based (mean curvature
+flow) skeletons' own spur noise; a plate that gave 34 branches gives 18, as
+the mesh does.
+
+`Number of Branches` counts the polylines between tips and junctions after
+pruning: a straight line is 1, a Y is 3, a ring is 1. An object whose
+skeleton is a single point (a round blob) is 1 as well, since whether
+thinning leaves one voxel or two is an accident of the grid; 0 means the
+object had no skeleton at all. `Longest Shortest Path (nm)` is 0 for a
+point.
 
 ## Medial surfaces and sheetness
 
