@@ -914,6 +914,104 @@ class CustomSkeleton:
 
         return self.graph_to_skeleton(g, preserve_polylines=False)
 
+    def prune_terminal_branches(
+        self,
+        min_branch_length_nm=100.0,
+        radius_scale=1.5,
+        width_scale=1.5,
+        width_anisotropy=2.0,
+        mask=None,
+        mask_origin_nm=None,
+        voxel_size_nm=None,
+    ):
+        """Remove terminal branches that do not stick out of the body they
+        grow from.
+
+        A terminal branch runs from a tip (degree 1) to the junction
+        (degree >= 3) it meets. With ``L`` its length and ``r`` the junction's
+        radius (the EDT value stored on the vertex), it is removed when
+
+            L <= radius_scale * r + min_branch_length_nm       (radius rule)
+
+        That is the scale axis criterion on the skeleton's inscribed balls:
+        the tip's ball is swallowed by the junction's ball inflated by
+        ``radius_scale``, so the branch is a bump of the body, not an arm.
+        ``min_branch_length_nm`` is the absolute floor (mesh-n-bone's prune).
+
+        The radius rule cannot see the teeth that thinning leaves on a sheet
+        (there ``r`` is half the sheet thickness). So where the cross-section
+        around a branch is sheet-like, ``W_max / W_min >= width_anisotropy``
+        with ``W_max``/``W_min`` the longest/shortest distance from the branch
+        to the surface along rays perpendicular to it, the branch is also
+        removed when
+
+            L <= width_scale * W_max                            (width rule)
+
+        A round lobe (``W_max ~ W_min``) is judged by the radius rule alone.
+        The two ends of each component's longest shortest path are exempt from
+        the width rule, so a sheet keeps its axis.
+
+        Branches are removed one at a time, smallest ratio first, and all
+        terminal branches are re-measured after each removal (removing an arm
+        can turn a junction into a pass-through point). A bare path or a ring
+        has no junction and is returned unchanged.
+
+        ``radius_scale=0`` disables the radius rule (leaving the absolute
+        floor), ``width_scale=0`` disables the width rule, and
+        ``width_anisotropy=None`` applies the width rule to every branch. The
+        width rule needs ``mask`` (bool, indexed z, y, x), ``mask_origin_nm``
+        (x, y, z centre of voxel (0, 0, 0)) and ``voxel_size_nm`` (scalar or
+        x, y, z); the radius rule needs ``self.radii``.
+        """
+        if len(self.vertices) <= 1:
+            return self
+        if radius_scale > 0 and not self.radii:
+            raise ValueError("radius_scale > 0 needs per-vertex radii on the skeleton")
+        use_width = width_scale > 0
+        if use_width and (mask is None or mask_origin_nm is None or voxel_size_nm is None):
+            raise ValueError(
+                "width_scale > 0 needs mask, mask_origin_nm and voxel_size_nm"
+            )
+
+        g = self.skeleton_to_graph()
+        if not any(d >= 3 for _, d in g.degree()):
+            return self
+
+        half_voxel = float(np.min(voxel_size_nm)) / 2 if use_width else 0.0
+        widths = {}
+        ends = axis_ends(g) if use_width else set()
+        removed = 0
+        while True:
+            best = None
+            for branch, junction in terminal_branches(g):
+                length = branch_length(g, branch, junction)
+                r = float(g.nodes[junction].get("radius", 0.0))
+                q = length / (radius_scale * r + min_branch_length_nm + 1e-9)
+                if q > 1 and use_width and branch[0] not in ends:
+                    key = (branch[0], junction, len(branch))
+                    if key not in widths:
+                        widths[key] = branch_width(
+                            g, branch, junction, mask, mask_origin_nm, voxel_size_nm
+                        )
+                    w_max, w_min = widths[key]
+                    sheet_like = (
+                        width_anisotropy is None
+                        or width_anisotropy <= 0
+                        or w_max / max(w_min, half_voxel) >= width_anisotropy
+                    )
+                    if sheet_like:
+                        q = min(q, length / (width_scale * w_max + 1e-9))
+                if q <= 1 and (best is None or q < best[0]):
+                    best = (q, branch)
+            if best is None:
+                break
+            g.remove_nodes_from(best[1])
+            removed += 1
+            if use_width and ends.intersection(best[1]):
+                ends = axis_ends(g)
+        logger.info(f"prune_terminal_branches removed {removed} branches")
+        return self.graph_to_skeleton(g, preserve_polylines=False)
+
     def _find_all_terminal_branches(self, g, min_branch_length_nm):
         """
         Find all terminal branches shorter than threshold.
@@ -1120,3 +1218,100 @@ class CustomSkeleton:
 
         # 5) Package results.
         return vertex_positions, edges
+
+
+# ---------------------------------------------------------------------------
+# Terminal-branch pruning by the scale of the body a branch grows from.
+# Used by CustomSkeleton.prune_terminal_branches; see its docstring.
+# ---------------------------------------------------------------------------
+
+_RAY_AZIMUTHS = np.radians(np.arange(0, 360, 15))  # 24 rays around a point
+_RAY_STEP_VOXELS = 0.5
+_RAY_MAX_STEPS = 600  # 300 voxels
+
+
+def terminal_branches(g):
+    """Yield ``(branch, junction)`` for every terminal branch of ``g``: the
+    nodes from a tip (degree 1) up to, but excluding, the first junction
+    (degree >= 3). A tip whose walk ends at another tip (a bare path) yields
+    nothing: a path has no junction to judge it against."""
+    for tip in [n for n, d in g.degree() if d == 1]:
+        path, prev, cur = [tip], None, tip
+        while True:
+            nxt = [m for m in g.neighbors(cur) if m != prev]
+            if len(nxt) != 1:
+                break
+            prev, cur = cur, nxt[0]
+            if g.degree[cur] >= 3:
+                yield path, cur
+                break
+            path.append(cur)
+
+
+def branch_length(g, branch, junction):
+    """Length (nm) of a terminal branch from its tip to the junction."""
+    path = branch + [junction]
+    return float(sum(g.edges[a, b]["weight"] for a, b in zip(path, path[1:])))
+
+
+def axis_ends(g):
+    """Tips of the longest shortest path of every component with >= 2 nodes."""
+    ends = set()
+    for comp in nx.connected_components(g):
+        if len(comp) < 2:
+            continue
+        sub = g.subgraph(comp)
+        d = nx.single_source_dijkstra_path_length(sub, next(iter(comp)), weight="weight")
+        a = max(d, key=d.get)
+        d = nx.single_source_dijkstra_path_length(sub, a, weight="weight")
+        ends.update((a, max(d, key=d.get)))
+    return ends
+
+
+def _perpendicular_basis(u):
+    a = np.array([1.0, 0.0, 0.0]) if abs(u[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+    e1 = np.cross(u, a)
+    e1 /= np.linalg.norm(e1)
+    return e1, np.cross(u, e1)
+
+
+def ray_extent(mask, points, direction):
+    """Distance (voxels) from each point to the boundary of ``mask`` along rays
+    perpendicular to ``direction``: ``(longest, shortest)`` over 24 azimuths.
+    ``points`` are float voxel coordinates in the axis order of ``mask``."""
+    e1, e2 = _perpendicular_basis(np.asarray(direction, dtype=float))
+    dirs = np.outer(np.cos(_RAY_AZIMUTHS), e1) + np.outer(np.sin(_RAY_AZIMUTHS), e2)
+    steps = np.arange(1, _RAY_MAX_STEPS + 1) * _RAY_STEP_VOXELS
+    points = np.asarray(points, dtype=float).reshape(-1, 3)
+    longest, shortest = [], []
+    for chunk in np.array_split(points, max(1, int(np.ceil(len(points) / 32)))):
+        pos = chunk[:, None, None, :] + steps[None, None, :, None] * dirs[None, :, None, :]
+        idx = np.rint(pos).astype(np.int64)
+        inside = np.ones(idx.shape[:3], dtype=bool)
+        for ax in range(3):
+            inside &= (idx[..., ax] >= 0) & (idx[..., ax] < mask.shape[ax])
+            idx[..., ax] = np.clip(idx[..., ax], 0, mask.shape[ax] - 1)
+        out = ~(inside & mask[idx[..., 0], idx[..., 1], idx[..., 2]])
+        first = np.where(out.any(axis=2), out.argmax(axis=2), _RAY_MAX_STEPS) * _RAY_STEP_VOXELS
+        longest.append(first.max(axis=1))
+        shortest.append(first.min(axis=1))
+    return np.concatenate(longest), np.concatenate(shortest)
+
+
+def branch_width(g, branch, junction, mask, mask_origin_nm, voxel_size_nm):
+    """``(W_max, W_min)`` in nm for a terminal branch: the median, over the tip
+    half of the branch's nodes, of the longest and the shortest distance from
+    the node to the object's surface along rays perpendicular to the branch.
+    ``mask`` is indexed (z, y, x); node positions, ``mask_origin_nm`` (the
+    centre of voxel (0, 0, 0)) and ``voxel_size_nm`` are (x, y, z)."""
+    tip_half = branch[: max(1, len(branch) // 2)]
+    origin = np.asarray(mask_origin_nm, dtype=float)
+    vs = np.broadcast_to(np.asarray(voxel_size_nm, dtype=float), (3,))
+    pts = (np.array([g.nodes[n]["position_nm"] for n in tip_half], dtype=float) - origin) / vs
+    u = np.asarray(g.nodes[branch[0]]["position_nm"], dtype=float) - np.asarray(
+        g.nodes[junction]["position_nm"], dtype=float
+    )
+    u = u / (np.linalg.norm(u) + 1e-9)
+    longest, shortest = ray_extent(mask, pts[:, ::-1], u[::-1])
+    scale = float(np.min(vs))
+    return float(np.median(longest)) * scale, float(np.median(shortest)) * scale

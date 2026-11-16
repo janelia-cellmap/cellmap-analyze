@@ -287,6 +287,76 @@ def _erosion_to_operations(erosion):
     )
 
 
+def _cavities(mask):
+    """Number of background components of ``mask`` that touch no face of the array."""
+    from scipy.ndimage import generate_binary_structure, label
+
+    labels, n = label(~mask, structure=generate_binary_structure(3, 1))
+    faces = [labels[0], labels[-1], labels[:, 0], labels[:, -1], labels[:, :, 0], labels[:, :, -1]]
+    touching = set(np.unique(np.concatenate([f.ravel() for f in faces])).tolist()) - {0}
+    return n - len(touching)
+
+
+def seal_tunnels(mask, radius_voxels):
+    """Fill the tunnels through ``mask`` that a ball of ``radius_voxels`` closes.
+
+    Thinning keeps every tunnel of the mask as a loop of the skeleton, and a
+    loop adds junctions and branches. Tunnels a few voxels wide are
+    segmentation noise, not anatomy, so they are filled before thinning.
+
+    The closing of the mask is computed from distance transforms. Each
+    connected component of (closing minus mask) is then added only if that
+    removes tunnels: the Euler number of the mask goes up (one component can
+    close several tunnels at once) while the number of components and of
+    cavities does not change. Bumps, gaps and bowls that a closing would
+    also fill are left alone. The topology checks
+    run on a box around each component padded by ``4 * radius_voxels + 2``
+    voxels, so a bowl whose interior is larger than that box is not detected.
+
+    Returns ``(mask, n_sealed, n_rejected)``.
+    """
+    from scipy.ndimage import find_objects, label
+    from skimage.measure import euler_number
+
+    radius_voxels = int(radius_voxels)
+    if radius_voxels <= 0 or not mask.any():
+        return mask, 0, 0
+    pad = radius_voxels + 2
+    padded = np.pad(mask, pad)
+    dilated = edt_module.edt(~padded) <= radius_voxels
+    closed = dilated & (edt_module.edt(dilated) > radius_voxels)
+    closed = closed[pad:-pad, pad:-pad, pad:-pad]
+    candidates = closed & ~mask
+    if not candidates.any():
+        return mask, 0, 0
+    labels, n = label(candidates, structure=np.ones((3, 3, 3), dtype=bool))
+    out = mask.copy()
+    margin = 4 * radius_voxels + 2
+    sealed = 0
+    for k, sl in enumerate(find_objects(labels), start=1):
+        if sl is None:
+            continue
+        box = tuple(
+            slice(max(s.start - margin, 0), min(s.stop + margin, mask.shape[i]))
+            for i, s in enumerate(sl)
+        )
+        component = labels[box] == k
+        before = out[box]
+        after = before | component
+        d_euler = euler_number(after, connectivity=3) - euler_number(before, connectivity=3)
+        if d_euler < 1:
+            continue
+        structure = np.ones((3, 3, 3), dtype=bool)
+        if label(after, structure=structure)[1] > label(before, structure=structure)[1]:
+            continue
+        if _cavities(after) > _cavities(before):
+            continue
+        out[box] = after
+        sealed += 1
+    logger.info(f"seal_tunnels: sealed {sealed} of {n} closing components")
+    return out, sealed, n - sealed
+
+
 class Skeletonize(ComputeConfigMixin):
     def __init__(
         self,
@@ -312,6 +382,10 @@ class Skeletonize(ComputeConfigMixin):
         skeleton_properties=True,
         write_vertex_radius=False,
         prune_only=False,
+        seal_tunnels_voxels=3,
+        prune_radius_scale=1.5,
+        prune_width_scale=1.5,
+        prune_width_anisotropy=2.0,
     ):
         """
         Skeletonize a segmentation, parallelized over IDs.
@@ -356,7 +430,10 @@ class Skeletonize(ComputeConfigMixin):
                      so shrinking ops (erosion/opening) keep true-object radii
                      while growing ops (dilation/closing) reflect the
                      grown/filled structure.
-            min_branch_length_nm: Minimum branch length for pruning (in nm)
+            min_branch_length_nm: Absolute floor of the pruning (nm): a
+                     terminal branch no longer than this is always removed.
+                     0 disables pruning altogether (the radius and width
+                     rules included).
             tolerance_nm: Tolerance for simplification (in nm)
             num_workers: Number of parallel workers
             timeout: Timeout for segmentation reads
@@ -413,6 +490,38 @@ class Skeletonize(ComputeConfigMixin):
                      carries the per-vertex radius when ``write_vertex_radius``
                      is set. Default False preserves the prune+simplify
                      ``simplified/`` output.
+            seal_tunnels_voxels: After the morphological operations and
+                     before thinning, fill the tunnels through the mask that
+                     a ball of this radius (in voxels) closes, where filling
+                     removes a tunnel without creating a cavity. Thinning
+                     keeps every tunnel as a loop, and a loop adds junctions
+                     and branches; tunnels a few voxels wide are segmentation
+                     noise. 0 disables. Radii and the width rule are measured
+                     on the unsealed mask.
+            prune_radius_scale: Radius rule. A terminal branch is removed when
+                     its length is at most ``prune_radius_scale`` times the
+                     radius at its junction plus ``min_branch_length_nm``: it
+                     does not stick out of the body it grows from (the scale
+                     axis criterion on the skeleton's inscribed balls). 0
+                     leaves only the absolute floor, as before 0.8.
+            prune_width_scale: Width rule, for sheets. Where the cross-section
+                     around a terminal branch is sheet-like (see
+                     ``prune_width_anisotropy``), the branch is also removed
+                     when its length is at most ``prune_width_scale`` times
+                     the in-plane width of the sheet there. This removes the
+                     comb of teeth that thinning leaves on a flat object; the
+                     two ends of the object's longest path are exempt. 0
+                     disables.
+            prune_width_anisotropy: A branch is sheet-like when the longest
+                     perpendicular distance to the surface is at least this
+                     many times the shortest. Round lobes and tubes have a
+                     ratio near 1 and are judged by the radius rule alone.
+                     None applies the width rule everywhere.
+
+        ``Number of Branches`` counts the polylines between tips and
+        junctions after pruning: a straight line is 1, a Y is 3, a ring is 1.
+        An object whose skeleton is a single point (a round blob) is 1 as
+        well; 0 means the object had no skeleton at all.
         """
         super().__init__(num_workers)
         self.concurrency_limit = concurrency_limit
@@ -459,6 +568,12 @@ class Skeletonize(ComputeConfigMixin):
         )
         self.write_vertex_radius = bool(write_vertex_radius)
         self.prune_only = bool(prune_only)
+        self.seal_tunnels_voxels = int(seal_tunnels_voxels or 0)
+        self.prune_radius_scale = float(prune_radius_scale or 0.0)
+        self.prune_width_scale = float(prune_width_scale or 0.0)
+        self.prune_width_anisotropy = (
+            None if prune_width_anisotropy is None else float(prune_width_anisotropy)
+        )
         # The second output is either prune+simplify ("simplified") or, when
         # prune_only is set, prune-only ("pruned"). Named honestly so the
         # neuroglancer layer reflects what it actually contains.
@@ -528,6 +643,16 @@ class Skeletonize(ComputeConfigMixin):
         }
 
     @staticmethod
+    def count_branches(skeleton):
+        """Number of polylines between tips and junctions: a line is 1, a Y is
+        3, a ring is 1. A single vertex (a round blob thinned to a point) is 1
+        as well, since whether thinning leaves one voxel or two is an accident
+        of the grid, not a property of the object. Only an empty skeleton is 0."""
+        if len(skeleton.vertices) == 0:
+            return 0
+        return max(1, len(skeleton.polylines))
+
+    @staticmethod
     def calculate_id_skeleton(
         id_value,
         segmentation_vol,
@@ -540,9 +665,16 @@ class Skeletonize(ComputeConfigMixin):
         write_vertex_radius: bool = False,
         prune_only: bool = False,
         second_subdir: str = "simplified",
+        seal_tunnels_voxels: int = 0,
+        prune_radius_scale: float = 0.0,
+        prune_width_scale: float = 0.0,
+        prune_width_anisotropy=None,
     ):
         """
         Process a single ID: extract, skeletonize, prune, (simplify,) and emit.
+
+        The keyword defaults here are the pre-0.8 behaviour (no sealing,
+        absolute prune only); ``Skeletonize`` passes its own defaults.
 
         Emits two skeletons: ``full`` (raw) and ``second_subdir`` -- either
         ``simplified`` (prune+simplify) or, when ``prune_only`` is set,
@@ -658,6 +790,16 @@ class Skeletonize(ComputeConfigMixin):
                 emit_empty()
                 return result
 
+            # Fill voxel-scale tunnels so they do not become loops of the
+            # skeleton. Radii (above) and the width rule use the unsealed mask.
+            if seal_tunnels_voxels and seal_tunnels_voxels > 0:
+                data, n_sealed, n_rejected = seal_tunnels(data, seal_tunnels_voxels)
+                if n_sealed:
+                    logger.info(
+                        f"ID {id_value}: sealed {n_sealed} tunnels "
+                        f"({n_rejected} closing components left alone)"
+                    )
+
             # Skeletonize using Lee's algorithm (skimage default). It has
             # known limitations (e.g. thin structures may lose branches) but
             # is sufficient for now.
@@ -698,6 +840,7 @@ class Skeletonize(ComputeConfigMixin):
                         seed_skel.radii = [peak_radius_nm]
                     emit("full", seed_skel)
                     emit(second_subdir, seed_skel)
+                    result["num_branches"] = 1  # a round blob is one unbranched object
                     result["radius_mean_nm"] = peak_radius_nm
                     result["radius_std_nm"] = 0.0
                     return result
@@ -749,14 +892,29 @@ class Skeletonize(ComputeConfigMixin):
             # only controls whether radii are written into the skeleton bytes.
             skeleton.radii = list(radii)
 
-            # Prune
-            if min_branch_length_nm > 0:
+            # Prune. min_branch_length_nm == 0 disables pruning altogether.
+            # With the radius or width rule on, branches are judged against
+            # the body they grow from (prune_terminal_branches); otherwise the
+            # pre-0.8 absolute prune runs unchanged.
+            if min_branch_length_nm > 0 and (
+                prune_radius_scale > 0 or prune_width_scale > 0
+            ):
+                pruned = skeleton.prune_terminal_branches(
+                    min_branch_length_nm=min_branch_length_nm,
+                    radius_scale=prune_radius_scale,
+                    width_scale=prune_width_scale,
+                    width_anisotropy=prune_width_anisotropy,
+                    mask=edt_mask,
+                    mask_origin_nm=np.asarray(start_point_nm, dtype=float)[::-1],
+                    voxel_size_nm=np.asarray(isotropic_voxel_size, dtype=float)[::-1],
+                )
+            elif min_branch_length_nm > 0:
                 pruned = skeleton.prune(min_branch_length_nm)
             else:
                 pruned = skeleton
 
             # Compute skeleton metrics on pruned skeleton
-            num_branches = len(pruned.polylines)
+            num_branches = Skeletonize.count_branches(pruned)
             longest_shortest_path = 0.0
             if len(pruned.vertices) > 1:
                 pruned_graph = pruned.skeleton_to_graph()
@@ -1151,6 +1309,10 @@ class Skeletonize(ComputeConfigMixin):
             write_vertex_radius=self.write_vertex_radius,
             prune_only=self.prune_only,
             second_subdir=self.second_subdir,
+            seal_tunnels_voxels=self.seal_tunnels_voxels,
+            prune_radius_scale=self.prune_radius_scale,
+            prune_width_scale=self.prune_width_scale,
+            prune_width_anisotropy=self.prune_width_anisotropy,
         )
         if result is None:
             result = Skeletonize._empty_metrics()
